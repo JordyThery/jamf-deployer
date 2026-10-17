@@ -8,7 +8,7 @@ The app ships the blocks that carry **no configuration opinions of their own** �
 
 | Built-in block | Creates | Risk |
 | --- | --- | --- |
-| **Foundation** | Categories, device groups and extension attributes every other block relies on. Always part of a baseline. | Low |
+| **Foundation** | Categories, device groups and extension attributes the opinionated blocks rely on. Added automatically when a selected block depends on it; captured blocks that carry their own groups and categories do not need it. | Low |
 | **App Catalog** | Apps from Jamf's App Catalog, installed and kept up to date automatically — no packaging. Pick apps with the built-in picker. | Medium |
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
 | **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
@@ -39,6 +39,8 @@ Scope is chosen per block: **all computers**, the **pilot group**, or a device g
 
 ## Presets
 
+Presets come from the catalogs you follow. The demo catalog ships two:
+
 - **Standard** — foundation, enrollment, FileVault, software updates, CIS Level 1 (monitor), Rosetta 2.
 - **Minimal** — foundation and software updates; a starting point to grow from.
 
@@ -52,7 +54,9 @@ Blocks are versioned. When a tenant's catalog source publishes a newer release, 
 
 Three ways:
 
-1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block — parameterizing names, categories and scope — and saves it to a catalog source of yours. One export can be captured as a single block or **split into several** — define the blocks, assign each object to one, and the app captures them all from the same export. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt** there instead (the editor warns about this).
+1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block and saves it to a catalog source of yours. One export can be captured as a single block or **split into several** — define the blocks, assign each object to one, and the app captures them all from the same export. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt** there instead (the editor warns about this).
+
+   Captured blocks **keep their wiring**: a policy keeps its category, scripts, packages and scope groups, and smart groups keep the extension attributes their criteria name. When an export is split, each block declares what it needs from the others and the baseline editor warns when a selected block's dependencies are not covered. Names that start with the tenant's prefix are parameterized so they follow each tenant's own prefix; a capture option can apply the prefix to every object name. Objects that cannot move between tenants — Self Service icons, PreStage enrollments, enrollment invitations, Jamf's built-in groups and default allowed file extensions, compliance benchmarks — are left out automatically, each with a warning that says why. An alternative capture option collapses group and category references onto Foundation instead of keeping the original wiring.
 2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
 3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
 

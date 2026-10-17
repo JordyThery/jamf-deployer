@@ -26,7 +26,7 @@ First visit to **Building Blocks**: the app ships only the configuration-free bl
 
 Then open the tenant's **Baseline** editor:
 
-- Start from a preset — **Standard** (enrollment, FileVault, software updates, CIS Level 1 monitoring, Rosetta 2) or **Minimal** — or pick blocks individually.
+- Start from a preset offered by your catalog — the demo catalog ships **Standard** (enrollment, FileVault, software updates, CIS Level 1 monitoring, Rosetta 2) and **Minimal** — or pick blocks individually.
 - Each block has plain-language settings and a scope: all computers, a pilot group, or a group of your own. Production tenants default to the pilot scope.
 - Blocks marked high-risk (compliance, endpoint security) start in monitor or report-only mode.
 
