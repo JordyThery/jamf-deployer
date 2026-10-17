@@ -311,7 +311,7 @@ struct PreviewDeploySheet: View {
                 .disabled(typedName != tenant?.name)
 
         case .deploying:
-            Text("Deploying… you can keep using the rest of the app.")
+            Text("Deploying… large baselines can take a few minutes.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
