@@ -421,6 +421,57 @@ struct BlockCaptureTests {
         #expect(provides?["category"] == ["JD - Testing"])
     }
 
+    @Test func smartGroupCriteriaOrderThroughDependencyMap() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "criteria-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let full = FileManager.default.temporaryDirectory
+            .appending(path: "criteria-src-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: exportFixtureURL(), to: full)
+        defer { try? FileManager.default.removeItem(at: full) }
+
+        // Split capture: the group lands in one block, the extension
+        // attribute it names in another.
+        let staging = FileManager.default.temporaryDirectory
+            .appending(path: "criteria-staging-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: full, to: staging)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let objects = try ExportedObjectInventory.scan(directory: staging)
+        let groupOnly = Set(objects.filter { $0.resourceType == "jamfplatform_device_group" }.map(\.address))
+        try ExportedObjectInventory.prune(directory: staging, keeping: groupOnly)
+
+        let split = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "criteria-groups",
+            name: "Groups",
+            summary: "Group slice.",
+            namePrefix: "JD - ",
+            sourceDirectory: staging,
+            catalogRootDirectory: destination,
+            resolutionDirectory: full
+        ))
+        let groups = try String(contentsOf: split.blockFolderURL.appending(path: "device_groups.tf"), encoding: .utf8)
+        #expect(groups.contains(#"criteria = local.dep_extension_attribute_names["Rosetta installed"]"#))
+        let variables = try String(contentsOf: split.blockFolderURL.appending(path: "variables.tf"), encoding: .utf8)
+        #expect(variables.contains(#"variable "dep_extension_attribute_ids""#))
+        #expect(variables.contains("dep_extension_attribute_names = { for name, id in var.dep_extension_attribute_ids : name => name }"))
+        let manifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: split.blockFolderURL.appending(path: "block.json"))) as? [String: Any]
+        #expect((manifest?["needs"] as? [String: [String]])?["extension_attribute"] == ["Rosetta installed"])
+
+        // Same-block capture: the criteria reference the local resource so
+        // the attribute is created first.
+        let whole = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "criteria-all",
+            name: "All",
+            summary: "Whole export.",
+            namePrefix: "JD - ",
+            sourceDirectory: full,
+            catalogRootDirectory: destination
+        ))
+        let local = try String(contentsOf: whole.blockFolderURL.appending(path: "device_groups.tf"), encoding: .utf8)
+        #expect(local.contains("criteria = jamfplatform_pro_computer_extension_attribute.rosetta_installed.name"))
+    }
+
     @Test func capturesExportIntoBlockLayout() throws {
         let destination = FileManager.default.temporaryDirectory
             .appending(path: "capture-test-\(UUID().uuidString)")
@@ -443,7 +494,7 @@ struct BlockCaptureTests {
             rebind: .foundation
         ))
 
-        #expect(result.objectCount == 6)
+        #expect(result.objectCount == 8)
         #expect(result.usesJamfProScope)
         #expect(!result.usesPlatformScope)
 
@@ -536,7 +587,7 @@ struct AsBuiltTests {
         #expect(markdown.contains("`jamfplatform_pro_policy`"))
         #expect(markdown.contains("Frequency: Once per computer"))
         #expect(markdown.contains("Scoped:"))
-        #expect(markdown.contains("**7 objects**"))
+        #expect(markdown.contains("**9 objects**"))
     }
 }
 
@@ -583,7 +634,7 @@ struct InventoryTests {
         let dir = try copyFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         let objects = try ExportedObjectInventory.scan(directory: dir)
-        #expect(objects.count == 7)
+        #expect(objects.count == 9)
         let script = try #require(objects.first { $0.resourceType == "jamfplatform_pro_script" })
         #expect(script.displayName == "JD - Install Rosetta 2")
         #expect(script.hasProvenanceTag) // fixture script carries the tag

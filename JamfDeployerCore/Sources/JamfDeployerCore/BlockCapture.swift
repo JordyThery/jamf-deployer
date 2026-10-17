@@ -73,6 +73,7 @@ public nonisolated enum BlockCapture {
         "jamfplatform_pro_script": "script",
         "jamfplatform_pro_package": "package",
         "jamfplatform_device_group": "device_group",
+        "jamfplatform_pro_computer_extension_attribute": "extension_attribute",
     ]
 
     /// ID→name knowledge from a full export: import files carry the Jamf
@@ -130,6 +131,7 @@ public nonisolated enum BlockCapture {
         var capturedText = ""
         var fileTexts: [(name: String, text: String)] = []
         var needs: [String: Set<String>] = [:]
+        var builtinGroupNames: Set<String> = []
         let table = buildReferenceTable(
             exportDirectory: request.resolutionDirectory ?? request.sourceDirectory
         )
@@ -178,8 +180,30 @@ public nonisolated enum BlockCapture {
                 )
             }
 
+            // Jamf trims trailing whitespace on descriptions; keeping it makes
+            // the provider report an inconsistent result after apply.
+            text = replacing(in: text, pattern: #"(description\s+= ")([^"]*[^ "\t])?[ \t]+(")"#) { match in
+                "\(match[1])\(match[2])\(match[3])"
+            }
+
             // Support files move into files/.
             text = text.replacingOccurrences(of: "support_files/", with: "files/")
+
+            // jamfplatform 1.5.0: profiles installed automatically carry a
+            // vestigial self_service block whose computed attributes the
+            // provider returns as unknown after apply — drop the block.
+            if text.contains("jamfplatform_pro_macos_configuration_profile") {
+                let resourceBlocks = ExportedObjectInventory.topLevelBlocks(in: text)
+                var rebuilt: [String] = []
+                for var block in resourceBlocks {
+                    if block.contains(#"distribution_method = "Install Automatically""#),
+                       block.contains("self_service = {") {
+                        block = strippingAttributeObject(named: "self_service", from: block)
+                    }
+                    rebuilt.append(block)
+                }
+                text = rebuilt.joined(separator: "\n\n") + "\n"
+            }
 
             // jamfplatform 1.5.0: macOS configuration profiles error with
             // "provider returned invalid result object after apply" when the
@@ -196,7 +220,10 @@ public nonisolated enum BlockCapture {
             if request.rebind == .fidelity {
                 // Associations survive: IDs become name-keyed lookups wired
                 // to the blocks that create the referenced objects.
-                for (key, names) in resolveAssociations(in: &text, table: table, localAddresses: localAddresses, warnings: &warnings) {
+                for (key, names) in resolveAssociations(
+                    in: &text, table: table, localAddresses: localAddresses,
+                    builtinGroupNames: &builtinGroupNames, warnings: &warnings
+                ) {
                     needs[key, default: []].formUnion(names)
                 }
                 fileTexts.append((name, text))
@@ -306,6 +333,27 @@ public nonisolated enum BlockCapture {
             }
         }
 
+        // 1b2. References to objects that are neither in this block nor
+        // resolvable (Self Service icons and similar) are stripped with a
+        // warning rather than left dangling.
+        var danglingAddresses: Set<String> = []
+        for (_, text) in fileTexts {
+            for match in text.matches(of: /\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.[a-z_]+\b/) {
+                let address = String(match.1)
+                if !localAddresses.contains(address) || droppedAddresses.contains(address) {
+                    // Still local? fileTexts may include it; check actual texts.
+                    let definedHere = fileTexts.contains { $0.text.contains("resource \"\(address.split(separator: ".").first ?? "")\" \"\(address.split(separator: ".").last ?? "")\"") }
+                    if !definedHere { danglingAddresses.insert(address) }
+                }
+            }
+        }
+        if !danglingAddresses.isEmpty {
+            fileTexts = fileTexts.map { entry in
+                (entry.name, Self.strippingReferences(to: Array(danglingAddresses), in: entry.text))
+            }
+            warnings.append("Left out references to objects that are not part of this capture: \(danglingAddresses.sorted().joined(separator: ", ")). Review the block before deploying.")
+        }
+
         // 1c. Write the files and count what survived.
         for (name, text) in fileTexts {
             guard text.contains("resource ") || text.contains("data ") else { continue }
@@ -391,7 +439,7 @@ public nonisolated enum BlockCapture {
         for match in capturedText.matches(of: /var\.([a-zA-Z0-9_]+)/) {
             referenced.insert(String(match.1))
         }
-        for name in referenced.subtracting(generatedVariables).sorted() {
+        for name in referenced.subtracting(generatedVariables).sorted() where !name.hasPrefix("dep_") {
             if var declaration = exportedDeclarations[name] {
                 if !declaration.contains("default"), let value = exportedValues[name],
                    let brace = declaration.range(of: "}", options: .backwards) {
@@ -437,7 +485,61 @@ public nonisolated enum BlockCapture {
             }
         }
 
+        if !needs.isEmpty {
+            // Name lookups route through these maps so resources wait for the
+            // objects they reference by name.
+            variables += "\n\nlocals {\n"
+            for depKey in needs.keys.sorted() {
+                variables += "  dep_\(depKey)_names = { for name, id in var.dep_\(depKey)_ids : name => name }\n"
+            }
+            variables += "}\n"
+        }
+
         try Data(variables.utf8).write(to: blockURL.appending(path: "variables.tf"))
+
+        if !builtinGroupNames.isEmpty {
+            // Jamf's built-in device groups exist in every tenant; look them
+            // up by name. The list data source carries no numeric Jamf Pro
+            // ID, so each group gets a follow-up single lookup.
+            var lookup = """
+            data "jamfplatform_device_groups" "builtin" {}
+
+            locals {
+              builtin_group_uuid_by_name = {
+                for group in data.jamfplatform_device_groups.builtin.device_groups :
+                group.name => group.id
+              }
+            }
+            """
+            var uuidPairs: [String] = []
+            var proPairs: [String] = []
+            for name in builtinGroupNames.sorted() {
+                let label = "builtin_" + name.lowercased()
+                    .replacingOccurrences(of: #"[^a-z0-9]+"#, with: "_", options: .regularExpression)
+                lookup += """
+
+
+                data "jamfplatform_device_group" "\(label)" {
+                  id = local.builtin_group_uuid_by_name[\(hclStringLiteral(name))]
+                }
+                """
+                uuidPairs.append("    \(hclStringLiteral(name)) = data.jamfplatform_device_group.\(label).id")
+                proPairs.append("    \(hclStringLiteral(name)) = data.jamfplatform_device_group.\(label).jamf_pro_id")
+            }
+            lookup += """
+
+
+            locals {
+              builtin_group_uuids = {
+            \(uuidPairs.joined(separator: "\n"))
+              }
+              builtin_group_jamf_pro_ids = {
+            \(proPairs.joined(separator: "\n"))
+              }
+            }
+            """
+            try Data(lookup.utf8).write(to: blockURL.appending(path: "builtin_groups.tf"))
+        }
 
         // Name→ID output maps, so other blocks can wire to this one.
         if !provides.isEmpty {
@@ -584,6 +686,28 @@ public nonisolated enum BlockCapture {
     }
 
     /// Reads the capability set out of jamformer's PERMISSIONS.md.
+    /// Removes one named attribute object (`name = { … }`) from a block.
+    static func strippingAttributeObject(named attribute: String, from text: String) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var kept: [String] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            if line.range(of: "^\\s*" + attribute + "\\s*=\\s*\\{\\s*$", options: .regularExpression) != nil {
+                var depth = 1
+                while depth > 0, index + 1 < lines.count {
+                    index += 1
+                    depth += lines[index].filter { $0 == "{" }.count - lines[index].filter { $0 == "}" }.count
+                }
+                index += 1
+                continue
+            }
+            kept.append(line)
+            index += 1
+        }
+        return kept.joined(separator: "\n")
+    }
+
     /// Removes attribute objects (`foo = { … }`) and single lines that
     /// reference any of the given resource addresses.
     static func strippingReferences(to addresses: [String], in text: String) -> String {
@@ -644,13 +768,14 @@ public nonisolated enum BlockCapture {
             && !file.lastPathComponent.hasSuffix("_import.tf") {
             guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
             for block in ExportedObjectInventory.topLevelBlocks(in: text) {
-                guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/),
-                      let name = block.firstMatch(of: /\n\s+name\s+= "([^"]*)"/)
-                else { continue }
+                guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) else { continue }
+                let name = block.firstMatch(of: /\n\s+name\s+= "([^"]*)"/).map { String($0.1) }
+                    ?? block.firstMatch(of: /\n\s+display_name\s+= "([^"]*)"/).map { String($0.1) }
+                guard let name else { continue }
                 let address = "\(header.1).\(header.2)"
-                table.nameByAddress[address] = String(name.1)
+                table.nameByAddress[address] = name
                 if let id = idByAddress[address] {
-                    table.nameByTypeAndID["\(header.1)#\(id)"] = String(name.1)
+                    table.nameByTypeAndID["\(header.1)#\(id)"] = name
                 }
             }
         }
@@ -663,6 +788,7 @@ public nonisolated enum BlockCapture {
         in text: inout String,
         table: ReferenceTable,
         localAddresses: Set<String>,
+        builtinGroupNames: inout Set<String>,
         warnings: inout [String]
     ) -> [String: Set<String>] {
         var needs: [String: Set<String>] = [:]
@@ -713,6 +839,37 @@ public nonisolated enum BlockCapture {
         }
         text = lines.joined(separator: "\n")
 
+        // `.name` references to objects outside this block resolve by name.
+        // Keying the name through the dependency map makes the resource wait
+        // for the referenced object to exist before it is created.
+        text = replacing(in: text, pattern: #"\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.name\b"#) { match in
+            let address = match[1]
+            guard !localAddresses.contains(address),
+                  let name = table.nameByAddress[address]
+            else { return nil }
+            let type = String(address.split(separator: ".").first ?? "")
+            if let depKey = dependencyTypes[type], !name.hasPrefix("All Managed ") {
+                needs[depKey, default: []].insert(name)
+                return "local.dep_\(depKey)_names[\(hclStringLiteral(name))]"
+            }
+            return hclStringLiteral(name)
+        }
+
+        // Numeric Jamf Pro group IDs: Jamf's built-in groups exist in every
+        // tenant and are looked up; everything else wires between blocks.
+        text = replacing(in: text, pattern: #"\b(jamfplatform_device_group\.[A-Za-z0-9_-]+)\.jamf_pro_id\b"#) { match in
+            let address = match[1]
+            guard !localAddresses.contains(address),
+                  let name = table.nameByAddress[address]
+            else { return nil }
+            if name.hasPrefix("All Managed ") {
+                builtinGroupNames.insert(name)
+                return "local.builtin_group_jamf_pro_ids[\(hclStringLiteral(name))]"
+            }
+            needs["device_group", default: []].insert(name)
+            return "var.dep_device_group_jamf_pro_ids[\(hclStringLiteral(name))]"
+        }
+
         // Resource references to objects outside this block (the exporter
         // resolves same-run references) become name-keyed lookups too.
         for (type, depKey) in dependencyTypes {
@@ -744,6 +901,37 @@ public nonisolated enum BlockCapture {
                 guard resolvedAll, !elements.isEmpty else { return nil }
                 return "\(attribute) = [\(elements.joined(separator: ", "))]"
             }
+        }
+
+        // Smart-group criteria name extension attributes as plain strings.
+        // Routing the name through the dependency map makes the group wait
+        // for the attribute to exist before it is created.
+        let extensionAttributeNames = Set(table.nameByAddress
+            .filter { $0.key.hasPrefix("jamfplatform_pro_computer_extension_attribute.") }
+            .values)
+        var localEAAddressesByName: [String: String] = [:]
+        for address in localAddresses where address.hasPrefix("jamfplatform_pro_computer_extension_attribute.") {
+            if let name = table.nameByAddress[address] { localEAAddressesByName[name] = address }
+        }
+        text = replacing(in: text, pattern: #"(criteria\s+= )"([^"]+)""#) { match in
+            let value = match[2]
+            guard extensionAttributeNames.contains(value) else { return nil }
+            if let address = localEAAddressesByName[value] {
+                return "\(match[1])\(address).name"
+            }
+            needs["extension_attribute", default: []].insert(value)
+            return "\(match[1])local.dep_extension_attribute_names[\(hclStringLiteral(value))]"
+        }
+
+        // Built-in group UUID references.
+        text = replacing(in: text, pattern: #"\b(jamfplatform_device_group\.[A-Za-z0-9_-]+)\.id\b"#) { match in
+            let address = match[1]
+            guard !localAddresses.contains(address),
+                  let name = table.nameByAddress[address],
+                  name.hasPrefix("All Managed ")
+            else { return nil }
+            builtinGroupNames.insert(name)
+            return "local.builtin_group_uuids[\(hclStringLiteral(name))]"
         }
 
         return needs
