@@ -107,6 +107,20 @@ struct TenantDetailView: View {
                                     .font(.callout.monospaced())
                                     .textSelection(.enabled)
                             }
+                            LabeledContent("Name prefix") {
+                                TextField("", text: Binding(
+                                    get: { tenant.namePrefix },
+                                    set: { newValue in
+                                        var updated = tenantStore.tenant(id: tenant.id) ?? tenant
+                                        updated.namePrefix = newValue
+                                        tenantStore.update(updated)
+                                    }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 160)
+                                .multilineTextAlignment(.trailing)
+                                .help("Applied to every prefixed object name. Changing it renames managed objects on the next deploy — the preview shows every rename first.")
+                            }
                             if let version = tenant.preflight?.jamfProVersion {
                                 LabeledContent("Jamf Pro", value: PreflightService.displayVersion(version))
                             }

@@ -113,6 +113,21 @@ struct BaselineEditorView: View {
         }
     }
 
+    /// Needed object names no other selected block creates — the same
+    /// check the generator enforces, surfaced before a preview is attempted.
+    private func unmetDependencies(for block: BlockMetadata) -> [String] {
+        block.needs.sorted(by: { $0.key < $1.key }).compactMap { depKey, names in
+            let covered = Set(tenant.blockSelections
+                .compactMap { catalog.block(id: $0.blockID) }
+                .filter { $0.id != block.id }
+                .flatMap { $0.provides[depKey] ?? [] })
+            let missing = names.filter { !covered.contains($0) }
+            guard !missing.isEmpty else { return nil }
+            let kind = depKey.replacingOccurrences(of: "_", with: " ")
+            return "Needs \(kind)s no selected block creates: \(missing.joined(separator: ", ")). Select the block that creates them."
+        }
+    }
+
     /// Selections that resolve to a catalog block on this Mac.
     private var availableSelectionCount: Int {
         tenant.blockSelections.filter { selection in
@@ -193,6 +208,14 @@ struct BaselineEditorView: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.orange)
+            }
+
+            if isSelected {
+                ForEach(unmetDependencies(for: block), id: \.self) { message in
+                    Label(message, systemImage: "link.badge.plus")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             if isSelected, block.capturedFromTenant == tenant.scopeID {

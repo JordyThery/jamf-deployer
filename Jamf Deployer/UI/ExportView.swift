@@ -68,6 +68,8 @@ struct ExportView: View {
         var name: String
     }
     @State private var captureMode: CaptureMode = .single
+    @State private var prefixAllNames = false
+    @State private var rebindToFoundation = false
     @State private var splitGroups: [SplitGroup] = []
     @State private var groupAssignment: [String: UUID] = [:]
     @State private var selectedSourceID: UUID?
@@ -520,6 +522,7 @@ struct ExportView: View {
                 .frame(maxWidth: 320)
             TextField("Summary", text: $blockSummary, prompt: Text("What this block sets up"))
                 .frame(maxWidth: 480)
+            captureOptionToggles
             sourcePickerRow
             Button("Capture Building Block", systemImage: "shippingbox") {
                 capture(result)
@@ -530,6 +533,19 @@ struct ExportView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Capture behavior shared by both modes.
+    @ViewBuilder
+    private var captureOptionToggles: some View {
+        Toggle("Apply the tenant prefix to all object names", isOn: $prefixAllNames)
+            .toggleStyle(.checkbox)
+            .font(.callout)
+            .help("Prefixes every captured name; otherwise only names that already carry this tenant's prefix are parameterized")
+        Toggle("Rebind scope and category to Foundation (portable block)", isOn: $rebindToFoundation)
+            .toggleStyle(.checkbox)
+            .font(.callout)
+            .help("Collapses group and category references to Foundation-wired settings. Off, associations are kept and wired between captured blocks.")
     }
 
     /// Where captured blocks are saved — shared by both capture modes.
@@ -613,6 +629,7 @@ struct ExportView: View {
             }
             .frame(maxHeight: 180)
 
+            captureOptionToggles
             sourcePickerRow
 
             Button("Capture \(populatedGroupCount) Building Block\(populatedGroupCount == 1 ? "" : "s")", systemImage: "shippingbox") {
@@ -668,7 +685,10 @@ struct ExportView: View {
                     sourceDirectory: staging,
                     catalogRootDirectory: URL(filePath: source.path),
                     secretFindings: result.secretFindings,
-                    originTenantScopeID: tenant.scopeID
+                    originTenantScopeID: tenant.scopeID,
+                    rebind: rebindToFoundation ? .foundation : .fidelity,
+                    prefixAllNames: prefixAllNames,
+                    resolutionDirectory: result.outputURL
                 ))
                 captured.append("\(group.name) (\(outcome.objectCount))")
             }
@@ -718,7 +738,9 @@ struct ExportView: View {
                 sourceDirectory: result.outputURL,
                 catalogRootDirectory: URL(filePath: source.path),
                 secretFindings: result.secretFindings,
-                originTenantScopeID: tenant.scopeID
+                originTenantScopeID: tenant.scopeID,
+                rebind: rebindToFoundation ? .foundation : .fidelity,
+                prefixAllNames: prefixAllNames
             ))
             var outcome = "Captured \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") into “\(source.name)” — find it in the Building Blocks library."
             if !captured.warnings.isEmpty {

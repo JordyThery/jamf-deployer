@@ -6,6 +6,17 @@ import Foundation
 /// the permissions the export recorded. Captured blocks are marked
 /// "Review before use" until a curator marks them reviewed.
 public nonisolated enum BlockCapture {
+    /// How captured references to other objects are handled.
+    public enum RebindMode: String, Sendable {
+        /// Associations survive: references become name-keyed lookups wired
+        /// to the blocks that create the referenced objects. The default —
+        /// a captured baseline deploys exactly as it was.
+        case fidelity
+        /// Scope and category collapse to Foundation-wired settings: right
+        /// for publishing small portable blocks.
+        case foundation
+    }
+
     public struct Request: Sendable {
         public var blockID: String
         public var name: String
@@ -20,6 +31,13 @@ public nonisolated enum BlockCapture {
         /// Scope ID of the tenant the objects were exported from; used to
         /// warn when the block is enabled in its own origin tenant.
         public var originTenantScopeID: String?
+        public var rebind: RebindMode
+        /// Prefixes every object name, not only names that already carried
+        /// the source tenant's prefix.
+        public var prefixAllNames: Bool
+        /// The full export the ID→name reference table is built from — pass
+        /// the unpruned export when capturing a slice of it.
+        public var resolutionDirectory: URL?
 
         public init(
             blockID: String,
@@ -29,7 +47,10 @@ public nonisolated enum BlockCapture {
             sourceDirectory: URL,
             catalogRootDirectory: URL,
             secretFindings: [String] = [],
-            originTenantScopeID: String? = nil
+            originTenantScopeID: String? = nil,
+            rebind: RebindMode = .fidelity,
+            prefixAllNames: Bool = false,
+            resolutionDirectory: URL? = nil
         ) {
             self.blockID = blockID
             self.name = name
@@ -39,6 +60,31 @@ public nonisolated enum BlockCapture {
             self.catalogRootDirectory = catalogRootDirectory
             self.secretFindings = secretFindings
             self.originTenantScopeID = originTenantScopeID
+            self.rebind = rebind
+            self.prefixAllNames = prefixAllNames
+            self.resolutionDirectory = resolutionDirectory
+        }
+    }
+
+    /// Terraform types whose instances other objects reference, and the
+    /// dependency key used for the name→ID wiring between blocks.
+    static let dependencyTypes: [String: String] = [
+        "jamfplatform_pro_category": "category",
+        "jamfplatform_pro_script": "script",
+        "jamfplatform_pro_package": "package",
+        "jamfplatform_device_group": "device_group",
+    ]
+
+    /// ID→name knowledge from a full export: import files carry the Jamf
+    /// IDs, resource definitions carry the names.
+    struct ReferenceTable {
+        /// "jamfplatform_pro_script#143" → object name.
+        var nameByTypeAndID: [String: String] = [:]
+        /// "jamfplatform_pro_script.foo" → object name.
+        var nameByAddress: [String: String] = [:]
+
+        func name(type: String, id: String) -> String? {
+            nameByTypeAndID["\(type)#\(id)"]
         }
     }
 
@@ -83,6 +129,21 @@ public nonisolated enum BlockCapture {
         var terraformTypes: Set<String> = []
         var capturedText = ""
         var fileTexts: [(name: String, text: String)] = []
+        var needs: [String: Set<String>] = [:]
+        let table = buildReferenceTable(
+            exportDirectory: request.resolutionDirectory ?? request.sourceDirectory
+        )
+        // Resource addresses present in this capture's own slice.
+        var localAddresses: Set<String> = []
+        if let sourceFiles = try? fileManager.contentsOfDirectory(at: request.sourceDirectory, includingPropertiesForKeys: nil) {
+            for file in sourceFiles where file.lastPathComponent.hasSuffix(".tf")
+                && !file.lastPathComponent.hasSuffix("_import.tf") {
+                guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                for match in text.matches(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) {
+                    localAddresses.insert("\(match.1).\(match.2)")
+                }
+            }
+        }
 
         // 1. Configuration files, transformed. provider/variables/tfvars and
         //    import blocks stay behind — a block is reusable configuration.
@@ -107,6 +168,16 @@ public nonisolated enum BlockCapture {
                 )
             }
 
+            if request.prefixAllNames {
+                // Prefix every top-level object name that is not already
+                // parameterized.
+                text = text.replacingOccurrences(
+                    of: #"(\n  name\s+= ")(?!\$\{var\.name_prefix\})"#,
+                    with: "$1${var.name_prefix}",
+                    options: .regularExpression
+                )
+            }
+
             // Support files move into files/.
             text = text.replacingOccurrences(of: "support_files/", with: "files/")
 
@@ -120,6 +191,16 @@ public nonisolated enum BlockCapture {
                     with: "$1    display_notifications     = true\n",
                     options: .regularExpression
                 )
+            }
+
+            if request.rebind == .fidelity {
+                // Associations survive: IDs become name-keyed lookups wired
+                // to the blocks that create the referenced objects.
+                for (key, names) in resolveAssociations(in: &text, table: table, localAddresses: localAddresses, warnings: &warnings) {
+                    needs[key, default: []].formUnion(names)
+                }
+                fileTexts.append((name, text))
+                continue
             }
 
             // Hard-coded scope group IDs become the block's scope setting.
@@ -195,7 +276,7 @@ public nonisolated enum BlockCapture {
         for (_, text) in fileTexts {
             for match in text.matches(of: /var\.([a-zA-Z0-9_]+)/) {
                 let name = String(match.1)
-                guard !generatedVariables.contains(name) else { continue }
+                guard !generatedVariables.contains(name), !name.hasPrefix("dep_") else { continue }
                 let hasDefault = exportedDeclarations[name]?.contains("default") ?? false
                 if !hasDefault && exportedValues[name] == nil {
                     unfillable.insert(name)
@@ -239,6 +320,20 @@ public nonisolated enum BlockCapture {
         guard objectCount > 0 else {
             try? fileManager.removeItem(at: blockURL)
             throw CaptureError.nothingToCapture
+        }
+
+        // What this block provides to others: name→resource maps per type.
+        // (address, objectName) pairs per dependency key.
+        var provides: [String: [(address: String, name: String)]] = [:]
+        for block in ExportedObjectInventory.topLevelBlocks(in: capturedText) {
+            guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/),
+                  let depKey = Self.dependencyTypes[String(header.1)]
+            else { continue }
+            let address = "\(header.1).\(header.2)"
+            guard let objectName = table.nameByAddress[address]
+                ?? block.firstMatch(of: /\n\s+name\s+= "([^"]*)"/).map({ String($0.1) })
+            else { continue }
+            provides[depKey, default: []].append((address, objectName))
         }
 
         // 2. Support files move after variables are known — see below: only
@@ -319,7 +414,66 @@ public nonisolated enum BlockCapture {
             }
         }
 
+        for depKey in needs.keys.sorted() {
+            variables += """
+
+
+            variable "dep_\(depKey)_ids" {
+              description = "IDs of \(depKey.replacingOccurrences(of: "_", with: " "))s this block references, keyed by object name."
+              type        = map(string)
+              default     = {}
+            }
+            """
+            if depKey == "device_group" {
+                variables += """
+
+
+                variable "dep_device_group_jamf_pro_ids" {
+                  description = "Numeric Jamf Pro IDs of referenced device groups, keyed by object name."
+                  type        = map(string)
+                  default     = {}
+                }
+                """
+            }
+        }
+
         try Data(variables.utf8).write(to: blockURL.appending(path: "variables.tf"))
+
+        // Name→ID output maps, so other blocks can wire to this one.
+        if !provides.isEmpty {
+            var outputs = ""
+            for (depKey, entries) in provides.sorted(by: { $0.key < $1.key }) {
+                let pairs = entries
+                    .sorted { $0.name < $1.name }
+                    .map { "    \(hclStringLiteral($0.name)) = \($0.address).id" }
+                    .joined(separator: "\n")
+                outputs += """
+                output "\(depKey)_ids" {
+                  value = {
+                \(pairs)
+                  }
+                }
+
+
+                """
+                if depKey == "device_group" {
+                    let proPairs = entries
+                        .sorted { $0.name < $1.name }
+                        .map { "    \(hclStringLiteral($0.name)) = \($0.address).jamf_pro_id" }
+                        .joined(separator: "\n")
+                    outputs += """
+                    output "device_group_jamf_pro_ids" {
+                      value = {
+                    \(proPairs)
+                      }
+                    }
+
+
+                    """
+                }
+            }
+            try Data(outputs.utf8).write(to: blockURL.appending(path: "dependency_outputs.tf"))
+        }
 
         // Support files → files/, filtered to the ones this block references
         // (in resources or in carried variable defaults).
@@ -377,6 +531,9 @@ public nonisolated enum BlockCapture {
             "summary": request.summary,
             "category": "Captured",
             "version": "0.1.0",
+            "rebind": request.rebind.rawValue,
+            "needs": needs.mapValues { Array($0).sorted() },
+            "provides": provides.mapValues { $0.map(\.name).sorted() },
             "requires": (usesJamfProScope || usesPlatformScope) ? ["foundation"] : [],
             "conflicts": [],
             "products": ["jamf-pro", "jamf-platform"],
@@ -464,6 +621,153 @@ public nonisolated enum BlockCapture {
             index += 1
         }
         return kept.joined(separator: "\n")
+    }
+
+    /// Builds the ID→name table from a full export directory.
+    static func buildReferenceTable(exportDirectory: URL) -> ReferenceTable {
+        var table = ReferenceTable()
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: exportDirectory, includingPropertiesForKeys: nil) else {
+            return table
+        }
+        var idByAddress: [String: String] = [:]
+        for file in files where file.lastPathComponent.hasSuffix("_import.tf") {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            for block in ExportedObjectInventory.topLevelBlocks(in: text) {
+                guard let to = block.firstMatch(of: /to = ([a-z0-9_]+\.[A-Za-z0-9_-]+)/),
+                      let id = block.firstMatch(of: /id = "([^"]+)"/)
+                else { continue }
+                idByAddress[String(to.1)] = String(id.1)
+            }
+        }
+        for file in files where file.lastPathComponent.hasSuffix(".tf")
+            && !file.lastPathComponent.hasSuffix("_import.tf") {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            for block in ExportedObjectInventory.topLevelBlocks(in: text) {
+                guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/),
+                      let name = block.firstMatch(of: /\n\s+name\s+= "([^"]*)"/)
+                else { continue }
+                let address = "\(header.1).\(header.2)"
+                table.nameByAddress[address] = String(name.1)
+                if let id = idByAddress[address] {
+                    table.nameByTypeAndID["\(header.1)#\(id)"] = String(name.1)
+                }
+            }
+        }
+        return table
+    }
+
+    /// Rewrites hard-coded cross-object IDs into name-keyed dependency-map
+    /// lookups. Returns the dependency names used, keyed by dependency type.
+    static func resolveAssociations(
+        in text: inout String,
+        table: ReferenceTable,
+        localAddresses: Set<String>,
+        warnings: inout [String]
+    ) -> [String: Set<String>] {
+        var needs: [String: Set<String>] = [:]
+
+        func record(_ depKey: String, _ name: String) -> String {
+            // Objects captured into this same block are referenced directly.
+            if let type = dependencyTypes.first(where: { $0.value == depKey })?.key,
+               let address = table.nameByAddress.first(where: { $0.value == name && $0.key.hasPrefix(type + ".") })?.key,
+               localAddresses.contains(address) {
+                return "\(address).id"
+            }
+            needs[depKey, default: []].insert(name)
+            return "var.dep_\(depKey)_ids[\(hclStringLiteral(name))]"
+        }
+
+        // category_id = "7" (with or without the exporter's TODO note).
+        text = replacing(in: text, pattern: #"category_id\s*= "(\d+)"( # TODO: unresolved reference)?"#) { match in
+            guard let name = table.name(type: "jamfplatform_pro_category", id: match[1]) else { return nil }
+            return "category_id = \(record("category", name))"
+        }
+
+        // id = "12" # TODO: … inside scripts/packages containers.
+        var container: [String] = []
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for index in lines.indices {
+            let line = lines[index]
+            if let open = line.firstMatch(of: /^\s*([a-zA-Z0-9_]+)\s*= [\[{]+\s*$/) {
+                container.append(String(open.1))
+            } else if line.range(of: #"^\s*[\[{]+\s*$"#, options: .regularExpression) != nil {
+                container.append("")
+            }
+            let closers = line.filter { $0 == "}" || $0 == "]" }.count
+            let openers = line.filter { $0 == "{" || $0 == "[" }.count
+            if closers > openers {
+                for _ in 0..<(closers - openers) where !container.isEmpty { container.removeLast() }
+            }
+            guard let match = line.firstMatch(of: /^(\s*)id\s+= "(\d+)" # TODO: unresolved reference/) else { continue }
+            let depKey: String? = container.contains("scripts") ? "script"
+                : container.contains("packages") ? "package" : nil
+            guard let key = depKey,
+                  let type = dependencyTypes.first(where: { $0.value == key })?.key,
+                  let name = table.name(type: type, id: String(match.2))
+            else {
+                warnings.append("A reference to \(container.last ?? "an object") with ID \(match.2) could not be resolved to a name — review it before deploying.")
+                continue
+            }
+            lines[index] = "\(match.1)id = \(record(key, name))"
+        }
+        text = lines.joined(separator: "\n")
+
+        // Resource references to objects outside this block (the exporter
+        // resolves same-run references) become name-keyed lookups too.
+        for (type, depKey) in dependencyTypes {
+            let pattern = "\\b(" + type + #"\.[A-Za-z0-9_-]+)\.id\b"#
+            text = replacing(in: text, pattern: pattern) { match in
+                let address = match[1]
+                guard !localAddresses.contains(address),
+                      let name = table.nameByAddress[address]
+                else { return nil }
+                return record(depKey, name)
+            }
+        }
+
+        // Platform device-group UUID lists keep their groups by name.
+        for attribute in ["target_device_groups", "device_groups"] {
+            let pattern = attribute + #"\s*= \[([^\]]*)\]"#
+            text = replacing(in: text, pattern: pattern) { match in
+                let body = match[1]
+                guard body.contains("\"") else { return nil }
+                var elements: [String] = []
+                var resolvedAll = true
+                for element in body.matches(of: /"([0-9a-fA-F-]{36})"/) {
+                    if let name = table.name(type: "jamfplatform_device_group", id: String(element.1)) {
+                        elements.append(record("device_group", name))
+                    } else {
+                        resolvedAll = false
+                    }
+                }
+                guard resolvedAll, !elements.isEmpty else { return nil }
+                return "\(attribute) = [\(elements.joined(separator: ", "))]"
+            }
+        }
+
+        return needs
+    }
+
+    /// Regex replacement with a closure; returning nil keeps the original.
+    static func replacing(in text: String, pattern: String, transform: ([String]) -> String?) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        var result = text
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed()
+        for match in matches {
+            var groups: [String] = []
+            for group in 0..<match.numberOfRanges {
+                if let range = Range(match.range(at: group), in: text) {
+                    groups.append(String(text[range]))
+                } else {
+                    groups.append("")
+                }
+            }
+            if let replacement = transform(groups), let full = Range(match.range, in: result) {
+                result.replaceSubrange(full, with: replacement)
+            }
+        }
+        return result
     }
 
     /// Simple `name = "value"` assignments from a tfvars file.

@@ -121,6 +121,40 @@ struct GeneratorTests {
         GeneratedSelection(block: catalog.block(id: id)!, settings: settings, scope: scope)
     }
 
+    static func metadata(_ json: String) throws -> BlockMetadata {
+        try JSONDecoder().decode(BlockMetadata.self, from: Data(json.utf8))
+    }
+
+    @Test func wiresDependencyMapsBetweenBlocks() throws {
+        let provider = try Self.metadata(
+            #"{"id": "cap-scripts", "name": "Scripts", "provides": {"script": ["JD - Install Rosetta 2"]}}"#)
+        let consumer = try Self.metadata(
+            #"{"id": "cap-policies", "name": "Policies", "needs": {"script": ["JD - Install Rosetta 2"]}}"#)
+        let input = WorkspaceInput(
+            namePrefix: "JD - ",
+            selections: [
+                GeneratedSelection(block: provider, settings: [:], scope: "pilot"),
+                GeneratedSelection(block: consumer, settings: [:], scope: "pilot"),
+            ],
+            providerVersion: "1.5.0"
+        )
+        let output = try WorkspaceGenerator.generate(input)
+        #expect(output.mainTF.contains("dep_script_ids = module.cap_scripts.script_ids"))
+    }
+
+    @Test func failsOnUnmetDependencies() throws {
+        let consumer = try Self.metadata(
+            #"{"id": "cap-policies", "name": "Policies", "needs": {"script": ["Missing Script"]}}"#)
+        let input = WorkspaceInput(
+            namePrefix: "JD - ",
+            selections: [GeneratedSelection(block: consumer, settings: [:], scope: "pilot")],
+            providerVersion: "1.5.0"
+        )
+        #expect(throws: WorkspaceGeneratorError.self) {
+            _ = try WorkspaceGenerator.generate(input)
+        }
+    }
+
     @Test func generatesFullBaseline() throws {
         let catalog = try Self.catalog()
         let input = WorkspaceInput(
@@ -301,6 +335,92 @@ struct BlockCaptureTests {
         Bundle.module.url(forResource: "Fixtures/jamformer-export", withExtension: nil)!
     }
 
+    @Test func fidelityCapturePreservesAssociations() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "fidelity-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let full = FileManager.default.temporaryDirectory
+            .appending(path: "fidelity-src-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: exportFixtureURL(), to: full)
+        defer { try? FileManager.default.removeItem(at: full) }
+
+        // Capture only the policy, as a split capture would: references to
+        // the script, package and category land in other blocks.
+        let staging = FileManager.default.temporaryDirectory
+            .appending(path: "fidelity-staging-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: full, to: staging)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let objects = try ExportedObjectInventory.scan(directory: staging)
+        let policyOnly = Set(objects.filter { $0.resourceType == "jamfplatform_pro_policy" }.map(\.address))
+        try ExportedObjectInventory.prune(directory: staging, keeping: policyOnly)
+
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "fidelity-policy",
+            name: "Policy",
+            summary: "Policy slice.",
+            namePrefix: "JD - ",
+            sourceDirectory: staging,
+            catalogRootDirectory: destination,
+            resolutionDirectory: full
+        ))
+        let folder = result.blockFolderURL
+        let policy = try String(contentsOf: folder.appending(path: "pro_policy.tf"), encoding: .utf8)
+        // Numeric and resource references become name-keyed lookups.
+        #expect(policy.contains(#"category_id = var.dep_category_ids["JD - Testing"]"#))
+        #expect(policy.contains(#"id = var.dep_package_ids["JD - Test Package"]"#))
+        #expect(policy.contains(#"var.dep_script_ids["JD - Install Rosetta 2"]"#))
+        #expect(!policy.contains("var.category_id"))
+        #expect(!policy.contains(#"= "73""#))
+
+        let variables = try String(contentsOf: folder.appending(path: "variables.tf"), encoding: .utf8)
+        #expect(variables.contains(#"variable "dep_category_ids""#))
+        #expect(variables.contains(#"variable "dep_script_ids""#))
+        #expect(variables.contains(#"variable "dep_package_ids""#))
+
+        let manifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: folder.appending(path: "block.json"))) as? [String: Any]
+        let needs = manifest?["needs"] as? [String: [String]]
+        #expect(needs?["category"] == ["JD - Testing"])
+        #expect(needs?["script"] == ["JD - Install Rosetta 2"])
+        #expect(needs?["package"] == ["JD - Test Package"])
+        #expect((manifest?["requires"] as? [String])?.isEmpty == true)
+    }
+
+    @Test func fidelityCaptureEmitsProvidesOutputs() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "provides-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let source = FileManager.default.temporaryDirectory
+            .appending(path: "provides-src-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: exportFixtureURL(), to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "fidelity-all",
+            name: "All",
+            summary: "Whole export.",
+            namePrefix: "JD - ",
+            sourceDirectory: source,
+            catalogRootDirectory: destination
+        ))
+        let folder = result.blockFolderURL
+        let outputs = try String(contentsOf: folder.appending(path: "dependency_outputs.tf"), encoding: .utf8)
+        #expect(outputs.contains(#"output "script_ids""#))
+        #expect(outputs.contains(#""JD - Install Rosetta 2" = jamfplatform_pro_script.jd_install_rosetta_2.id"#))
+        #expect(outputs.contains(#"output "category_ids""#))
+        #expect(outputs.contains(#"output "package_ids""#))
+
+        // Same-block references stay direct resource references.
+        let policy = try String(contentsOf: folder.appending(path: "pro_policy.tf"), encoding: .utf8)
+        #expect(policy.contains("category_id = jamfplatform_pro_category.jd_testing.id"))
+        #expect(!policy.contains("dep_category_ids"))
+        let manifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: folder.appending(path: "block.json"))) as? [String: Any]
+        let provides = manifest?["provides"] as? [String: [String]]
+        #expect(provides?["script"]?.contains("JD - Install Rosetta 2") == true)
+        #expect(provides?["category"] == ["JD - Testing"])
+    }
+
     @Test func capturesExportIntoBlockLayout() throws {
         let destination = FileManager.default.temporaryDirectory
             .appending(path: "capture-test-\(UUID().uuidString)")
@@ -319,10 +439,11 @@ struct BlockCaptureTests {
             summary: "Rosetta policy captured from a tenant.",
             namePrefix: "JD - ",
             sourceDirectory: source,
-            catalogRootDirectory: destination
+            catalogRootDirectory: destination,
+            rebind: .foundation
         ))
 
-        #expect(result.objectCount == 4)
+        #expect(result.objectCount == 6)
         #expect(result.usesJamfProScope)
         #expect(!result.usesPlatformScope)
 
@@ -415,7 +536,7 @@ struct AsBuiltTests {
         #expect(markdown.contains("`jamfplatform_pro_policy`"))
         #expect(markdown.contains("Frequency: Once per computer"))
         #expect(markdown.contains("Scoped:"))
-        #expect(markdown.contains("**5 objects**"))
+        #expect(markdown.contains("**7 objects**"))
     }
 }
 
@@ -462,7 +583,7 @@ struct InventoryTests {
         let dir = try copyFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         let objects = try ExportedObjectInventory.scan(directory: dir)
-        #expect(objects.count == 5)
+        #expect(objects.count == 7)
         let script = try #require(objects.first { $0.resourceType == "jamfplatform_pro_script" })
         #expect(script.displayName == "JD - Install Rosetta 2")
         #expect(script.hasProvenanceTag) // fixture script carries the tag

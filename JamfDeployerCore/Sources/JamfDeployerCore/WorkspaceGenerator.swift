@@ -63,15 +63,18 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     case missingFoundation
     case unknownScope(block: String, scope: String)
     case missingRequiredSetting(block: String, setting: String)
+    case unmetDependencies(block: String, type: String, names: [String])
 
     public var errorDescription: String? {
         switch self {
         case .missingFoundation:
-            "The Foundation block must be part of every baseline."
+            "A selected block scopes or categorizes through Foundation, so the Foundation block must be selected too."
         case .unknownScope(let block, let scope):
             "The block \"\(block)\" is scoped to \"\(scope)\", which the Foundation block does not provide."
         case .missingRequiredSetting(let block, let setting):
             "The block \"\(block)\" needs a value for its \"\(setting)\" setting."
+        case .unmetDependencies(let block, let type, let names):
+            "The block \"\(block)\" references \(type.replacingOccurrences(of: "_", with: " "))s no selected block creates: \(names.joined(separator: ", ")). Select the block that creates them, or remove this block."
         }
     }
 }
@@ -92,12 +95,18 @@ public nonisolated enum WorkspaceGenerator {
     }
 
     public static func generate(_ input: WorkspaceInput) throws -> Output {
-        // Hand over empties the baseline entirely; otherwise foundation is
-        // mandatory because every other block scopes through it.
-        if !input.selections.isEmpty {
-            guard input.selections.contains(where: { $0.block.id == "foundation" }) else {
-                throw WorkspaceGeneratorError.missingFoundation
-            }
+        // Foundation is needed only when a selected block wires to it:
+        // Foundation-scoped blocks, Foundation categories, or an explicit
+        // requirement. Fidelity-captured baselines bring their own groups
+        // and categories.
+        let needsFoundation = input.selections.contains { selection in
+            selection.block.scope.kind != .none
+                || selection.block.acceptsCategory
+                || selection.block.requires.contains("foundation")
+        }
+        if needsFoundation,
+           !input.selections.contains(where: { $0.block.id == "foundation" }) {
+            throw WorkspaceGeneratorError.missingFoundation
         }
 
         var secretVariables: [String: String] = [:]
@@ -139,6 +148,31 @@ public nonisolated enum WorkspaceGenerator {
             if block.acceptsCategory {
                 let key = foundationCategoryKey(for: block.category)
                 arguments.append(("category_id", "module.foundation.category_\(key)_id"))
+            }
+
+            // Dependency wiring: name-keyed maps from every selected block
+            // that provides the needed type. Fidelity-captured blocks carry
+            // their associations this way.
+            for (depKey, names) in block.needs.sorted(by: { $0.key < $1.key }) {
+                let providers = input.selections
+                    .map(\.block)
+                    .filter { $0.id != block.id && !($0.provides[depKey] ?? []).isEmpty }
+                let covered = Set(providers.flatMap { $0.provides[depKey] ?? [] })
+                let missing = names.filter { !covered.contains($0) }
+                guard missing.isEmpty else {
+                    throw WorkspaceGeneratorError.unmetDependencies(
+                        block: block.id, type: depKey, names: missing)
+                }
+                let maps = providers
+                    .map { "module.\(sanitized($0.id)).\(depKey)_ids" }
+                    .joined(separator: ", ")
+                arguments.append(("dep_\(depKey)_ids", providers.count == 1 ? maps : "merge(\(maps))"))
+                if depKey == "device_group" {
+                    let proMaps = providers
+                        .map { "module.\(sanitized($0.id)).device_group_jamf_pro_ids" }
+                        .joined(separator: ", ")
+                    arguments.append(("dep_device_group_jamf_pro_ids", providers.count == 1 ? proMaps : "merge(\(proMaps))"))
+                }
             }
 
             // Settings.

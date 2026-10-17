@@ -123,6 +123,12 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     /// Scope ID of the tenant a captured block was exported from; nil for
     /// authored blocks.
     public var capturedFromTenant: String?
+    /// Object names this block references per dependency type ("script",
+    /// "category", "package", "device_group") — satisfied by blocks whose
+    /// `provides` covers them.
+    public var needs: [String: [String]]
+    /// Object names this block creates per dependency type.
+    public var provides: [String: [String]]
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -147,6 +153,8 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
         reviewStatus = try container.decodeIfPresent(String.self, forKey: .reviewStatus)
         driftBindings = try container.decodeIfPresent([DriftBinding].self, forKey: .driftBindings) ?? []
         capturedFromTenant = try container.decodeIfPresent(String.self, forKey: .capturedFromTenant)
+        needs = try container.decodeIfPresent([String: [String]].self, forKey: .needs) ?? [:]
+        provides = try container.decodeIfPresent([String: [String]].self, forKey: .provides) ?? [:]
     }
 
     /// The setting controlling a drifted field, when one is bound.
