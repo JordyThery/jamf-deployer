@@ -30,7 +30,7 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 
 ## Packaging and release
 - 1.0 shipped signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
-- No app-target unit tests (needs a test target added in Xcode); JamfDeployerCore carries 68 tests, DeployerKit 4.
+- No app-target unit tests (needs a test target added in Xcode); JamfDeployerCore carries 69 tests, DeployerKit 4.
 - App Sandbox is off by design (child-process engine); Developer ID + notarisation is the distribution model.
 
 ## Adopting an existing tenant

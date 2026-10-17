@@ -30,6 +30,7 @@ struct AppCatalogPickerView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var searchTask: Task<Void, Never>?
+    @State private var categories: [ExistingObjectRef] = []
 
     var body: some View {
         SheetFrame(
@@ -59,6 +60,19 @@ struct AppCatalogPickerView: View {
         .task {
             search()
         }
+        .task {
+            categories = (try? await ExistingObjectService.categories(tenant: tenant, activityLog: activityLog)) ?? []
+        }
+    }
+
+    private func categoryBinding(_ app: Binding<AppCatalogApp>) -> Binding<String> {
+        Binding(
+            get: { app.wrappedValue.categoryID ?? "" },
+            set: { id in
+                app.wrappedValue.categoryID = id.isEmpty ? nil : id
+                app.wrappedValue.categoryName = id.isEmpty ? nil : categories.first { $0.id == id }?.name ?? app.wrappedValue.categoryName
+            }
+        )
     }
 
     // MARK: Search column
@@ -188,6 +202,16 @@ struct AppCatalogPickerView: View {
                                     Text(behavior.label).tag(behavior)
                                 }
                             }
+                            Picker("Category", selection: categoryBinding($app)) {
+                                Text("Same as the block").tag("")
+                                if let id = app.categoryID, !categories.contains(where: { $0.id == id }) {
+                                    Text(app.categoryName ?? id).tag(id)
+                                }
+                                ForEach(categories, id: \.id) { category in
+                                    Text(category.name).tag(category.id)
+                                }
+                            }
+                            .help("Categories already in the tenant. Categories another block creates can be chosen for the whole block in its settings.")
                         }
                         .controlSize(.small)
                         .padding(.vertical, 4)

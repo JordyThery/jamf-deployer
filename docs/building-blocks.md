@@ -33,7 +33,7 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Self Service Maintenance** | "Update inventory" and "Flush DNS cache" items users run when support asks. | Low |
 | **macOS Version Groups** | Smart groups for Macs on the current macOS and Macs below your supported minimum. | Low |
 
-The built-in App Catalog block picks its apps with a searchable picker, with per-app delivery and update behavior:
+The built-in App Catalog block picks its apps with a searchable picker, with per-app delivery, update behavior and category (an app without its own category uses the block's default category):
 
 ![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
 

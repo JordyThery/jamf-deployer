@@ -624,7 +624,7 @@ struct BlockSettingsForm: View {
     }
 
     private var categoryPicker: some View {
-        Picker("Category", selection: categoryBinding) {
+        Picker(block.settings.contains { $0.type == .appPicker } ? "Default category" : "Category", selection: categoryBinding) {
             if foundationSelected || selection.existingCategory == nil && selection.providedCategory == nil {
                 Text(foundationSelected ? "Foundation: \(block.category)" : "Choose a category…").tag("foundation")
             }

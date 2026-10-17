@@ -272,6 +272,19 @@ struct AppCatalogTests {
         #expect(AppCatalogApp.decode(settingValue: "not json") == [])
     }
 
+    @Test func appsCarryTheirOwnCategory() throws {
+        let apps = [
+            AppCatalogApp(titleName: "Slack", publisher: "Slack", categoryID: "12", categoryName: "Communication"),
+            AppCatalogApp(titleName: "Zoom", publisher: "Zoom"),
+        ]
+        let encoded = AppCatalogApp.encode(apps)
+        #expect(encoded.contains(#""categoryId":"12""#))
+        #expect(AppCatalogApp.decode(settingValue: encoded) == apps)
+        // Lists saved before per-app categories still decode.
+        let legacy = AppCatalogApp.decode(settingValue: #"[{"titleName":"Zoom","publisher":"Zoom","deploymentType":"SELF_SERVICE","updateBehavior":"AUTOMATIC"}]"#)
+        #expect(legacy.first?.categoryID == nil)
+    }
+
     @Test func generatorEmbedsAppsJSON() throws {
         let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
         let apps = AppCatalogApp.encode([AppCatalogApp(titleName: "Google Chrome", publisher: "Google")])

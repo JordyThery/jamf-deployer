@@ -37,6 +37,10 @@ public nonisolated struct AppCatalogApp: Codable, Sendable, Identifiable, Hashab
     public var publisher: String
     public var deploymentType: DeploymentType
     public var updateBehavior: UpdateBehavior
+    /// The app's own Jamf Pro category; nil uses the block's category.
+    public var categoryID: String?
+    /// Display name of `categoryID`.
+    public var categoryName: String?
 
     public var id: String { titleName }
 
@@ -44,12 +48,22 @@ public nonisolated struct AppCatalogApp: Codable, Sendable, Identifiable, Hashab
         titleName: String,
         publisher: String,
         deploymentType: DeploymentType = .selfService,
-        updateBehavior: UpdateBehavior = .automatic
+        updateBehavior: UpdateBehavior = .automatic,
+        categoryID: String? = nil,
+        categoryName: String? = nil
     ) {
         self.titleName = titleName
         self.publisher = publisher
         self.deploymentType = deploymentType
         self.updateBehavior = updateBehavior
+        self.categoryID = categoryID
+        self.categoryName = categoryName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case titleName, publisher, deploymentType, updateBehavior
+        case categoryID = "categoryId"
+        case categoryName
     }
 
     // MARK: Setting round-trip
