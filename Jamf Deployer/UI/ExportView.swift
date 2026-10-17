@@ -69,7 +69,7 @@ struct ExportView: View {
     }
     @State private var captureMode: CaptureMode = .single
     @State private var prefixAllNames = false
-    @State private var rebindToFoundation = false
+    @State private var choosesScopePerTenant = false
     @State private var splitGroups: [SplitGroup] = []
     @State private var groupAssignment: [String: UUID] = [:]
     @State private var selectedSourceID: UUID?
@@ -542,7 +542,7 @@ struct ExportView: View {
             .toggleStyle(.checkbox)
             .font(.callout)
             .help("Prefixes every captured name; otherwise only names that already carry this tenant's prefix are parameterized")
-        Toggle("Choose scope and category per tenant (portable block)", isOn: $rebindToFoundation)
+        Toggle("Choose scope and category per tenant (portable block)", isOn: $choosesScopePerTenant)
             .toggleStyle(.checkbox)
             .font(.callout)
             .help("Replaces the captured group and category references with a scope and category you pick on each tenant. When off, associations are kept and wired between captured blocks.")
@@ -686,7 +686,7 @@ struct ExportView: View {
                     catalogRootDirectory: URL(filePath: source.path),
                     secretFindings: result.secretFindings,
                     originTenantScopeID: tenant.scopeID,
-                    rebind: rebindToFoundation ? .foundation : .fidelity,
+                    rebind: choosesScopePerTenant ? .perTenant : .fidelity,
                     prefixAllNames: prefixAllNames,
                     resolutionDirectory: result.outputURL
                 ))
@@ -739,7 +739,7 @@ struct ExportView: View {
                 catalogRootDirectory: URL(filePath: source.path),
                 secretFindings: result.secretFindings,
                 originTenantScopeID: tenant.scopeID,
-                rebind: rebindToFoundation ? .foundation : .fidelity,
+                rebind: choosesScopePerTenant ? .perTenant : .fidelity,
                 prefixAllNames: prefixAllNames
             ))
             var outcome = "Captured \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") into “\(source.name)” — find it in the Building Blocks library."

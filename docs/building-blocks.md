@@ -6,7 +6,7 @@ A baseline is composed of building blocks. Each block is a self-contained piece 
 
 The app ships the blocks that carry **no configuration opinions of their own** — connector-style blocks you configure entirely yourself, scoped to groups and filed under categories already in your tenant:
 
-| Built-in block | Creates | Risk |
+| Built-in block | Creates | Impact |
 | --- | --- | --- |
 | **App Catalog** | Apps from Jamf's App Catalog, installed and kept up to date automatically — no packaging. Pick apps with the built-in picker. | Medium |
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
@@ -16,7 +16,7 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 
 ## The demo catalog
 
-| Block | Creates | Risk |
+| Block | Creates | Impact |
 | --- | --- | --- |
 | **Device Groups** | A static Pilot group plus smart groups for all Macs, laptops, desktops and Apple silicon — what the other blocks scope to. | Low |
 | **Categories** | Applications, Enrollment, Maintenance and Security. | Low |
@@ -33,17 +33,17 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Self Service Maintenance** | "Update inventory" and "Flush DNS cache" items users run when support asks. | Low |
 | **macOS Version Groups** | Smart groups for Macs on the current macOS and Macs below your supported minimum. | Low |
 
-The built-in App Catalog block picks its apps with a searchable picker — searchable, with per-app delivery and update behavior:
+The built-in App Catalog block picks its apps with a searchable picker, with per-app delivery and update behavior:
 
 ![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
 
-![The baseline editor: blocks with checkboxes and settings, the last deploy result, and the adopt and hand-over actions](screenshot-baseline.png)
+![The tenant Overview: Managed in this tenant with the adopt actions, and Add from the catalog with block settings](screenshot-baseline.png)
 
 ## Settings and scope
 
 Every block exposes a small set of plain-language settings — toggles, choices, numbers — defined by the block, not by the underlying provider schema. Secret-typed settings (API keys and similar) are stored in your Keychain, never in the tenant record.
 
-Every block is optional, and blocks connect by reference. A block that applies to devices lets you pick its scope per tenant: a group another selected block creates (for example **Device Groups** from the demo catalog), or a group that already exists in the tenant. Blocks that file objects under a category pick it the same way, or use no category. A block starts on its declared default when the block creating it is selected too — FileVault on Pilot and Security, Rosetta 2 on Apple Silicon Macs — and otherwise asks you to choose, so nothing is created just to satisfy a dependency. Blocks that only support smart groups (App Catalog apps) only offer those. Captured blocks that keep their original wiring carry their own scope instead.
+Every block is optional, and blocks connect by reference. A block that applies to devices lets you pick its scope per tenant: a group another selected block creates (for example **Device Groups** from the demo catalog), or a group that already exists in the tenant. Platform-scoped blocks (Software Updates, CIS Level 1) currently offer only groups created by another selected block. Blocks that file objects under a category pick it the same way, or use no category. A block starts on its declared default when the block creating it is selected too — FileVault on Pilot and Security, Rosetta 2 on Apple Silicon Macs — and otherwise asks you to choose, so nothing is created just to satisfy a dependency. Blocks that only support smart groups (App Catalog apps) only offer those. Captured blocks that keep their original wiring carry their own scope instead.
 
 In a block's `block.json`, defaults read `"scope": { …, "default": "device-groups/Pilot" }` and `"defaultCategory": "categories/Security"` — the providing block's ID and the object's name from its `provides` list. Presets use the same form in their `scopes` and `categories` maps.
 
@@ -73,10 +73,18 @@ Blocks are versioned. When a tenant's catalog source publishes a newer release, 
 
 Three ways:
 
-1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block and saves it to a catalog source of yours. One export can be captured as a single block or **split into several** — define the blocks, assign each object to one, and the app captures them all from the same export. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt** there instead (the editor warns about this).
+1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block and saves it to a catalog source of yours. One export can be captured as a single block or **split into several** — define the blocks, assign each object to one, and the app captures them all from the same export. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt Existing Configuration…** there instead (the editor warns about this).
 
-   Captured blocks **keep their wiring**: a policy keeps its category, scripts, packages and scope groups, and smart groups keep the extension attributes their criteria name. When an export is split, each block declares what it needs from the others; the baseline editor warns when a selected block's dependencies are not covered, and the preview refuses to run until they are. Names that start with the tenant's prefix are parameterized so they follow each tenant's own prefix; a capture option can apply the prefix to every object name. PreStage enrollments stay in the capture: they attach to the deploying tenant's Automated Device Enrollment instance through an editable block setting (the instance name), so the tenant only needs its own ADE token uploaded. PreStages that enable Recovery Lock have it turned off, because Jamf never exports the password. Objects that cannot move between tenants — Self Service icons, enrollment invitations, Jamf's built-in All Managed groups, default allowed file extensions, the cloud distribution point, Jamf Patch reporting attributes, compliance benchmarks, values Jamf does not export (activation code, GSX and volume purchasing tokens) and a login page without disclaimer text — are left out automatically, each with a warning that says why. Settings-style types (check-in, re-enrollment, Self Service and the like) can be exported on their own or together with anything else. An alternative capture option, **Choose scope and category per tenant**, replaces the captured groups and categories with a scope and category you pick on each tenant; everything else (scripts, packages, extension attributes) stays wired between blocks either way.
-2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
+   Captured blocks **keep their wiring**:
+
+   - A policy keeps its category, scripts, packages and scope groups, and smart groups keep the extension attributes their criteria name. When an export is split, each block declares what it needs from the others; the baseline editor warns when a selected block's dependencies are not covered, and the preview refuses to run until they are.
+   - Names that start with the tenant's prefix are parameterized so they follow each tenant's own prefix; a capture option applies the prefix to every object name.
+   - PreStage enrollments attach to the deploying tenant's Automated Device Enrollment instance through an editable block setting (the instance name), so the tenant only needs its own ADE token uploaded. PreStages that enable Recovery Lock have it turned off, because Jamf never exports the password.
+   - Objects that cannot move between tenants are left out automatically, each with a warning that says why: Self Service icons, enrollment invitations, Jamf's built-in All Managed groups, default allowed file extensions, the cloud distribution point, Jamf Patch reporting attributes, compliance benchmarks, values Jamf does not export (activation code, GSX and volume purchasing tokens) and a login page without disclaimer text.
+   - Settings-style types (check-in, re-enrollment, Self Service and the like) can be exported on their own or together with anything else.
+   - **Choose scope and category per tenant (portable block)** replaces the captured groups and categories with a scope and category you pick on each tenant; scripts, packages and extension attributes stay wired between blocks either way.
+
+2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks…** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
 3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
 
 Custom blocks are managed from their detail view: edit the name, summary and version in place, reveal the folder in Finder for deeper changes, or delete the block (the app warns when tenants still select it). Sources themselves are managed under **Manage Sources…** in the library's toolbar: **Add Folder…** uses a new or existing folder for your own blocks and presets, **Add Git Catalog…** follows a published catalog, and **Remove…** detaches a source without deleting anything.

@@ -1,9 +1,10 @@
 import Foundation
 
 /// Jamf sometimes answers a create with a server error (500, 502, 503 or
-/// 504) after the object was created, so the engine records nothing and a retry collides on the
-/// name. This finds those creates and turns each object Jamf did create into
-/// an import block, so the next preview adopts it instead of duplicating it.
+/// 504) after creating the object, so the engine records nothing and a
+/// retry collides on the name. This finds those creates and turns each
+/// object Jamf did create into an import block, so the next preview adopts
+/// it instead of duplicating it.
 public nonisolated enum CreateFailureRecovery {
     public struct Candidate: Sendable, Equatable {
         public var address: String
@@ -31,7 +32,7 @@ public nonisolated enum CreateFailureRecovery {
             path: "/pro/v1/app-installers/deployments", root: "results", pageSize: 2000),
     ]
 
-    /// Failed creates worth checking: a 500 from Jamf on a recoverable type,
+    /// Failed creates worth checking: a 500, 502, 503 or 504 on a recoverable type,
     /// with the planned object name taken from the approved plan.
     public static func candidates(diagnostics: [EngineStreamEvent.Diagnostic], plan: PlanFile) -> [Candidate] {
         let changes = Dictionary(

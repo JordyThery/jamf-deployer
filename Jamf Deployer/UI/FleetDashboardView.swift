@@ -128,7 +128,7 @@ struct FleetDashboardView: View {
                 }
             }
             .disabled(deployService.fleetCheckProgress != nil || !tenantStore.tenants.contains { deployService.isManaged($0) })
-            .help("Compare every deployed tenant against its record (a few at a time) and flag changes made in Jamf")
+            .help("Compare every managed tenant against its record (a few at a time) and flag changes made in Jamf")
         }
     }
 

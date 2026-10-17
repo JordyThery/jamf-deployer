@@ -23,7 +23,8 @@ and fix the integration's permissions later.
 
 Each block declares the privileges it needs; the app only uses what the
 tenant's baseline actually contains. Checking for changes needs only the
-`read` half; deploying needs all four.
+`read` half; deploying needs everything listed (create/read/update/delete,
+or read/update for tenant-wide settings).
 
 | Block | Privileges |
 | --- | --- |
@@ -35,9 +36,18 @@ tenant's baseline actually contains. Checking for changes needs only the
 | Software Updates | `blueprints` (create/read/update/delete), `device-groups:read` |
 | Compliance — CIS Level 1 | `compliance-benchmarks` (create/read/update/delete), `device-groups:read` |
 | Rosetta 2 | `scripts`, `policies` (create/read/update/delete) |
-| App Catalog | `applications` (create/read/update/delete), `smart-computer-groups:read`; `computer-groups:read` and `categories:read` to list existing groups and categories |
+| Check-in & Inventory | `computer-check-in`, `computer-inventory-collection-settings` (read/update) |
+| Re-enrollment | `re-enrollment` (read/update) |
+| Local Admin Password Rotation | `local-admin-passwords` (read/update) |
+| Self Service App | `self-service` (read/update) |
+| Self Service Maintenance | `scripts`, `policies` (create/read/update/delete) |
+| macOS Version Groups | `device-groups` (create/read/update/delete) |
+| App Catalog | `applications` (create/read/update/delete), `smart-computer-groups:read` |
 | Security Cloud | `uem-connections`, `activation-profiles` (create/read/update/delete), `tenant-id:read` |
 | Jamf Protect Baseline | none on the Platform client — see the Protect client below |
+
+Picking an existing group or category in a block's settings lists them
+with `computer-groups:read` and `categories:read`.
 
 ### Per feature
 

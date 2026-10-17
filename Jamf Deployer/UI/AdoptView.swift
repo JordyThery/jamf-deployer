@@ -35,6 +35,8 @@ struct AdoptView: View {
     @State private var selectedObjects: Set<String> = []
     /// Objects left out because the app cannot manage them, by reason.
     @State private var unmanageableNotes: [String] = []
+    /// Addresses already in the tenant's adopted configuration.
+    @State private var alreadyAdopted: Set<String> = []
     @State private var logTail: [String] = []
 
     private let runner = JamformerRunner()
@@ -230,14 +232,23 @@ struct AdoptView: View {
                 }
                 exportURL = result.outputURL
                 let unmanageable = ExportedObjectInventory.unmanageable(directory: result.outputURL)
-                objects = try ExportedObjectInventory.scan(directory: result.outputURL)
+                alreadyAdopted = Set(((try? ExportedObjectInventory.scan(
+                    directory: deployService.adoptedURL(for: tenant))) ?? []).map(\.address))
+                let found = try ExportedObjectInventory.scan(directory: result.outputURL)
                     .filter { unmanageable[$0.address] == nil }
+                objects = found.filter { !alreadyAdopted.contains($0.address) }
                 unmanageableNotes = Dictionary(grouping: unmanageable.values, by: { $0 })
                     .sorted { $0.key < $1.key }
                     .map { "\($0.value.count) object\($0.value.count == 1 ? "" : "s"): \($0.key)" }
+                let adoptedCount = found.count - objects.count
+                if adoptedCount > 0 {
+                    unmanageableNotes.insert("\(adoptedCount) object\(adoptedCount == 1 ? " is" : "s are") already adopted", at: 0)
+                }
                 selectedObjects = Set(objects.filter { !$0.hasProvenanceTag }.map(\.address))
                 step = objects.isEmpty
-                    ? .failed("No objects of the chosen types were found.")
+                    ? .failed(alreadyAdopted.isEmpty
+                        ? "No objects of the chosen types were found."
+                        : "Every object of the chosen types is already adopted.")
                     : .pickObjects
                 activityLog.append(ActivityLogEntry(
                     category: "Adopt", operation: "discover", detail: tenant.name,
@@ -252,8 +263,10 @@ struct AdoptView: View {
     private func stage() {
         guard let exportURL else { return }
         do {
-            try ExportedObjectInventory.pinReferences(directory: exportURL, keeping: selectedObjects)
-            try ExportedObjectInventory.prune(directory: exportURL, keeping: selectedObjects)
+            let kept = ExportedObjectInventory.withRequiredReferences(
+                directory: exportURL, kept: selectedObjects, excluding: alreadyAdopted)
+            try ExportedObjectInventory.pinReferences(directory: exportURL, keeping: kept.union(alreadyAdopted))
+            try ExportedObjectInventory.prune(directory: exportURL, keeping: kept)
             try ExportedObjectInventory.normalizeImportBlocks(directory: exportURL)
             try ExportedObjectInventory.inlineVariables(directory: exportURL)
 
@@ -264,19 +277,48 @@ struct AdoptView: View {
             }
 
             let destination = deployService.adoptedURL(for: tenant)
-            try? fileManager.removeItem(at: destination)
-            try fileManager.createDirectory(
-                at: destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try fileManager.moveItem(at: exportURL, to: destination)
-            step = .ready(count: selectedObjects.count)
+            if alreadyAdopted.isEmpty {
+                try? fileManager.removeItem(at: destination)
+                try fileManager.createDirectory(
+                    at: destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try fileManager.moveItem(at: exportURL, to: destination)
+            } else {
+                try Self.merge(exportURL, into: destination)
+            }
+            step = .ready(count: kept.count)
             activityLog.append(ActivityLogEntry(
                 category: "Adopt", operation: "stage", detail: tenant.name,
-                status: 200, duration: nil, note: "\(selectedObjects.count) objects"
+                status: 200, duration: nil, note: "\(kept.count) objects"
             ))
         } catch {
             step = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
+    }
+
+    /// Adds a staged export to existing adopted configuration. Files get a
+    /// unique prefix (keeping the `_import.tf` suffix the deploy cleanup
+    /// looks for); support files already present are kept.
+    private static func merge(_ source: URL, into destination: URL) throws {
+        let fileManager = FileManager.default
+        let stamp = DeployHistoryEntry.makeID()
+        for item in try fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
+            if item.pathExtension == "tf" {
+                try fileManager.moveItem(at: item, to: destination.appending(path: "adopt-\(stamp)-\(item.lastPathComponent)"))
+            } else if item.lastPathComponent == "support_files" {
+                let base = item.resolvingSymlinksInPath().path
+                let enumerator = fileManager.enumerator(at: item, includingPropertiesForKeys: [.isRegularFileKey])
+                while let file = enumerator?.nextObject() as? URL {
+                    guard (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+                    let relative = String(file.resolvingSymlinksInPath().path.dropFirst(base.count + 1))
+                    let target = destination.appending(path: "support_files/\(relative)")
+                    guard !fileManager.fileExists(atPath: target.path) else { continue }
+                    try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try fileManager.moveItem(at: file, to: target)
+                }
+            }
+        }
+        try? fileManager.removeItem(at: source)
     }
 }

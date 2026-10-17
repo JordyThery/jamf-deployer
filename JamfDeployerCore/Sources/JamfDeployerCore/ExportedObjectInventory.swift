@@ -44,8 +44,17 @@ public nonisolated enum ExportedObjectInventory {
         return objects.sorted { $0.displayName < $1.displayName }
     }
 
-    /// Rewrites the export so only `keptAddresses` remain; matching import
-    /// blocks follow their resources automatically.
+    /// Whether a folder's configuration declares any resource — `removed`
+    /// and `import` blocks alone manage nothing.
+    public static func containsResources(directory: URL) -> Bool {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.contains { file in
+            guard file.pathExtension == "tf",
+                  let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
+            return text.contains(/(?m)^resource\s+"/)
+        }
+    }
+
     /// Objects in an export the app cannot manage, with the reason: those
     /// referencing values Jamf never exports (tokens, passwords — variables
     /// with neither a default nor a tfvars value) and types the provider
@@ -130,6 +139,37 @@ public nonisolated enum ExportedObjectInventory {
         }
     }
 
+    /// `kept` plus every object a kept object references by an attribute
+    /// other than `.id` (a Jamf Pro ID or a name). Only `.id` can be pinned
+    /// from import blocks, so those references must stay managed too.
+    /// Objects in `excluding` (already managed) are neither added nor
+    /// followed.
+    public static func withRequiredReferences(directory: URL, kept: Set<String>, excluding: Set<String> = []) -> Set<String> {
+        var blocks: [String: String] = [:]
+        let files = (try? configurationFiles(in: directory, includeImports: false)) ?? []
+        for file in files {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            for block in topLevelBlocks(in: text) {
+                guard let header = block.firstMatch(of: /^resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) else { continue }
+                blocks["\(header.1).\(header.2)"] = block
+            }
+        }
+        var result = kept
+        var pending = Array(kept)
+        while let address = pending.popLast() {
+            guard let block = blocks[address] else { continue }
+            for match in block.matches(of: /\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.([a-z_]+)\b/) where match.2 != "id" {
+                let referenced = String(match.1)
+                if blocks[referenced] != nil, !excluding.contains(referenced), result.insert(referenced).inserted {
+                    pending.append(referenced)
+                }
+            }
+        }
+        return result
+    }
+
+    /// Rewrites the export so only `keptAddresses` remain; matching import
+    /// blocks follow their resources automatically.
     public static func prune(directory: URL, keeping keptAddresses: Set<String>) throws {
         for file in try configurationFiles(in: directory, includeImports: true) {
             let text = try String(contentsOf: file, encoding: .utf8)
@@ -192,7 +232,7 @@ public nonisolated enum ExportedObjectInventory {
     }
 
     /// Splits a file into top-level `xxx { … }` blocks by brace counting.
-    static func topLevelBlocks(in text: String) -> [String] {
+    public static func topLevelBlocks(in text: String) -> [String] {
         var blocks: [String] = []
         var current: [Substring] = []
         var depth = 0

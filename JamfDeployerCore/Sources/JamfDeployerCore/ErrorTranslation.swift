@@ -68,13 +68,6 @@ public nonisolated enum ErrorTranslation {
             "Check the Protect console URL and API client under the tenant's Day 0 Setup tab."
         ),
         (
-            // Captured live: Jamf answers some creates with 500/502/503/504
-            // under load, sometimes after creating the object.
-            "status 50",
-            "Jamf had a temporary server problem with this object.",
-            "Preview Changes again. Objects Jamf created despite the error are adopted, the rest are created — nothing is duplicated."
-        ),
-        (
             // Captured live: jamfplatform 1.5.0 on profile creates.
             "invalid result object after apply",
             "Jamf created the object, but the provider reported an incomplete result — a provider bug, not a tenant problem.",
@@ -106,6 +99,14 @@ public nonisolated enum ErrorTranslation {
             "Invalid combination of arguments",
             "Two settings on a building block contradict each other.",
             "Review the block's settings; the technical details name the exact fields."
+        ),
+        (
+            // Captured live: Jamf answers some creates with 500/502/503/504
+            // under load, sometimes after creating the object. Last, so the
+            // specific entries above win when their text carries a status.
+            "status 50",
+            "Jamf had a temporary server problem with this object.",
+            "Preview Changes again. Policies, configuration profiles, patch titles and App Installers that Jamf created despite the error are adopted rather than created twice."
         ),
     ]
 

@@ -65,7 +65,7 @@ struct BaselineEditorView: View {
                             Text(selection.blockID)
                                 .font(.callout.monospaced())
                             Text(selection.blockID == "foundation"
-                                ? "Foundation now comes with the demo catalog. Add it in Building Blocks → Manage Sources to keep managing it here."
+                                ? "Foundation is no longer built in. Remove it here — if it was deployed, its groups and categories stay in Jamf — then pick groups and categories in each block's Settings."
                                 : "Selected on this tenant, but not in any catalog this Mac follows. Add the catalog it comes from, or remove it from the baseline.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -230,7 +230,9 @@ struct BaselineEditorView: View {
 
             if isSelected, let missing = prerequisitesUnavailable.first {
                 Label(
-                    "Needs “\(missing)”, which no catalog on this Mac provides\(missing == "foundation" ? " — Foundation comes with the demo catalog. Add it in Building Blocks → Manage Sources" : ""). Or remove this block.",
+                    missing == "foundation"
+                        ? "Needs Foundation, which is no longer built in. Pick this block's scope and category in Settings instead, or remove the block."
+                        : "Needs “\(missing)”, which no catalog on this Mac provides. Add the catalog it comes from, or remove this block.",
                     systemImage: "exclamationmark.circle.fill"
                 )
                 .font(.caption)
@@ -356,7 +358,7 @@ struct BaselineEditorView: View {
             if let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)) {
                 if selectedIDs.contains(provided.blockID) { selection.providedScope = provided }
             } else if withFoundation {
-                selection.scope = block.scope.default ?? "pilot"
+                selection.scope = block.scope.default ?? Self.foundationFallbackScope(for: block)
             }
         }
         if block.acceptsCategory {
@@ -379,12 +381,17 @@ struct BaselineEditorView: View {
            provided.blockID == provider.id {
             selection.providedScope = provided
         }
-        if block.acceptsCategory, selection.existingCategory == .noCategory || selection.existingCategory == nil && selection.providedCategory == nil,
+        if block.acceptsCategory, selection.existingCategory == .noCategory,
            let provided = block.defaultCategory.flatMap(ProvidedObject.init(reference:)),
            provided.blockID == provider.id {
             selection.existingCategory = nil
             selection.providedCategory = provided
         }
+    }
+
+    /// Foundation's static Pilot group cannot scope smart-group-only blocks.
+    static func foundationFallbackScope(for block: BlockMetadata) -> String {
+        block.scope.smartOnly ? "all_macs" : "pilot"
     }
 
     static func wiresThroughFoundation(_ block: BlockMetadata, _ selection: BlockSelection) -> Bool {
@@ -418,7 +425,7 @@ struct BaselineEditorView: View {
             }
         }
         if Self.wiresThroughFoundation(block, selection), !foundationSelected, block.id != "foundation" {
-            return "Uses Foundation groups or categories, but Foundation is not selected. Pick other ones in Settings."
+            return "Uses a Foundation group or category, and Foundation is not part of this baseline. Pick another in Settings."
         }
         return nil
     }
@@ -438,7 +445,8 @@ struct BaselineEditorView: View {
                     selection.scope = ""
                 } else if presetIDs.contains("foundation") {
                     selection.providedScope = nil
-                    selection.scope = scope
+                    selection.scope = block.scope.smartOnly && scope == "pilot"
+                        ? Self.foundationFallbackScope(for: block) : scope
                 }
             }
             if let category = preset.categories[blockID], block.acceptsCategory,
@@ -520,8 +528,8 @@ struct BlockSettingsForm: View {
 
     // MARK: Scope and category
 
-    /// Existing groups need a Jamf Pro group ID; Platform-scoped blocks
-    /// keep Foundation groups only.
+    /// Existing groups are listed by Jamf Pro ID; Platform-scoped blocks
+    /// offer groups other selected blocks create.
     private var offersExistingGroups: Bool {
         block.scope.kind == .jamfProGroup
     }
@@ -548,7 +556,7 @@ struct BlockSettingsForm: View {
                 Text("Choose a group…").tag("")
             }
             if foundationSelected || Self.scopeChoices.contains(where: { $0.key == selection.scope }) && selection.existingScope == nil && selection.providedScope == nil {
-                Section("Foundation") {
+                Section("Created by Foundation") {
                     ForEach(foundationScopeChoices, id: \.key) { choice in
                         Text(choice.label).tag("foundation:\(choice.key)")
                     }
@@ -618,7 +626,7 @@ struct BlockSettingsForm: View {
     private var categoryPicker: some View {
         Picker("Category", selection: categoryBinding) {
             if foundationSelected || selection.existingCategory == nil && selection.providedCategory == nil {
-                Text("Foundation: \(block.category)").tag("foundation")
+                Text(foundationSelected ? "Foundation: \(block.category)" : "Choose a category…").tag("foundation")
             }
             ForEach(providers.filter { !$0.categories.isEmpty }, id: \.blockID) { provider in
                 Section("Created by \(provider.blockName)") {
@@ -638,7 +646,7 @@ struct BlockSettingsForm: View {
             }
         }
         .frame(maxWidth: 420)
-        .help("The Jamf Pro category this block's objects are filed under.")
+        .help("The Jamf Pro category this block's objects are filed under")
     }
 
     private var categoryBinding: Binding<String> {
@@ -820,7 +828,7 @@ struct SavePresetSheet: View {
                     }
                 }
                 Section {
-                    Text("\(tenant.blockSelections.count) blocks with their scopes and changed settings. Secret settings are never saved — each tenant keeps its own.")
+                    Text("\(tenant.blockSelections.count) building block\(tenant.blockSelections.count == 1 ? "" : "s") with their changed settings, and the groups and categories they use from other blocks in the preset. Groups and categories picked from this tenant, and secret settings, are not saved.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

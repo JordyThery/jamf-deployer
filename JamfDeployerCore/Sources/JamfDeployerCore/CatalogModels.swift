@@ -61,7 +61,7 @@ public nonisolated struct DriftBinding: Codable, Sendable, Equatable {
 /// How a block is scoped (block.json `scope`).
 public nonisolated struct BlockScope: Codable, Sendable, Equatable {
     public enum Kind: String, Codable, Sendable {
-        /// The block has no device scope (e.g. foundation, enrollment).
+        /// The block has no device scope (e.g. enrollment, tenant settings).
         case none
         /// Scoped via a numeric Jamf Pro group ID (policies, profiles).
         case jamfProGroup
@@ -72,10 +72,11 @@ public nonisolated struct BlockScope: Codable, Sendable, Equatable {
     public var kind: Kind
     /// The module variable receiving the group reference.
     public var variable: String?
-    /// Default scope choice: a foundation group key (pilot, all_macs, …).
+    /// Default scope: a group another block provides ("<blockID>/<name>"),
+    /// or a legacy Foundation group key (pilot, all_macs, …).
     public var `default`: String?
-    /// Some Jamf objects (App Installers) only accept smart groups — the
-    /// static Pilot group is not offered for these blocks.
+    /// Some Jamf objects (App Installers) only accept smart groups; static
+    /// groups are not offered for these blocks.
     public var smartOnly: Bool
 
     public init(kind: Kind, variable: String?, default defaultScope: String?, smartOnly: Bool = false) {
@@ -112,8 +113,7 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     public var settings: [BlockSetting]
     public var objectsCreated: [String]
     public var docsURL: String?
-    /// Whether the block takes a category_id wired from the foundation
-    /// category matching its catalog category.
+    /// Whether the block takes a category_id, chosen per tenant.
     public var acceptsCategory: Bool
     /// Captured blocks start as "needsReview" until a curator marks them
     /// reviewed; nil for authored blocks.

@@ -623,7 +623,7 @@ struct BlockCaptureTests {
             namePrefix: "JD - ",
             sourceDirectory: staging,
             catalogRootDirectory: destination,
-            rebind: .foundation,
+            rebind: .perTenant,
             resolutionDirectory: full
         ))
         let policy = try String(contentsOf: result.blockFolderURL.appending(path: "pro_policy.tf"), encoding: .utf8)
@@ -701,7 +701,7 @@ struct BlockCaptureTests {
             namePrefix: "JD - ",
             sourceDirectory: source,
             catalogRootDirectory: destination,
-            rebind: .foundation
+            rebind: .perTenant
         ))
 
         #expect(result.objectCount == 9)
@@ -1050,6 +1050,45 @@ struct PlanRedactionTests {
         // Non-sensitive content survives, and the result still decodes as a plan.
         #expect(text.contains("module.blk.terraform_data.x"))
         _ = try JSONDecoder().decode(PlanFile.self, from: redacted)
+    }
+
+    @Test func adoptionKeepsObjectsReferencedByJamfProID() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "refs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+        resource "jamfplatform_pro_policy" "p" {
+          scope = { computer_group_ids = [jamfplatform_device_group.g.jamf_pro_id] }
+          category_id = jamfplatform_pro_category.c.id
+        }
+
+        resource "jamfplatform_device_group" "g" {
+          name = "Group"
+        }
+
+        resource "jamfplatform_pro_category" "c" {
+          name = "Cat"
+        }
+        """.utf8).write(to: directory.appending(path: "main.tf"))
+        let kept = ExportedObjectInventory.withRequiredReferences(directory: directory, kept: ["jamfplatform_pro_policy.p"])
+        #expect(kept == ["jamfplatform_pro_policy.p", "jamfplatform_device_group.g"])
+        let excluded = ExportedObjectInventory.withRequiredReferences(
+            directory: directory, kept: ["jamfplatform_pro_policy.p"], excluding: ["jamfplatform_device_group.g"])
+        #expect(excluded == ["jamfplatform_pro_policy.p"])
+    }
+
+    @Test func masksDriftAndDropsUnknownSections() throws {
+        let raw = Data(#"""
+        {"format_version":"1.2",
+         "resource_drift":[{"address":"a.b","change":{"actions":["update"],
+           "before":{"password":"OLD-SECRET"},"after":{"password":"NEW-SECRET"},
+           "before_sensitive":{"password":true},"after_sensitive":{"password":true}}}],
+         "future_section":{"value":"UNKNOWN-SECRET"}}
+        """#.utf8)
+        let text = String(decoding: try #require(PlanRedactor.redact(raw)), as: UTF8.self)
+        #expect(!text.contains("OLD-SECRET") && !text.contains("NEW-SECRET"))
+        #expect(!text.contains("UNKNOWN-SECRET"))
+        #expect(text.contains("a.b"))
     }
 
     @Test func masksNestedPathsOnly() {

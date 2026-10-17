@@ -5,7 +5,8 @@ public nonisolated struct GeneratedSelection: Sendable {
     public var block: BlockMetadata
     /// Non-secret setting values keyed by setting key.
     public var settings: [String: String]
-    /// Foundation group key this block is scoped to (pilot, all_macs, …).
+    /// Legacy Foundation group key this block is scoped to (pilot,
+    /// all_macs, …); empty when another scope source is set.
     public var scope: String
     /// Overrides the catalog's folder for this block — used when a selection
     /// is pinned to a different catalog tag than the tenant default.
@@ -189,8 +190,9 @@ public nonisolated enum WorkspaceGenerator {
                 arguments.append((variable, "module.foundation.\(selection.scope)_\(suffix)"))
             }
 
-            // Category wiring: blocks that accept a category get the one
-            // matching their catalog category, when foundation provides it.
+            // Category wiring: an existing category, one another block
+            // creates, or (legacy) Foundation's category for the block's
+            // catalog category.
             if block.acceptsCategory, let existing = selection.existingCategoryID {
                 arguments.append(("category_id", hclString(existing)))
             } else if block.acceptsCategory, let provided = selection.providedCategory {
@@ -340,8 +342,6 @@ public nonisolated enum WorkspaceGenerator {
         )
     }
 
-    /// Writes the generated configuration and copies the pinned block
-    /// folders into `<workspace>/modules/`, replacing previous contents.
     /// Tenant-wide settings exist once per tenant; two blocks managing the
     /// same one would overwrite each other on every deploy.
     static func checkSettingOwnership(selections: [GeneratedSelection], catalog: LoadedCatalog) throws {
@@ -363,6 +363,8 @@ public nonisolated enum WorkspaceGenerator {
         }
     }
 
+    /// Writes the generated configuration and copies the pinned block
+    /// folders into `<workspace>/modules/`, replacing previous contents.
     public static func materialize(
         _ output: Output,
         selections: [GeneratedSelection],

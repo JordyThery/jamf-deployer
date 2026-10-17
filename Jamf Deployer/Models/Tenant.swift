@@ -64,6 +64,12 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
     /// Blocks awaiting removal on the next deploy ("Remove from tenant" or
     /// "Stop managing").
     var pendingRemovals: [BlockRemoval]
+    /// Set by Hand Over until the hand-over deploys: the next preview
+    /// releases every block and adopted object, and a successful deploy
+    /// archives the record.
+    var handOverPending: Bool
+    /// The baseline before Hand Over was prepared, restored on cancel.
+    var selectionsBeforeHandOver: [BlockSelection]?
     /// Last drift check result ("Changes made in Jamf").
     var driftReport: DriftReport?
     /// Drift the user chose to keep, keyed "address|field|value".
@@ -106,6 +112,7 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         self.day0 = Day0Status()
         self.deployedBlockVersions = [:]
         self.pendingRemovals = []
+        self.handOverPending = false
         self.acknowledgedDrift = []
         self.createdAt = .now
     }
@@ -130,6 +137,8 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         day0 = try container.decodeIfPresent(Day0Status.self, forKey: .day0) ?? Day0Status()
         deployedBlockVersions = try container.decodeIfPresent([String: String].self, forKey: .deployedBlockVersions) ?? [:]
         pendingRemovals = try container.decodeIfPresent([BlockRemoval].self, forKey: .pendingRemovals) ?? []
+        handOverPending = try container.decodeIfPresent(Bool.self, forKey: .handOverPending) ?? false
+        selectionsBeforeHandOver = try container.decodeIfPresent([BlockSelection].self, forKey: .selectionsBeforeHandOver)
         driftReport = try container.decodeIfPresent(DriftReport.self, forKey: .driftReport)
         acknowledgedDrift = try container.decodeIfPresent([String].self, forKey: .acknowledgedDrift) ?? []
         preflight = try container.decodeIfPresent(PreflightSnapshot.self, forKey: .preflight)

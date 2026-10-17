@@ -225,11 +225,35 @@ final class TenantDeployService {
         where stale.lastPathComponent.hasPrefix("adopted-") {
             try? fileManager.removeItem(at: stale)
         }
-        if fileManager.fileExists(atPath: adopted.path) {
+        if tenant.handOverPending {
+            // Hand-over releases adopted objects like blocks: the engine
+            // forgets them and Jamf keeps them.
+            let addresses = ((try? ExportedObjectInventory.scan(directory: adopted)) ?? []).map(\.address)
+            if !addresses.isEmpty {
+                let blocks = addresses.sorted().map { address in
+                    "removed {\n  from = \(address)\n\n  lifecycle {\n    destroy = false\n  }\n}\n"
+                }
+                try Data(blocks.joined(separator: "\n").utf8)
+                    .write(to: generated.appending(path: "adopted-handover_removed.tf"))
+            }
+        } else if fileManager.fileExists(atPath: adopted.path) {
+            let selectedModules = Set(selections.map { "module.\(WorkspaceGenerator.sanitized($0.block.id))" })
             for file in (try? fileManager.contentsOfDirectory(at: adopted, includingPropertiesForKeys: nil)) ?? [] {
                 // versions.tf would duplicate the workspace's own provider
                 // requirements and fail init.
-                if file.pathExtension == "tf", file.lastPathComponent != "versions.tf" {
+                if file.lastPathComponent == Self.recoveredImportsFile {
+                    // Recovered creates of blocks no longer selected have
+                    // nothing left to import into.
+                    let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+                    let kept = ExportedObjectInventory.topLevelBlocks(in: text).filter { block in
+                        guard let to = block.firstMatch(of: /\bto\s*=\s*(module\.[A-Za-z0-9_-]+)/) else { return true }
+                        return selectedModules.contains(String(to.1))
+                    }
+                    if !kept.isEmpty {
+                        try Data((kept.joined(separator: "\n\n") + "\n").utf8)
+                            .write(to: generated.appending(path: "adopted-\(file.lastPathComponent)"))
+                    }
+                } else if file.pathExtension == "tf", file.lastPathComponent != "versions.tf" {
                     try? fileManager.copyItem(
                         at: file,
                         to: generated.appending(path: "adopted-\(file.lastPathComponent)")
@@ -307,27 +331,23 @@ final class TenantDeployService {
 
     /// Hand-configured objects adopted into the tenant record live here as
     /// root-level configuration (plus one-shot import blocks until applied).
+    /// Import blocks for objects Jamf created despite an error.
+    static let recoveredImportsFile = "recovered_import.tf"
+
     func adoptedURL(for tenant: Tenant) -> URL {
         tenantStore.workspaceURL(for: tenant).appending(path: "adopted")
     }
 
     /// Whether the app manages anything in the tenant: deployed blocks, or
-    /// adopted configuration that has been deployed. A tenant brought in
-    /// entirely through Adopt has no blocks but is fully managed.
+    /// adopted objects once the tenant has been deployed. A tenant brought
+    /// in entirely through Adopt has no blocks but is fully managed.
     func isManaged(_ tenant: Tenant) -> Bool {
         !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
     }
 
-    /// Whether adopted objects are still managed. After a hand-over the
-    /// folder keeps only `removed` blocks, which manage nothing.
+    /// Whether the tenant has adopted objects.
     func hasAdoptedConfig(for tenant: Tenant) -> Bool {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: adoptedURL(for: tenant), includingPropertiesForKeys: nil)) ?? []
-        return files.contains { file in
-            guard file.pathExtension == "tf",
-                  let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
-            return text.contains(/(?m)^resource\s+"/)
-        }
+        ExportedObjectInventory.containsResources(directory: adoptedURL(for: tenant))
     }
 
     /// Adopted objects by plain-language type, most common first.
@@ -645,9 +665,12 @@ final class TenantDeployService {
             updated.driftReport = nil
             updated.acknowledgedDrift = []
             updated.lastDriftCheck = .now
-            if updated.blockSelections.isEmpty && !hasAdoptedConfig(for: tenant) {
-                // Hand over completed: no blocks and no adopted objects are
-                // left; the record is archived and the tenant is read-only.
+            if tenant.handOverPending {
+                // Hand-over completed: everything was released. The record is
+                // archived and the tenant is read-only in this app.
+                archiveAdoptedConfig(for: tenant)
+                updated.handOverPending = false
+                updated.selectionsBeforeHandOver = nil
                 updated.mode = .handedOver
             }
         }
@@ -691,7 +714,7 @@ final class TenantDeployService {
             configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
             activityLog: activityLog
         )
-        let fileURL = adoptedURL(for: tenant).appending(path: "recovered_import.tf")
+        let fileURL = adoptedURL(for: tenant).appending(path: Self.recoveredImportsFile)
         // Keep recoveries from earlier deploys that have not been applied yet.
         var found: [String: String] = [:]
         if let existing = try? String(contentsOf: fileURL, encoding: .utf8) {
@@ -912,42 +935,44 @@ final class TenantDeployService {
 
     // MARK: Hand over
 
-    /// Prepares hand-over: everything deployed is marked "stop managing".
-    /// The user then previews and deploys; on success the tenant archives.
+    /// Prepares hand-over: every deployed block and adopted object is
+    /// marked "stop managing". Nothing changes until the user previews and
+    /// deploys; on success the tenant archives. Until then it can be
+    /// cancelled.
     func prepareHandOver(tenant: Tenant) {
         var updated = tenant
-        updated.pendingRemovals = updated.deployedBlockVersions.keys.map {
+        updated.selectionsBeforeHandOver = tenant.blockSelections
+        updated.pendingRemovals = updated.deployedBlockVersions.keys.sorted().map {
             BlockRemoval(blockID: $0, keepInJamf: true)
         }
         updated.blockSelections = []
-        releaseAdoptedConfig(for: tenant)
+        updated.handOverPending = true
         tenantStore.update(updated)
     }
 
-    /// Adopted objects are released the same way as blocks: their
-    /// configuration is archived (kept, not deleted) and replaced by
-    /// removed blocks, so the next deploy forgets them instead of deleting
-    /// them from Jamf.
-    private func releaseAdoptedConfig(for tenant: Tenant) {
+    func cancelHandOver(tenant: Tenant) {
+        var updated = tenant
+        updated.blockSelections = tenant.selectionsBeforeHandOver ?? tenant.blockSelections
+        updated.pendingRemovals = []
+        updated.selectionsBeforeHandOver = nil
+        updated.handOverPending = false
+        tenantStore.update(updated)
+    }
+
+    /// After a hand-over the adopted configuration is kept for reference,
+    /// out of the workspace.
+    private func archiveAdoptedConfig(for tenant: Tenant) {
         let fileManager = FileManager.default
         let adopted = adoptedURL(for: tenant)
-        guard let addresses = try? ExportedObjectInventory.scan(directory: adopted).map(\.address),
-              !addresses.isEmpty
-        else { return }
+        guard fileManager.fileExists(atPath: adopted.path) else { return }
         let archive = tenantStore.workspaceURL(for: tenant)
             .appending(path: "adopted-handed-over-\(DeployHistoryEntry.makeID())")
         do {
             try fileManager.moveItem(at: adopted, to: archive)
-            try fileManager.createDirectory(at: adopted, withIntermediateDirectories: true)
-            let blocks = addresses.sorted().map { address in
-                "removed {\n  from = \(address)\n\n  lifecycle {\n    destroy = false\n  }\n}\n"
-            }
-            try Data(blocks.joined(separator: "\n").utf8)
-                .write(to: adopted.appending(path: "handover_removed.tf"))
         } catch {
             activityLog.append(ActivityLogEntry(
                 category: "Engine", operation: "hand over", detail: tenant.name,
-                status: 500, duration: nil, note: "Adopted objects could not be prepared: \(error.localizedDescription)"
+                status: 500, duration: nil, note: "The adopted configuration could not be archived: \(error.localizedDescription)"
             ))
         }
     }

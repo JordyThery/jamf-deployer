@@ -110,11 +110,13 @@ if your pipeline calls for it.
   its model on every run; after switching, the HCL is yours to edit, and the
   app's record of that tenant should be removed or handed over so there is
   only one owner.
-- **Building blocks become modules.** The `modules/` folder inside the
-  workspace contains each block as a plain module — keep, rename or inline
-  them as you prefer.
-- **History stays readable.** The `history/` folders next to the workspace
-  are plain JSON (sensitive values masked) and remain useful forever, with
+- **Building blocks become modules.** `generated/modules/` contains each
+  block as a plain module — keep, rename or inline them as you prefer.
+- **Adopted objects are plain files.** They sit at the root of `generated/`
+  as `adopted-*.tf` (copied from `tenants/<id>/adopted/`) and come along
+  with the rest of the workspace.
+- **History stays readable.** `tenants/<id>/history/`, next to `generated/`,
+  is plain JSON (sensitive values masked) and remains useful forever, with
   or without the app.
 - **Credentials and permissions** are unchanged: the same API clients keep
   working, with the privileges listed in [Permissions](permissions.md).

@@ -108,7 +108,7 @@ struct CatalogView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Blocks come from catalogs")
                         .font(.headline)
-                    Text("The app ships only blocks without configuration opinions (App Catalog, Jamf Protect, Security Cloud) — they use the groups and categories already in your tenant. Add the demo catalog for Foundation and a full baseline — for real fleets, capture your own blocks or publish your own catalog repository.")
+                    Text("The app ships only blocks without configuration opinions (App Catalog, Jamf Protect, Security Cloud); they use the groups and categories already in your tenant. Add the demo catalog for device groups, categories and a full baseline. For real fleets, capture your own blocks or publish your own catalog repository.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     if let demoCatalogError {
@@ -339,7 +339,7 @@ struct BlockDetailSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Save") { saveDetails() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(editName.isEmpty || editVersion.isEmpty
+                    .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty || editVersion.isEmpty
                               || editCategory.trimmingCharacters(in: .whitespaces).isEmpty)
             } else {
             Text("Source: \(catalog?.sourceName(for: block.id) ?? "—") · \(block.id)@\(block.version)")
@@ -414,6 +414,7 @@ struct BlockDetailSheet: View {
                     }
                 }
                 .fixedSize()
+                .disabled(existingCategories.isEmpty)
                 .help("The section this block appears under in the library")
             }
             TextField("Version", text: $editVersion)
@@ -441,15 +442,14 @@ struct BlockDetailSheet: View {
     private func saveDetails() {
         do {
             try writeManifest { object in
-                object["name"] = editName
+                object["name"] = editName.trimmingCharacters(in: .whitespaces)
                 object["summary"] = editSummary
                 object["version"] = editVersion
                 object["category"] = editCategory.trimmingCharacters(in: .whitespaces)
             }
         } catch {
             Self.log.error("Saving details for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
-            // Shown inside the edit dialog: an alert on this sheet would sit
-            // behind the dialog and never appear.
+            // Shown inline: an alert presented from this sheet is unreliable.
             editError = "The details could not be saved: \(error.localizedDescription)"
             return
         }

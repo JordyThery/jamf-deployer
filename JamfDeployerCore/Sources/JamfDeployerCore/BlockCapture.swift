@@ -12,9 +12,9 @@ public nonisolated enum BlockCapture {
         /// to the blocks that create the referenced objects. The default —
         /// a captured baseline deploys exactly as it was.
         case fidelity
-        /// Scope and category collapse to Foundation-wired settings: right
+        /// Scope and category become settings chosen on each tenant: right
         /// for publishing small portable blocks.
-        case foundation
+        case perTenant
     }
 
     public struct Request: Sendable {
@@ -184,6 +184,7 @@ public nonisolated enum BlockCapture {
         // reference becomes a name-based lookup of the deploying tenant's
         // instance (name captured as an editable block setting).
         var adeReferenced = false
+        var adeAddresses: Set<String> = []
         var adeInstanceName: String?
 
         // 1. Configuration files, transformed. provider/variables/tfvars and
@@ -262,6 +263,7 @@ public nonisolated enum BlockCapture {
 
             text = replacing(in: text, pattern: #"\bjamfplatform_pro_automated_device_enrollment\.([A-Za-z0-9_-]+)\.id\b"#) { match in
                 adeReferenced = true
+                adeAddresses.insert(match[1])
                 if adeInstanceName == nil {
                     adeInstanceName = table.nameByAddress["jamfplatform_pro_automated_device_enrollment.\(match[1])"]
                 }
@@ -269,16 +271,21 @@ public nonisolated enum BlockCapture {
             }
 
             // Jamf never exports Recovery Lock passwords; a PreStage that
-            // enables Recovery Lock without one cannot be created.
-            if text.contains("prestage_enrollment"),
-               text.range(of: #"enable_recovery_lock\s+= true"#, options: .regularExpression) != nil,
-               text.range(of: #"\n\s+recovery_lock_password\s+= ""#, options: .regularExpression) == nil {
-                text = text.replacingOccurrences(
-                    of: #"(enable_recovery_lock\s+= )true"#,
-                    with: "$1false",
-                    options: .regularExpression
-                )
-                warnings.append("Recovery Lock was turned off in \(name): Jamf does not export Recovery Lock passwords. Re-enable it with a password after deploying.")
+            // enables Recovery Lock without a non-empty one cannot be created.
+            if text.contains("prestage_enrollment") {
+                var turnedOff = 0
+                let blocks = ExportedObjectInventory.topLevelBlocks(in: text).map { block -> String in
+                    guard block.range(of: #"enable_recovery_lock\s*=\s*true"#, options: .regularExpression) != nil,
+                          block.range(of: #"\brecovery_lock_password\s*=\s*"[^"]+""#, options: .regularExpression) == nil
+                    else { return block }
+                    turnedOff += 1
+                    return block.replacingOccurrences(
+                        of: #"(enable_recovery_lock\s*=\s*)true"#, with: "$1false", options: .regularExpression)
+                }
+                if turnedOff > 0 {
+                    text = blocks.joined(separator: "\n\n") + "\n"
+                    warnings.append("Recovery Lock was turned off in \(name): Jamf does not export Recovery Lock passwords. Re-enable it with a password after deploying.")
+                }
             }
 
             // Name prefix: every quoted string that starts with the tenant's
@@ -350,10 +357,10 @@ public nonisolated enum BlockCapture {
                 )
             }
 
-            if request.rebind == .foundation {
+            if request.rebind == .perTenant {
                 // Scope group IDs collapse to the block's scope setting and
-                // categories to its category variable (wired to a foundation
-                // category by the generator, "-1" = none otherwise). Both the
+                // categories to its category variable (chosen per tenant;
+                // "-1" = none). Both the
                 // numeric form jamformer writes for unresolved references and
                 // the resource-reference form it writes for same-run objects
                 // are covered; everything else keeps its wiring below.
@@ -681,6 +688,9 @@ public nonisolated enum BlockCapture {
         }
 
         if adeReferenced {
+            if adeAddresses.count > 1 {
+                warnings.append("PreStages in this block used \(adeAddresses.count) Automated Device Enrollment instances; all now attach to the one named in the block's setting. Capture them as separate blocks to keep them apart.")
+            }
             // PreStages wire to the deploying tenant's Automated Device
             // Enrollment instance, found by the name in the block setting.
             let instance = """
@@ -800,6 +810,9 @@ public nonisolated enum BlockCapture {
                     for action in actions { set.insert("\(name):\(action)") }
                 }
             }
+            // Lookups the capture adds itself only read.
+            if adeReferenced { set.insert("device-enrollment-program-instances:read") }
+            if !builtinGroupNames.isEmpty { set.insert("device-groups:read") }
             permissions = set.sorted()
         }
         if permissions.isEmpty {

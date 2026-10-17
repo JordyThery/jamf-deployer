@@ -218,7 +218,22 @@ struct TenantDetailView: View {
                             .padding(4)
                         }
                     }
-                    if deployService.isManaged(tenant) && !tenant.isHandedOver {
+                    if tenant.handOverPending && !tenant.isHandedOver {
+                        GroupBox("Hand over") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Hand-over prepared: the next deploy stops managing everything in this tenant and archives its record. Every object stays in Jamf.", systemImage: "hand.raised")
+                                    .font(.callout)
+                                HStack {
+                                    Button("Preview Hand-Over…") { isPreviewing = true }
+                                        .buttonStyle(.borderedProminent)
+                                    Button("Cancel Hand-Over") { deployService.cancelHandOver(tenant: tenant) }
+                                        .help("Restores the baseline as it was; nothing has changed in Jamf")
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(4)
+                        }
+                    } else if deployService.isManaged(tenant) && !tenant.isHandedOver {
                         GroupBox("Hand over") {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Stops managing everything: every object stays exactly as it is in Jamf, and this app archives its record. For when another team or tool takes over.")
@@ -247,7 +262,7 @@ struct TenantDetailView: View {
                 }
                 .disabled(!deployService.isManaged(tenant) || isCheckingDrift || deployService.isBusy || tenant.isHandedOver)
                 .help(!deployService.isManaged(tenant)
-                    ? "Deploy a baseline first, then check for changes made in Jamf"
+                    ? "Deploy first, then check for changes made in Jamf"
                     : "Compare the tenant against its record and list changes made in Jamf")
 
                 Button {
@@ -270,7 +285,7 @@ struct TenantDetailView: View {
                 OverrideEditorView(tenant: tenant)
             }
             .onChange(of: appState.previewRequestCount) {
-                if !tenant.isHandedOver, !(tenant.blockSelections.isEmpty && tenant.pendingRemovals.isEmpty) {
+                if !tenant.isHandedOver, hasAnythingToPreview(tenant) {
                     isPreviewing = true
                 }
             }
@@ -284,12 +299,12 @@ struct TenantDetailView: View {
                     isPreviewing = true
                 }
             } message: {
-                Text("Every object stays in Jamf exactly as it is. The app stops managing everything in this tenant — \(tenant.deployedBlockVersions.count) blocks\(deployService.hasAdoptedConfig(for: tenant) ? " and all adopted objects" : "") — and archives the record. You review the change before anything happens.")
+                Text(handOverMessage(tenant))
             }
             .task {
                 catalog = try? deployService.loadCatalog()
             }
-            .task(id: "\(tenant.lastDeploy?.date.timeIntervalSince1970 ?? 0)|\(isAdopting)|\(isPreviewing)") {
+            .task(id: "\(tenant.id)|\(tenant.lastDeploy?.date.timeIntervalSince1970 ?? 0)|\(isAdopting)|\(isPreviewing)|\(isAddingCustomObject)") {
                 adoptedSummary = deployService.adoptedSummary(for: tenant)
             }
         } else {
@@ -336,12 +351,23 @@ struct TenantDetailView: View {
                     }
                     .help("Create an object the catalog doesn't cover yet — the form comes from the live provider schema, no configuration language needed")
                 }
+                .disabled(tenant.handOverPending)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
         } label: {
             Text("Managed in this tenant")
         }
+    }
+
+    private func handOverMessage(_ tenant: Tenant) -> String {
+        let blockCount = tenant.deployedBlockVersions.count
+        let adoptedCount = adoptedSummary.reduce(0) { $0 + $1.count }
+        var parts: [String] = []
+        if blockCount > 0 { parts.append("\(blockCount) building block\(blockCount == 1 ? "" : "s")") }
+        if adoptedCount > 0 { parts.append("\(adoptedCount) adopted object\(adoptedCount == 1 ? "" : "s")") }
+        let subject = parts.isEmpty ? "everything" : parts.joined(separator: " and ")
+        return "Every object stays in Jamf exactly as it is. The app stops managing \(subject) and archives the record. You review the change before anything happens, and can cancel until you deploy."
     }
 
     private func managedSummaryText(_ tenant: Tenant, adoptedCount: Int, blockCount: Int) -> String {

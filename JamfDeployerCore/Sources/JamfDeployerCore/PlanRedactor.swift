@@ -8,8 +8,18 @@ import Foundation
 public nonisolated enum PlanRedactor {
     public static let placeholder = "(sensitive)"
 
+    /// Top-level keys of the plan format this redactor understands. Anything
+    /// else is dropped rather than kept unredacted.
+    static let knownKeys: Set<String> = [
+        "format_version", "terraform_version", "variables", "planned_values",
+        "resource_drift", "resource_changes", "output_changes", "prior_state",
+        "configuration", "relevant_attributes", "checks", "timestamp",
+        "applyable", "complete", "errored",
+    ]
+
     public static func redact(_ data: Data) -> Data? {
         guard var plan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        plan = plan.filter { knownKeys.contains($0.key) }
 
         // Input variables marked sensitive in the root module.
         let configuredVariables = ((plan["configuration"] as? [String: Any])?["root_module"] as? [String: Any])?["variables"] as? [String: Any] ?? [:]
@@ -24,17 +34,14 @@ public nonisolated enum PlanRedactor {
             plan["variables"] = variables
         }
 
-        // Resource changes carry before/after values with parallel masks.
-        if let changes = plan["resource_changes"] as? [[String: Any]] {
-            plan["resource_changes"] = changes.map { change in
+        // Resource changes and drift carry before/after values with parallel
+        // masks.
+        for key in ["resource_changes", "resource_drift"] {
+            guard let changes = plan[key] as? [[String: Any]] else { continue }
+            plan[key] = changes.map { change in
                 var change = change
-                guard var detail = change["change"] as? [String: Any] else { return change }
-                for (valueKey, maskKey) in [("before", "before_sensitive"), ("after", "after_sensitive")] {
-                    if let value = detail[valueKey], let mask = detail[maskKey] {
-                        detail[valueKey] = masked(value, mask)
-                    }
-                }
-                change["change"] = detail
+                guard let detail = change["change"] as? [String: Any] else { return change }
+                change["change"] = maskedChange(detail)
                 return change
             }
         }
@@ -53,18 +60,23 @@ public nonisolated enum PlanRedactor {
         // Output changes mark whole outputs sensitive.
         if var outputs = plan["output_changes"] as? [String: Any] {
             for (name, value) in outputs {
-                guard var detail = (value as? [String: Any])?["change"] as? [String: Any] ?? (value as? [String: Any]) else { continue }
-                for (valueKey, maskKey) in [("before", "before_sensitive"), ("after", "after_sensitive")] {
-                    if let v = detail[valueKey], let mask = detail[maskKey] {
-                        detail[valueKey] = masked(v, mask)
-                    }
-                }
-                outputs[name] = detail
+                guard let detail = value as? [String: Any] else { continue }
+                outputs[name] = maskedChange(detail)
             }
             plan["output_changes"] = outputs
         }
 
         return try? JSONSerialization.data(withJSONObject: plan, options: [.sortedKeys])
+    }
+
+    private static func maskedChange(_ change: [String: Any]) -> [String: Any] {
+        var change = change
+        for (valueKey, maskKey) in [("before", "before_sensitive"), ("after", "after_sensitive")] {
+            if let value = change[valueKey], let mask = change[maskKey] {
+                change[valueKey] = masked(value, mask)
+            }
+        }
+        return change
     }
 
     private static func redactModuleTree(_ tree: [String: Any]) -> [String: Any] {

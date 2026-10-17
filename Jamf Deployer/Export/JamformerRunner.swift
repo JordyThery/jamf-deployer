@@ -116,12 +116,11 @@ actor JamformerRunner {
             if let index = retryArguments.firstIndex(of: "-output") {
                 retryArguments[index + 1] = retryURL.path
             }
+            try? FileManager.default.removeItem(at: outputURL)
             result = try await run(arguments: retryArguments, environment: environment, onLine: onLine)
             result.outputURL = retryURL
-            if result.exitCode == 0 {
-                for file in ["pro_category.tf", "pro_category_import.tf"] {
-                    try? FileManager.default.removeItem(at: retryURL.appending(path: file))
-                }
+            for file in ["pro_category.tf", "pro_category_import.tf"] {
+                try? FileManager.default.removeItem(at: retryURL.appending(path: file))
             }
         }
         return result
