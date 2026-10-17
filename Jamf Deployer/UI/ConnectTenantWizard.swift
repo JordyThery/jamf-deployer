@@ -36,6 +36,8 @@ struct ConnectTenantWizard: View {
     // Step 3
     @State private var clientID = ""
     @State private var clientSecret = ""
+    /// Pasted secrets often carry a trailing space or line break.
+    private var trimmedSecret: String { clientSecret.trimmingCharacters(in: .whitespacesAndNewlines) }
     @State private var usesLegacyTenantScope = false
     @State private var scopeID = ""
     @State private var fetchedEnvironments: [OrganizationService.Environment] = []
@@ -234,7 +236,7 @@ struct ConnectTenantWizard: View {
                 fetchedEnvironments = try await OrganizationService.environments(
                     gatewayURL: region.gatewayURL,
                     clientID: clientID,
-                    clientSecret: clientSecret,
+                    clientSecret: trimmedSecret,
                     activityLog: activityLog
                 )
                 if fetchedEnvironments.isEmpty {
@@ -314,7 +316,7 @@ struct ConnectTenantWizard: View {
             configuration: JamfAPIConfiguration(
                 gatewayURL: region.gatewayURL,
                 clientID: clientID,
-                clientSecret: clientSecret,
+                clientSecret: trimmedSecret,
                 environmentID: usesLegacyTenantScope ? nil : scopeID
             ),
             activityLog: activityLog
@@ -414,7 +416,7 @@ struct ConnectTenantWizard: View {
         }
 
         let secrets = TenantSecrets(tenantID: tenant.id)
-        secrets.platformClientSecret.save(clientSecret)
+        secrets.platformClientSecret.save(trimmedSecret)
         if !protectClientSecret.isEmpty {
             secrets.protectClientSecret.save(protectClientSecret)
         }
