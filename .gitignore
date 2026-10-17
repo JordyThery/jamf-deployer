@@ -24,3 +24,4 @@ Vendor/providers/
 Spike/live-sandbox/files/*.pkg
 .terraform.lock.hcl
 Jamf Deployer.app/
+Jamf.Deployer.*.zip

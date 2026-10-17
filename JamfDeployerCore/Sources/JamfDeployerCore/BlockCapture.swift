@@ -79,8 +79,6 @@ public nonisolated enum BlockCapture {
     /// Exported types that can never deploy into another tenant; captured
     /// blocks leave them out with a warning.
     static let unportableTypes: [String: String] = [
-        "jamfplatform_pro_computer_prestage_enrollment":
-            "PreStage enrollments bind to the origin tenant's Automated Device Enrollment instance and must be recreated by hand",
         "jamfplatform_pro_computer_invitation":
             "enrollment invitations are tenant-specific and expire",
         "jamfplatform_pro_allowed_file_extension":
@@ -174,6 +172,13 @@ public nonisolated enum BlockCapture {
             return true
         }
 
+        // PreStages attach to the tenant's Automated Device Enrollment
+        // instance; the origin's instance never exists elsewhere, so the
+        // reference becomes a name-based lookup of the deploying tenant's
+        // instance (name captured as an editable block setting).
+        var adeReferenced = false
+        var adeInstanceName: String?
+
         // 1. Configuration files, transformed. provider/variables/tfvars and
         //    import blocks stay behind — a block is reusable configuration.
         let skipped: Set<String> = ["provider.tf", "variables.tf", "versions.tf", "terraform.tfvars"]
@@ -247,6 +252,27 @@ public nonisolated enum BlockCapture {
                 }
             }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+
+            text = replacing(in: text, pattern: #"\bjamfplatform_pro_automated_device_enrollment\.([A-Za-z0-9_-]+)\.id\b"#) { match in
+                adeReferenced = true
+                if adeInstanceName == nil {
+                    adeInstanceName = table.nameByAddress["jamfplatform_pro_automated_device_enrollment.\(match[1])"]
+                }
+                return "data.jamfplatform_pro_automated_device_enrollment.instance.id"
+            }
+
+            // Jamf never exports Recovery Lock passwords; a PreStage that
+            // enables Recovery Lock without one cannot be created.
+            if text.contains("prestage_enrollment"),
+               text.range(of: #"enable_recovery_lock\s+= true"#, options: .regularExpression) != nil,
+               text.range(of: #"\n\s+recovery_lock_password\s+= ""#, options: .regularExpression) == nil {
+                text = text.replacingOccurrences(
+                    of: #"(enable_recovery_lock\s+= )true"#,
+                    with: "$1false",
+                    options: .regularExpression
+                )
+                warnings.append("Recovery Lock was turned off in \(name): Jamf does not export Recovery Lock passwords. Re-enable it with a password after deploying.")
+            }
 
             // Name prefix: every quoted string that starts with the tenant's
             // prefix becomes "${var.name_prefix}…".
@@ -444,8 +470,11 @@ public nonisolated enum BlockCapture {
         // warning rather than left dangling.
         var danglingAddresses: Set<String> = []
         for (_, text) in fileTexts {
-            for match in text.matches(of: /\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.[a-z_]+\b/) {
-                let address = String(match.1)
+            // `data.` lookups resolve against the deploying tenant and are
+            // never dangling.
+            for match in text.matches(of: /(data\.)?\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.[a-z_]+\b/) {
+                guard match.1 == nil else { continue }
+                let address = String(match.2)
                 if !localAddresses.contains(address) || droppedAddresses.contains(address) {
                     // localAddresses reflects the capture selection, not the
                     // resources dropped above — confirm against the texts.
@@ -650,6 +679,24 @@ public nonisolated enum BlockCapture {
             try Data(lookup.utf8).write(to: blockURL.appending(path: "builtin_groups.tf"))
         }
 
+        if adeReferenced {
+            // PreStages wire to the deploying tenant's Automated Device
+            // Enrollment instance, found by the name in the block setting.
+            let instance = """
+            variable "ade_instance_name" {
+              description = "Name of the tenant's Automated Device Enrollment instance that PreStage enrollments attach to."
+              type        = string
+              default     = \(hclStringLiteral(adeInstanceName ?? ""))
+            }
+
+            data "jamfplatform_pro_automated_device_enrollment" "instance" {
+              name = var.ade_instance_name
+            }
+            """
+            try Data(instance.utf8).write(to: blockURL.appending(path: "enrollment_instance.tf"))
+            warnings.append("PreStage enrollments attach to the deploying tenant's Automated Device Enrollment instance — the tenant needs its ADE token uploaded, and the block's \"Automated Device Enrollment instance\" setting must match that instance's name.")
+        }
+
         // Name→ID and name→deployed-name output maps, so other blocks can
         // wire to this one; names come from the resources so prefixing is
         // reflected.
@@ -769,7 +816,15 @@ public nonisolated enum BlockCapture {
             "acceptsCategory": usesCategory,
             "reviewStatus": "needsReview",
             "scope": scope,
-            "settings": [],
+            "settings": adeReferenced ? [[
+                "key": "ade_instance_name",
+                "title": "Automated Device Enrollment instance",
+                "type": "string",
+                "default": adeInstanceName ?? "",
+                "required": true,
+                "description": "Name of this tenant's Automated Device Enrollment instance. PreStage enrollments attach to it, so the tenant needs its ADE token uploaded first.",
+                "section": "Enrollment",
+            ]] : [],
             "objectsCreated": terraformTypes.sorted().map { "1+ \($0)" },
         ]
         if let origin = request.originTenantScopeID {

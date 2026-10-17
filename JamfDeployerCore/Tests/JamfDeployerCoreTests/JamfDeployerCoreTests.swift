@@ -474,6 +474,47 @@ struct BlockCaptureTests {
         #expect(local.contains("criteria = jamfplatform_pro_computer_extension_attribute.rosetta_installed.name"))
     }
 
+    @Test func prestigeWiresToDestinationEnrollmentInstance() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "prestage-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let source = FileManager.default.temporaryDirectory
+            .appending(path: "prestage-src-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: exportFixtureURL(), to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "prestage-block",
+            name: "PreStage",
+            summary: "Whole export including a PreStage.",
+            namePrefix: "JD - ",
+            sourceDirectory: source,
+            catalogRootDirectory: destination
+        ))
+        let folder = result.blockFolderURL
+        let prestige = try String(contentsOf: folder.appending(path: "pro_computer_prestage_enrollment.tf"), encoding: .utf8)
+        #expect(prestige.contains("device_enrollment_program_instance_id = data.jamfplatform_pro_automated_device_enrollment.instance.id"))
+
+        // The origin's instance resource is dropped (its token is not
+        // exportable); the lookup file replaces it.
+        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "pro_automated_device_enrollment.tf").path))
+        let lookup = try String(contentsOf: folder.appending(path: "enrollment_instance.tf"), encoding: .utf8)
+        #expect(lookup.contains(#"default     = "Apple Business Manager""#))
+        #expect(lookup.contains(#"data "jamfplatform_pro_automated_device_enrollment" "instance""#))
+
+        let manifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: folder.appending(path: "block.json"))) as? [String: Any]
+        let settings = manifest?["settings"] as? [[String: Any]]
+        #expect(settings?.first?["key"] as? String == "ade_instance_name")
+        #expect(settings?.first?["default"] as? String == "Apple Business Manager")
+        #expect(result.warnings.contains { $0.contains("Automated Device Enrollment instance") })
+
+        // Recovery Lock passwords are not exportable; the capture turns the
+        // feature off rather than shipping a PreStage that cannot be created.
+        #expect(prestige.range(of: #"enable_recovery_lock\s+= false"#, options: .regularExpression) != nil)
+        #expect(result.warnings.contains { $0.contains("Recovery Lock") })
+    }
+
     @Test func capturesExportIntoBlockLayout() throws {
         let destination = FileManager.default.temporaryDirectory
             .appending(path: "capture-test-\(UUID().uuidString)")
@@ -496,7 +537,7 @@ struct BlockCaptureTests {
             rebind: .foundation
         ))
 
-        #expect(result.objectCount == 8)
+        #expect(result.objectCount == 9)
         #expect(result.usesJamfProScope)
         #expect(!result.usesPlatformScope)
 
@@ -525,7 +566,7 @@ struct BlockCaptureTests {
         let prunedPolicy = try String(contentsOf: folder.appending(path: "pro_policy.tf"), encoding: .utf8)
         #expect(!prunedPolicy.contains("self_service_icon"))
         #expect(prunedPolicy.contains("jamfplatform_pro_script.jd_install_rosetta_2.id"))
-        #expect(result.warnings.contains { $0.contains("Left out 1 object") })
+        #expect(result.warnings.contains { $0.contains("Left out 2 objects") })
 
         // Referenced support files follow the block into files/.
         let copiedScript = folder.appending(path: "files/scripts/JD - Install Rosetta 2.zsh")
@@ -589,7 +630,7 @@ struct AsBuiltTests {
         #expect(markdown.contains("`jamfplatform_pro_policy`"))
         #expect(markdown.contains("Frequency: Once per computer"))
         #expect(markdown.contains("Scoped:"))
-        #expect(markdown.contains("**9 objects**"))
+        #expect(markdown.contains("**11 objects**"))
     }
 }
 
@@ -636,7 +677,7 @@ struct InventoryTests {
         let dir = try copyFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         let objects = try ExportedObjectInventory.scan(directory: dir)
-        #expect(objects.count == 9)
+        #expect(objects.count == 11)
         let script = try #require(objects.first { $0.resourceType == "jamfplatform_pro_script" })
         #expect(script.displayName == "JD - Install Rosetta 2")
         #expect(script.hasProvenanceTag) // fixture script carries the tag

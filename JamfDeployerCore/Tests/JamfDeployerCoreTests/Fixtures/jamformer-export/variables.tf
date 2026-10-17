@@ -17,3 +17,8 @@ variable "pro_icon_icon_99_icon_file_source" {
   description = "Required value (the server returned an empty value, so it must be supplied here)"
   type        = string
 }
+
+variable "pro_automated_device_enrollment_apple_business_manager_server_token" {
+  description = "Required value (the server returned an empty value, so it must be supplied here)"
+  type        = string
+}
