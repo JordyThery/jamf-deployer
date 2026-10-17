@@ -181,6 +181,20 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
     public var summary: String
     public var blocks: [String]
     public var defaults: [String: [String: String]]
+    /// Scope per block, where it differs from the block's own default.
+    public var scopes: [String: String]
+
+    public init(
+        id: String, name: String, summary: String, blocks: [String],
+        defaults: [String: [String: String]] = [:], scopes: [String: String] = [:]
+    ) {
+        self.id = id
+        self.name = name
+        self.summary = summary
+        self.blocks = blocks
+        self.defaults = defaults
+        self.scopes = scopes
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -189,6 +203,45 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
         summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
         blocks = try container.decodeIfPresent([String].self, forKey: .blocks) ?? []
         defaults = try container.decodeIfPresent([String: [String: String]].self, forKey: .defaults) ?? [:]
+        scopes = try container.decodeIfPresent([String: String].self, forKey: .scopes) ?? [:]
+    }
+
+    /// A preset capturing a baseline: its blocks in order, the non-secret
+    /// settings that differ from each block's defaults, and scopes that
+    /// differ from each block's default scope. Secret values never leave
+    /// the Keychain.
+    public static func capturing(
+        name: String,
+        summary: String,
+        selections: [(blockID: String, settings: [String: String], scope: String)],
+        blocks: [BlockMetadata]
+    ) -> Preset {
+        let byID = Dictionary(blocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var defaults: [String: [String: String]] = [:]
+        var scopes: [String: String] = [:]
+        for selection in selections {
+            guard let block = byID[selection.blockID] else { continue }
+            var changed: [String: String] = [:]
+            for setting in block.settings where setting.type != .secret {
+                if let value = selection.settings[setting.key], value != setting.default {
+                    changed[setting.key] = value
+                }
+            }
+            if !changed.isEmpty { defaults[block.id] = changed }
+            if block.scope.kind != .none, selection.scope != (block.scope.default ?? "pilot") {
+                scopes[block.id] = selection.scope
+            }
+        }
+        return Preset(
+            id: identifier(for: name), name: name, summary: summary,
+            blocks: selections.map(\.blockID), defaults: defaults, scopes: scopes)
+    }
+
+    /// File-safe preset ID derived from its name.
+    public static func identifier(for name: String) -> String {
+        let lowered = name.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
+        let collapsed = lowered.split(separator: "-").joined(separator: "-")
+        return collapsed.isEmpty ? "preset" : collapsed
     }
 }
 

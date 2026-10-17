@@ -183,7 +183,9 @@ struct TenantDetailView: View {
                     GroupBox("Baseline") {
                         VStack(alignment: .leading, spacing: 10) {
                             if let catalog {
-                                BaselineEditorView(tenant: tenant, catalog: catalog)
+                                BaselineEditorView(tenant: tenant, catalog: catalog) {
+                                    self.catalog = try? deployService.loadCatalog()
+                                }
                             } else {
                                 Text("Loading building blocks…")
                                     .font(.callout)

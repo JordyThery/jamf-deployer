@@ -59,6 +59,8 @@ Presets come from the catalogs you follow. The demo catalog ships three:
 
 A preset is just a starting selection. Everything stays editable afterwards.
 
+To make your own, compose a tenant's baseline and choose **Apply a Preset → Save Current Baseline as Preset…**. The preset records the blocks, every setting you changed from a block's default, and any scope other than the default; secret settings are never saved. It is written to `presets/<name>.json` in a folder catalog source of your choice, so it travels with that catalog — publish the folder as a Git catalog to share presets with a team.
+
 ## Baseline updates
 
 Blocks are versioned. When a tenant's catalog source publishes a newer release, **Baseline Updates…** lists what changed per block, and you opt blocks into the newer version individually — each update then goes through the normal preview before it can deploy.

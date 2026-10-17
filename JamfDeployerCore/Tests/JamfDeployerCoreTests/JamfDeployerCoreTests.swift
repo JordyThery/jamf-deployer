@@ -1059,3 +1059,69 @@ struct ServerErrorTranslationTests {
         }
     }
 }
+
+@Suite("Saving presets")
+struct PresetCaptureTests {
+    static let blocks: [BlockMetadata] = [
+        try! JSONDecoder().decode(BlockMetadata.self, from: Data(#"""
+        {"id":"checkin","name":"Check-in","scope":{"kind":"none"},
+         "settings":[{"key":"check_in_frequency","type":"enum","default":"15"},
+                     {"key":"api_key","type":"secret"}]}
+        """#.utf8)),
+        try! JSONDecoder().decode(BlockMetadata.self, from: Data(#"""
+        {"id":"rosetta","name":"Rosetta","scope":{"kind":"jamfProGroup","variable":"scope_jamf_pro_group_id","default":"apple_silicon"},"settings":[]}
+        """#.utf8)),
+    ]
+
+    @Test func keepsOnlyChangesAndNeverSecrets() throws {
+        let preset = Preset.capturing(
+            name: "Office Macs — 2026",
+            summary: "Our standard.",
+            selections: [
+                (blockID: "checkin", settings: ["check_in_frequency": "30", "api_key": "s3cret"], scope: "pilot"),
+                (blockID: "rosetta", settings: [:], scope: "laptops"),
+            ],
+            blocks: Self.blocks)
+        #expect(preset.id == "office-macs-2026")
+        #expect(preset.blocks == ["checkin", "rosetta"])
+        #expect(preset.defaults == ["checkin": ["check_in_frequency": "30"]])
+        #expect(preset.scopes == ["rosetta": "laptops"])
+
+        // Round-trips through JSON; files without scopes still decode.
+        let data = try JSONEncoder().encode(preset)
+        #expect(!String(decoding: data, as: UTF8.self).contains("s3cret"))
+        #expect(try JSONDecoder().decode(Preset.self, from: data) == preset)
+        let legacy = try JSONDecoder().decode(Preset.self, from: Data(#"{"id":"minimal","blocks":["foundation"]}"#.utf8))
+        #expect(legacy.scopes.isEmpty)
+    }
+
+    @Test func savedPresetLoadsFromAFolderSource() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "preset-src-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appending(path: "presets"), withIntermediateDirectories: true)
+        try Data(#"{"id":"mine","name":"Mine","schemaVersion":1}"#.utf8).write(to: root.appending(path: "catalog.json"))
+
+        let preset = Preset.capturing(
+            name: "Office Macs", summary: "",
+            selections: [(blockID: "rosetta", settings: [:], scope: "laptops")],
+            blocks: Self.blocks)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(preset).write(to: root.appending(path: "presets/\(preset.id).json"))
+
+        let catalog = try LoadedCatalog.load(from: root)
+        #expect(catalog.presets == [preset])
+        #expect(catalog.presets.first?.scopes["rosetta"] == "laptops")
+    }
+
+    @Test func unchangedDefaultsStayOut() {
+        let preset = Preset.capturing(
+            name: "", summary: "",
+            selections: [(blockID: "checkin", settings: ["check_in_frequency": "15"], scope: "pilot"),
+                         (blockID: "rosetta", settings: [:], scope: "apple_silicon")],
+            blocks: Self.blocks)
+        #expect(preset.id == "preset")
+        #expect(preset.defaults.isEmpty)
+        #expect(preset.scopes.isEmpty)
+    }
+}

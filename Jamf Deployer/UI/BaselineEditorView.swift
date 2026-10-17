@@ -10,8 +10,12 @@ struct BaselineEditorView: View {
 
     let tenant: Tenant
     let catalog: LoadedCatalog
+    /// Called after something on disk changed (a saved preset), so the
+    /// owner reloads the catalog.
+    var onCatalogChanged: () -> Void = {}
 
     @State private var expandedBlockID: String?
+    @State private var isSavingPreset = false
     @State private var blockPendingRemoval: BlockMetadata?
     @State private var isCheckingUpdates = false
 
@@ -27,9 +31,15 @@ struct BaselineEditorView: View {
                         Button(preset.name) { apply(preset) }
                             .help(preset.summary)
                     }
+                    if !catalog.presets.isEmpty { Divider() }
+                    Button("Save Current Baseline as Preset…") { isSavingPreset = true }
+                        .disabled(tenant.blockSelections.isEmpty)
                 }
                 .fixedSize()
-                .help("Replaces the current block selection with a preset")
+                .help("Replaces the current block selection with a preset, or saves this baseline as one")
+                .sheet(isPresented: $isSavingPreset) {
+                    SavePresetSheet(tenant: tenant, catalog: catalog, onSaved: onCatalogChanged)
+                }
 
                 Button("Baseline Updates…", systemImage: "square.and.arrow.down.badge.clock") {
                     isCheckingUpdates = true
@@ -299,6 +309,9 @@ struct BaselineEditorView: View {
             for (key, value) in preset.defaults[blockID] ?? [:] {
                 selection.settings[key] = value
             }
+            if let scope = preset.scopes[blockID] {
+                selection.scope = scope
+            }
             return selection
         }
         tenantStore.update(updated)
@@ -448,5 +461,105 @@ struct BlockSettingsForm: View {
         guard let index = tenantCopy.blockSelections.firstIndex(where: { $0.blockID == block.id }) else { return }
         mutate(&tenantCopy.blockSelections[index])
         tenantStore.update(tenantCopy)
+    }
+}
+
+/// Saves the tenant's baseline as a preset file in a folder catalog source.
+struct SavePresetSheet: View {
+    let tenant: Tenant
+    let catalog: LoadedCatalog
+    var onSaved: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(CatalogSourceStore.self) private var catalogSources
+    @State private var name = ""
+    @State private var summary = ""
+    @State private var destinationID: UUID?
+    @State private var errorMessage: String?
+    @State private var isConfirmingReplace = false
+
+    private var folderSources: [CatalogSourceStore.CustomSource] {
+        catalogSources.customSources.filter { $0.kind == .localFolder }
+    }
+
+    private var preset: Preset {
+        Preset.capturing(
+            name: name.trimmingCharacters(in: .whitespaces),
+            summary: summary.trimmingCharacters(in: .whitespaces),
+            selections: tenant.blockSelections.map { ($0.blockID, $0.settings, $0.scope) },
+            blocks: catalog.blocks)
+    }
+
+    private var destinationURL: URL? {
+        guard let source = folderSources.first(where: { $0.id == destinationID }) else { return nil }
+        return URL(filePath: source.path).appending(path: "presets/\(preset.id).json")
+    }
+
+    var body: some View {
+        SheetFrame(title: "Save as Preset", systemImage: "square.stack.3d.up") {
+            Form {
+                TextField("Name", text: $name, prompt: Text("Office Macs"))
+                TextField("Summary", text: $summary, prompt: Text("What this baseline is for"), axis: .vertical)
+                    .lineLimit(2...4)
+                if folderSources.isEmpty {
+                    Text("Presets are saved in a folder catalog source. Add one under Building Blocks → Manage Sources, or capture a block first.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Save into", selection: $destinationID) {
+                        ForEach(folderSources) { source in
+                            Text(source.name).tag(Optional(source.id))
+                        }
+                    }
+                }
+                Section {
+                    Text("\(tenant.blockSelections.count) blocks with their scopes and changed settings. Secret settings are never saved — each tenant keeps its own.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+        } footer: {
+            Spacer()
+            Button("Cancel") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+            Button("Save") {
+                if let url = destinationURL, FileManager.default.fileExists(atPath: url.path) {
+                    isConfirmingReplace = true
+                } else {
+                    save()
+                }
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || destinationURL == nil)
+        }
+        .frame(width: 480, height: 400)
+        .confirmationDialog(
+            "Replace the existing preset “\(preset.id)”?",
+            isPresented: $isConfirmingReplace,
+            titleVisibility: .visible
+        ) {
+            Button("Replace", role: .destructive) { save() }
+        }
+        .onAppear { destinationID = destinationID ?? folderSources.first?.id }
+    }
+
+    private func save() {
+        guard let url = destinationURL else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(preset).write(to: url, options: .atomic)
+            onSaved()
+            dismiss()
+        } catch {
+            errorMessage = "The preset could not be saved: \(error.localizedDescription)"
+        }
     }
 }
