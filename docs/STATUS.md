@@ -37,6 +37,7 @@ Supported by design: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFP
 ## Upstream dependencies being watched
 - jamfplatform provider pinned at 1.5.0 (released 2026-10-16 — very fresh); blueprints' top-level settings deprecated with a stated removal window (catalog already uses `component_blocks`). Settings → Built-in tools now flags newer upstream releases of OpenTofu, both providers and jamformer (24-hour check).
 - jamformer 0.6.0 emits Terraform-style identity imports that fail under OpenTofu; the app normalizes them (worth reporting upstream).
+- jamfplatform 1.5.0 returns an unknown `self_service.display_notifications` after creating macOS configuration profiles ("invalid result object after apply"); objects are created and kept in state regardless. Captured blocks set the attribute explicitly to sidestep it (worth reporting upstream).
 - Platform OAuth tokens live 900 s (handled); provider request pacing left at its real default (0 ms).
 - Compliance benchmarks auto-create an audit policy in Jamf Pro (Jamf-managed; excluded from drift logic by the noise list).
 

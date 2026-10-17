@@ -110,6 +110,18 @@ public nonisolated enum BlockCapture {
             // Support files move into files/.
             text = text.replacingOccurrences(of: "support_files/", with: "files/")
 
+            // jamfplatform 1.5.0: macOS configuration profiles error with
+            // "provider returned invalid result object after apply" when the
+            // computed self_service.display_notifications is left unset.
+            // Setting Jamf's default explicitly sidesteps the provider bug.
+            if text.contains("jamfplatform_pro_macos_configuration_profile") {
+                text = text.replacingOccurrences(
+                    of: #"(  self_service = \{\n)(?![^}]*display_notifications)"#,
+                    with: "$1    display_notifications     = true\n",
+                    options: .regularExpression
+                )
+            }
+
             // Hard-coded scope group IDs become the block's scope setting.
             // jamformer writes multi-line lists with trailing commas and
             // "# TODO: unresolved reference" comments; match any non-empty

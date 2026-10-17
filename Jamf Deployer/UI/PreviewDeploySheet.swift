@@ -117,28 +117,34 @@ struct PreviewDeploySheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                ForEach(Array(outcome.errors.enumerated()), id: \.offset) { _, raw in
-                    let translated = ErrorTranslation.translate(raw)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(translated.message, systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                        if let hint = translated.hint {
-                            Text(hint)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        if showsTechnicalDetails {
-                            DisclosureGroup("Show details") {
-                                Text(raw)
-                                    .font(.caption.monospaced())
-                                    .textSelection(.enabled)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(outcome.errors.enumerated()), id: \.offset) { _, raw in
+                            let translated = ErrorTranslation.translate(raw)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(translated.message, systemImage: "xmark.circle.fill")
+                                    .foregroundStyle(.red)
+                                if let hint = translated.hint {
+                                    Text(hint)
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if showsTechnicalDetails {
+                                    DisclosureGroup("Show details") {
+                                        Text(raw)
+                                            .font(.caption.monospaced())
+                                            .textSelection(.enabled)
+                                    }
+                                    .font(.caption)
+                                }
                             }
-                            .font(.caption)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
                         }
                     }
-                    .padding(8)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
                 }
+                .frame(maxHeight: .infinity)
                 Text("The result is recorded in History, and the tenant record was backed up automatically.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

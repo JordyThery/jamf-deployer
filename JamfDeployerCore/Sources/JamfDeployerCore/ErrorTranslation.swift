@@ -67,6 +67,12 @@ public nonisolated enum ErrorTranslation {
             "Check the Protect console URL and API client under the tenant's Day 0 Setup tab."
         ),
         (
+            // Captured live: jamfplatform 1.5.0 on profile creates.
+            "invalid result object after apply",
+            "Jamf created the object, but the provider reported an incomplete result — a provider bug, not a tenant problem.",
+            "The object is saved in the tenant record. Run Check for Changes; if nothing shows for it, everything is in order."
+        ),
+        (
             // Captured live: [DUPLICATE_FIELD] name: duplicate name
             "DUPLICATE_FIELD",
             "An object with this name already exists in Jamf.",
