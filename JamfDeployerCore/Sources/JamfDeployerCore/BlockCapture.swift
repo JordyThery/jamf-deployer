@@ -343,74 +343,66 @@ public nonisolated enum BlockCapture {
                 )
             }
 
-            if request.rebind == .fidelity {
-                // Associations survive: IDs become name-keyed lookups wired
-                // to the blocks that create the referenced objects.
-                for (key, names) in resolveAssociations(
-                    in: &text, table: table, localAddresses: localAddresses,
-                    namePrefix: request.namePrefix,
-                    builtinGroupNames: &builtinGroupNames, warnings: &warnings
-                ) {
-                    needs[key, default: []].formUnion(names)
+            if request.rebind == .foundation {
+                // Scope group IDs collapse to the block's scope setting and
+                // categories to its category variable (wired to a foundation
+                // category by the generator, "-1" = none otherwise). Both the
+                // numeric form jamformer writes for unresolved references and
+                // the resource-reference form it writes for same-run objects
+                // are covered; everything else keeps its wiring below.
+                enum Rebind { case jamfPro, platform, category }
+                let scopeRewrites: [(pattern: String, replacement: String, kind: Rebind)] = [
+                    (#"computer_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#,
+                     "computer_group_ids = [var.scope_jamf_pro_group_id]", .jamfPro),
+                    (#"computer_group_ids\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
+                     "computer_group_ids = [var.scope_jamf_pro_group_id]", .jamfPro),
+                    (#"smart_group_id\s*=\s*"\d+""#,
+                     "smart_group_id = var.scope_jamf_pro_group_id", .jamfPro),
+                    (#"smart_group_id\s*=\s*jamfplatform_device_group\.[A-Za-z0-9_-]+\.jamf_pro_id"#,
+                     "smart_group_id = var.scope_jamf_pro_group_id", .jamfPro),
+                    (#"category_id\s*=\s*"\d+"( # TODO: unresolved reference)?"#,
+                     "category_id = var.category_id", .category),
+                    (#"category_id\s*=\s*jamfplatform_pro_category\.[A-Za-z0-9_-]+\.id"#,
+                     "category_id = var.category_id", .category),
+                    (#"target_device_groups\s*=\s*\[[^\]]*"[0-9a-f-]{36}"[^\]]*\]"#,
+                     "target_device_groups = [var.scope_platform_group_uuid]", .platform),
+                    (#"target_device_groups\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
+                     "target_device_groups = [var.scope_platform_group_uuid]", .platform),
+                ]
+                for rewrite in scopeRewrites where text.range(of: rewrite.pattern, options: .regularExpression) != nil {
+                    text = text.replacingOccurrences(
+                        of: rewrite.pattern, with: rewrite.replacement, options: .regularExpression)
+                    switch rewrite.kind {
+                    case .jamfPro: usesJamfProScope = true
+                    case .platform: usesPlatformScope = true
+                    case .category: usesCategory = true
+                    }
                 }
-                let unresolved = text.components(separatedBy: "# TODO: unresolved reference").count - 1
-                if unresolved > 0 {
-                    warnings.append("\(name) keeps \(unresolved) numeric ID\(unresolved == 1 ? "" : "s") that could not be resolved to names — they point at objects in the origin tenant and need review before deploying elsewhere.")
+                let deviceGroupsPattern = #"(^|\n)(\s*)device_groups\s*=\s*\[[^\]]*("[0-9a-f-]{36}"|jamfplatform_device_group\.)[^\]]*\]"#
+                if text.range(of: deviceGroupsPattern, options: .regularExpression) != nil {
+                    text = text.replacingOccurrences(
+                        of: deviceGroupsPattern,
+                        with: "$1$2device_groups = [var.scope_platform_group_uuid]",
+                        options: .regularExpression
+                    )
+                    usesPlatformScope = true
                 }
-                fileTexts.append((name, text))
-                continue
             }
 
-            // Hard-coded scope group IDs become the block's scope setting.
-            // jamformer writes multi-line lists with trailing commas and
-            // "# TODO: unresolved reference" comments; match any non-empty
-            // numeric list, leave empty lists (exclusions) alone.
-            let groupListPattern = #"computer_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#
-            if text.range(of: groupListPattern, options: .regularExpression) != nil {
-                text = text.replacingOccurrences(
-                    of: groupListPattern,
-                    with: "computer_group_ids = [var.scope_jamf_pro_group_id]",
-                    options: .regularExpression
-                )
-                usesJamfProScope = true
+            // Both modes: remaining associations survive as name-keyed
+            // lookups wired to the blocks that create the referenced objects
+            // (scripts, packages, extension attributes, groups outside the
+            // collapsed scope).
+            for (key, names) in resolveAssociations(
+                in: &text, table: table, localAddresses: localAddresses,
+                namePrefix: request.namePrefix,
+                builtinGroupNames: &builtinGroupNames, warnings: &warnings
+            ) {
+                needs[key, default: []].formUnion(names)
             }
-            if text.range(of: #"smart_group_id\s*=\s*"\d+""#, options: .regularExpression) != nil {
-                text = text.replacingOccurrences(
-                    of: #"smart_group_id\s*=\s*"\d+""#,
-                    with: "smart_group_id = var.scope_jamf_pro_group_id",
-                    options: .regularExpression
-                )
-                usesJamfProScope = true
-            }
-            // Category IDs are tenant-specific numeric IDs too: swap them
-            // for the block's category variable (wired to a foundation
-            // category by the generator, "-1" = none otherwise).
-            if text.range(of: #"category_id\s*=\s*"\d+""#, options: .regularExpression) != nil {
-                text = text.replacingOccurrences(
-                    of: #"category_id\s*=\s*"\d+""#,
-                    with: "category_id = var.category_id",
-                    options: .regularExpression
-                )
-                usesCategory = true
-            }
-
-            let platformListPattern = #"target_device_groups\s*=\s*\[[^\]]*"[0-9a-f-]{36}"[^\]]*\]"#
-            if text.range(of: platformListPattern, options: .regularExpression) != nil {
-                text = text.replacingOccurrences(
-                    of: platformListPattern,
-                    with: "target_device_groups = [var.scope_platform_group_uuid]",
-                    options: .regularExpression
-                )
-                usesPlatformScope = true
-            }
-            let deviceGroupsPattern = #"(^|\n)(\s*)device_groups\s*=\s*\[[^\]]*"[0-9a-f-]{36}"[^\]]*\]"#
-            if text.range(of: deviceGroupsPattern, options: .regularExpression) != nil {
-                text = text.replacingOccurrences(
-                    of: deviceGroupsPattern,
-                    with: "$1$2device_groups = [var.scope_platform_group_uuid]",
-                    options: .regularExpression
-                )
-                usesPlatformScope = true
+            let unresolved = text.components(separatedBy: "# TODO: unresolved reference").count - 1
+            if unresolved > 0 {
+                warnings.append("\(name) keeps \(unresolved) numeric ID\(unresolved == 1 ? "" : "s") that could not be resolved to names — they point at objects in the origin tenant and need review before deploying elsewhere.")
             }
 
             fileTexts.append((name, text))

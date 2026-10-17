@@ -474,6 +474,51 @@ struct BlockCaptureTests {
         #expect(local.contains("criteria = jamfplatform_pro_computer_extension_attribute.rosetta_installed.name"))
     }
 
+    @Test func foundationRebindKeepsCrossBlockWiring() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "rebind-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let full = FileManager.default.temporaryDirectory
+            .appending(path: "rebind-src-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: exportFixtureURL(), to: full)
+        defer { try? FileManager.default.removeItem(at: full) }
+
+        // Split capture with foundation rebind: scope and category collapse
+        // to the block settings, but the script and package the policy uses
+        // live in other blocks and must stay wired.
+        let staging = FileManager.default.temporaryDirectory
+            .appending(path: "rebind-staging-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: full, to: staging)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let objects = try ExportedObjectInventory.scan(directory: staging)
+        let policyOnly = Set(objects.filter { $0.resourceType == "jamfplatform_pro_policy" }.map(\.address))
+        try ExportedObjectInventory.prune(directory: staging, keeping: policyOnly)
+
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "rebind-policy",
+            name: "Policy",
+            summary: "Policy slice, rebound to Foundation.",
+            namePrefix: "JD - ",
+            sourceDirectory: staging,
+            catalogRootDirectory: destination,
+            rebind: .foundation,
+            resolutionDirectory: full
+        ))
+        let policy = try String(contentsOf: result.blockFolderURL.appending(path: "pro_policy.tf"), encoding: .utf8)
+        #expect(policy.contains("category_id = var.category_id"))
+        #expect(policy.contains("computer_group_ids = [var.scope_jamf_pro_group_id]"))
+        #expect(policy.contains(#"var.dep_script_ids["JD - Install Rosetta 2"]"#))
+        #expect(policy.contains(#"var.dep_package_ids["JD - Test Package"]"#))
+
+        let manifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: result.blockFolderURL.appending(path: "block.json"))) as? [String: Any]
+        let needs = manifest?["needs"] as? [String: [String]]
+        #expect(needs?["script"] == ["JD - Install Rosetta 2"])
+        #expect(needs?["package"] == ["JD - Test Package"])
+        #expect(needs?["category"] == nil)
+        #expect((manifest?["requires"] as? [String]) == ["foundation"])
+    }
+
     @Test func prestigeWiresToDestinationEnrollmentInstance() throws {
         let destination = FileManager.default.temporaryDirectory
             .appending(path: "prestage-test-\(UUID().uuidString)")

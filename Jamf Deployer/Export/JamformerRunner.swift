@@ -96,6 +96,34 @@ actor JamformerRunner {
 
         var result = try await run(arguments: arguments, environment: environment, onLine: onLine)
         result.outputURL = outputURL
+
+        // The exporter always runs a search phase, but settings-style types
+        // have nothing to search; a selection with only those fails with
+        // "No resources to query". Retry with a small searchable helper type
+        // and drop its files from the result.
+        if result.exitCode != 0,
+           provider != "jamfprotect",
+           !includeResources.contains("category"),
+           let events = try? String(contentsOf: outputURL.appending(path: "query_events.json"), encoding: .utf8),
+           events.contains("No resources to query") {
+            onLine?("The selected types have no searchable objects — retrying with a helper type.")
+            let retryURL = FileManager.default.temporaryDirectory
+                .appending(path: "jamf-deployer-export-\(UUID().uuidString)")
+            var retryArguments = arguments
+            if let index = retryArguments.firstIndex(of: "-include-resources") {
+                retryArguments[index + 1] = (includeResources + ["category"]).joined(separator: " ")
+            }
+            if let index = retryArguments.firstIndex(of: "-output") {
+                retryArguments[index + 1] = retryURL.path
+            }
+            result = try await run(arguments: retryArguments, environment: environment, onLine: onLine)
+            result.outputURL = retryURL
+            if result.exitCode == 0 {
+                for file in ["pro_category.tf", "pro_category_import.tf"] {
+                    try? FileManager.default.removeItem(at: retryURL.appending(path: file))
+                }
+            }
+        }
         return result
     }
 
