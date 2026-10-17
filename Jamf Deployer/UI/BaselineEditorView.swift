@@ -502,7 +502,7 @@ struct SavePresetSheet: View {
                 TextField("Summary", text: $summary, prompt: Text("What this baseline is for"), axis: .vertical)
                     .lineLimit(2...4)
                 if folderSources.isEmpty {
-                    Text("Presets are saved in a folder catalog source. Add one under Building Blocks → Manage Sources, or capture a block first.")
+                    Text("Presets are saved in a folder catalog source. Add one in Building Blocks → Manage Sources → Add Folder…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {

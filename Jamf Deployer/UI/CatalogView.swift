@@ -493,6 +493,8 @@ struct ManageSourcesSheet: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(\.dismiss) private var dismiss
     @State private var sourcePendingRemoval: CatalogSourceStore.CustomSource?
+    @State private var isAddingGitSource = false
+    @State private var addError: String?
 
     var body: some View {
         SheetFrame(title: "Catalog Sources", systemImage: "folder.badge.gearshape") {
@@ -500,7 +502,7 @@ struct ManageSourcesSheet: View {
                 ContentUnavailableView(
                     "No Custom Sources",
                     systemImage: "folder",
-                    description: Text("Captured blocks create a folder source; Add Git Catalog follows a published one.")
+                    description: Text("Add a folder for your own blocks and presets, or follow a catalog published as a Git repository.")
                 )
                 .frame(maxHeight: 220)
             } else {
@@ -535,14 +537,26 @@ struct ManageSourcesSheet: View {
                 }
             }
         } footer: {
-            Text("Removing a source detaches it from the app — local folders keep their files.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Button("Add Folder…", systemImage: "folder.badge.plus") { addFolder() }
+                .help("Use a folder on this Mac for your own blocks and presets — new or existing")
+            Button("Add Git Catalog…", systemImage: "arrow.triangle.branch") { isAddingGitSource = true }
+                .help("Follow a building-block catalog published as a Git repository, pinned by release tag")
             Spacer()
             Button("Close") { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
-        .frame(width: 560, height: 360)
+        .frame(width: 600, height: 380)
+        .sheet(isPresented: $isAddingGitSource) {
+            AddGitCatalogSheet { onChanged() }
+        }
+        .alert(
+            "The folder could not be added",
+            isPresented: Binding(get: { addError != nil }, set: { if !$0 { addError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(addError ?? "")
+        }
         .confirmationDialog(
             removalTitle,
             isPresented: Binding(
@@ -558,6 +572,28 @@ struct ManageSourcesSheet: View {
             Text(sourcePendingRemoval?.kind == .gitRepository
                 ? "The downloaded checkouts are deleted; the repository itself is untouched."
                 : "The folder and its blocks stay on disk — the app just stops reading them.")
+        }
+    }
+
+    /// Registers a folder as a catalog source; a new folder gets its
+    /// catalog.json, an existing catalog folder is used as it is.
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use Folder"
+        panel.message = "Choose (or create) a folder for your blocks and presets."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard !catalogSources.customSources.contains(where: { $0.path == url.path }) else {
+            addError = "\(url.lastPathComponent) is already a catalog source."
+            return
+        }
+        do {
+            try catalogSources.addSource(name: url.lastPathComponent, folderURL: url)
+            onChanged()
+        } catch {
+            addError = error.localizedDescription
         }
     }
 

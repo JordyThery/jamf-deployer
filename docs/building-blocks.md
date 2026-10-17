@@ -75,7 +75,7 @@ Three ways:
 2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
 3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
 
-Custom blocks are managed from their detail view: edit the name, summary and version in place, reveal the folder in Finder for deeper changes, or delete the block (the app warns when tenants still select it). Sources themselves are managed under **Manage Sources…** in the library's toolbar.
+Custom blocks are managed from their detail view: edit the name, summary and version in place, reveal the folder in Finder for deeper changes, or delete the block (the app warns when tenants still select it). Sources themselves are managed under **Manage Sources…** in the library's toolbar: **Add Folder…** uses a new or existing folder for your own blocks and presets, **Add Git Catalog…** follows a published catalog, and **Remove…** detaches a source without deleting anything.
 
 ## Catalog sources
 
