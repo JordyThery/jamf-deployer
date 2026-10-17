@@ -86,6 +86,7 @@ final class TenantStore {
             do {
                 var tenant = try JSONFile.load(Tenant.self, from: file)
                 migrateDeployedVersionsIfNeeded(&tenant, workspace: folder)
+                migratePreparedHandOverIfNeeded(&tenant, workspace: folder)
                 loaded.append(tenant)
             } catch {
                 logger.error("Could not read \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -97,6 +98,18 @@ final class TenantStore {
     /// Tenants deployed before the maintain features existed have no record
     /// of which block versions they run; seed it from the newest history
     /// entry once.
+    /// Earlier versions prepared a hand-over by replacing the adopted
+    /// configuration with removed blocks; mark such tenants as pending so
+    /// their hand-over deploy archives them.
+    private func migratePreparedHandOverIfNeeded(_ tenant: inout Tenant, workspace: URL) {
+        let adopted = workspace.appending(path: "adopted")
+        guard tenant.mode == .managed, !tenant.handOverPending, tenant.blockSelections.isEmpty,
+              FileManager.default.fileExists(atPath: adopted.appending(path: "handover_removed.tf").path),
+              !ExportedObjectInventory.containsResources(directory: adopted)
+        else { return }
+        tenant.handOverPending = true
+    }
+
     private func migrateDeployedVersionsIfNeeded(_ tenant: inout Tenant, workspace: URL) {
         guard tenant.deployedBlockVersions.isEmpty, tenant.lastDeploy != nil else { return }
         // A tenant managed only through Adopt legitimately has no blocks.

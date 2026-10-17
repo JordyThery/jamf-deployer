@@ -228,6 +228,12 @@ final class TenantDeployService {
         if tenant.handOverPending {
             // Hand-over releases adopted objects like blocks: the engine
             // forgets them and Jamf keeps them.
+            // A hand-over prepared by an earlier version already replaced the
+            // adopted files with these removed blocks.
+            let legacy = adopted.appending(path: "handover_removed.tf")
+            if fileManager.fileExists(atPath: legacy.path) {
+                try? fileManager.copyItem(at: legacy, to: generated.appending(path: "adopted-legacy-handover_removed.tf"))
+            }
             let addresses = ((try? ExportedObjectInventory.scan(directory: adopted)) ?? []).map(\.address)
             if !addresses.isEmpty {
                 let blocks = addresses.sorted().map { address in
@@ -253,7 +259,7 @@ final class TenantDeployService {
                         try Data((kept.joined(separator: "\n\n") + "\n").utf8)
                             .write(to: generated.appending(path: "adopted-\(file.lastPathComponent)"))
                     }
-                } else if file.pathExtension == "tf", file.lastPathComponent != "versions.tf" {
+                } else if file.pathExtension == "tf", !file.lastPathComponent.hasSuffix("versions.tf") {
                     try? fileManager.copyItem(
                         at: file,
                         to: generated.appending(path: "adopted-\(file.lastPathComponent)")
@@ -665,12 +671,13 @@ final class TenantDeployService {
             updated.driftReport = nil
             updated.acknowledgedDrift = []
             updated.lastDriftCheck = .now
-            if tenant.handOverPending {
+            if tenant.handOverPending && updated.blockSelections.isEmpty {
                 // Hand-over completed: everything was released. The record is
                 // archived and the tenant is read-only in this app.
                 archiveAdoptedConfig(for: tenant)
                 updated.handOverPending = false
                 updated.selectionsBeforeHandOver = nil
+                updated.removalsBeforeHandOver = nil
                 updated.mode = .handedOver
             }
         }
@@ -930,6 +937,10 @@ final class TenantDeployService {
         var updated = tenant
         updated.blockSelections = selections
         updated.pendingRemovals = []
+        // Restoring an earlier baseline cancels a prepared hand-over.
+        updated.handOverPending = false
+        updated.selectionsBeforeHandOver = nil
+        updated.removalsBeforeHandOver = nil
         tenantStore.update(updated)
     }
 
@@ -942,6 +953,7 @@ final class TenantDeployService {
     func prepareHandOver(tenant: Tenant) {
         var updated = tenant
         updated.selectionsBeforeHandOver = tenant.blockSelections
+        updated.removalsBeforeHandOver = tenant.pendingRemovals
         updated.pendingRemovals = updated.deployedBlockVersions.keys.sorted().map {
             BlockRemoval(blockID: $0, keepInJamf: true)
         }
@@ -953,8 +965,9 @@ final class TenantDeployService {
     func cancelHandOver(tenant: Tenant) {
         var updated = tenant
         updated.blockSelections = tenant.selectionsBeforeHandOver ?? tenant.blockSelections
-        updated.pendingRemovals = []
+        updated.pendingRemovals = tenant.removalsBeforeHandOver ?? []
         updated.selectionsBeforeHandOver = nil
+        updated.removalsBeforeHandOver = nil
         updated.handOverPending = false
         tenantStore.update(updated)
     }

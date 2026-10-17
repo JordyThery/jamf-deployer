@@ -1070,11 +1070,15 @@ struct PlanRedactionTests {
           name = "Cat"
         }
         """.utf8).write(to: directory.appending(path: "main.tf"))
-        let kept = ExportedObjectInventory.withRequiredReferences(directory: directory, kept: ["jamfplatform_pro_policy.p"])
-        #expect(kept == ["jamfplatform_pro_policy.p", "jamfplatform_device_group.g"])
-        let excluded = ExportedObjectInventory.withRequiredReferences(
-            directory: directory, kept: ["jamfplatform_pro_policy.p"], excluding: ["jamfplatform_device_group.g"])
-        #expect(excluded == ["jamfplatform_pro_policy.p"])
+        let policy = "jamfplatform_pro_policy.p", group = "jamfplatform_device_group.g"
+        let pulled = ExportedObjectInventory.adoptableSelection(directory: directory, kept: [policy])
+        #expect(pulled.kept == [policy, group] && pulled.leftOut.isEmpty)
+        // Already adopted: referenced as it is.
+        let managed = ExportedObjectInventory.adoptableSelection(directory: directory, kept: [policy], alreadyManaged: [group])
+        #expect(managed.kept == [policy])
+        // Cannot be adopted: neither can the policy that needs it.
+        let blocked = ExportedObjectInventory.adoptableSelection(directory: directory, kept: [policy], unavailable: [group])
+        #expect(blocked.kept.isEmpty && blocked.leftOut == [policy])
     }
 
     @Test func masksDriftAndDropsUnknownSections() throws {

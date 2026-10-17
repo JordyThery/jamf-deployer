@@ -139,12 +139,15 @@ public nonisolated enum ExportedObjectInventory {
         }
     }
 
-    /// `kept` plus every object a kept object references by an attribute
-    /// other than `.id` (a Jamf Pro ID or a name). Only `.id` can be pinned
-    /// from import blocks, so those references must stay managed too.
-    /// Objects in `excluding` (already managed) are neither added nor
-    /// followed.
-    public static func withRequiredReferences(directory: URL, kept: Set<String>, excluding: Set<String> = []) -> Set<String> {
+    /// The objects to adopt for a selection: `kept` plus every object a kept
+    /// object references by an attribute other than `.id` (a Jamf Pro ID or
+    /// a name) — only `.id` can be pinned from import blocks, so those must
+    /// be managed too. Objects already managed are referenced as they are.
+    /// A selected object that needs one of `unavailable` (unmanageable, or
+    /// managed by a block) cannot be adopted and is returned as left out.
+    public static func adoptableSelection(
+        directory: URL, kept: Set<String>, alreadyManaged: Set<String> = [], unavailable: Set<String> = []
+    ) -> (kept: Set<String>, leftOut: Set<String>) {
         var blocks: [String: String] = [:]
         let files = (try? configurationFiles(in: directory, includeImports: false)) ?? []
         for file in files {
@@ -154,18 +157,33 @@ public nonisolated enum ExportedObjectInventory {
                 blocks["\(header.1).\(header.2)"] = block
             }
         }
-        var result = kept
-        var pending = Array(kept)
-        while let address = pending.popLast() {
-            guard let block = blocks[address] else { continue }
-            for match in block.matches(of: /\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.([a-z_]+)\b/) where match.2 != "id" {
-                let referenced = String(match.1)
-                if blocks[referenced] != nil, !excluding.contains(referenced), result.insert(referenced).inserted {
-                    pending.append(referenced)
+        func requiredReferences(of address: String) -> Set<String> {
+            guard let block = blocks[address] else { return [] }
+            return Set(block.matches(of: /\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.([a-z_]+)\b/)
+                .filter { $0.2 != "id" }
+                .map { String($0.1) }
+                .filter { blocks[$0] != nil && !alreadyManaged.contains($0) })
+        }
+        // Everything a selected object needs, following required references
+        // through objects that will be adopted with it.
+        func needs(of selected: String) -> (objects: Set<String>, blocked: Bool) {
+            var seen: Set<String> = [selected]
+            var stack = [selected]
+            while let address = stack.popLast() {
+                for referenced in requiredReferences(of: address) {
+                    if unavailable.contains(referenced) { return ([], true) }
+                    if seen.insert(referenced).inserted { stack.append(referenced) }
                 }
             }
+            return (seen, false)
         }
-        return result
+        var result: Set<String> = []
+        var leftOut: Set<String> = []
+        for selected in kept {
+            let (objects, blocked) = needs(of: selected)
+            if blocked { leftOut.insert(selected) } else { result.formUnion(objects) }
+        }
+        return (result, leftOut)
     }
 
     /// Rewrites the export so only `keptAddresses` remain; matching import

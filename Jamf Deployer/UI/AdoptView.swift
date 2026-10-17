@@ -37,6 +37,10 @@ struct AdoptView: View {
     @State private var unmanageableNotes: [String] = []
     /// Addresses already in the tenant's adopted configuration.
     @State private var alreadyAdopted: Set<String> = []
+    /// Addresses in the export the app cannot manage.
+    @State private var unmanageableAddresses: Set<String> = []
+    /// Selected objects that could not be staged, and why.
+    @State private var stagingNote: String?
     @State private var logTail: [String] = []
 
     private let runner = JamformerRunner()
@@ -130,6 +134,11 @@ struct AdoptView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if !alreadyAdopted.isEmpty {
+                    Text("Objects already adopted are not listed; they stay managed as they are.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 List(objects) { object in
                     HStack(spacing: 8) {
                         Toggle(isOn: Binding(
@@ -161,7 +170,14 @@ struct AdoptView: View {
             ContentUnavailableView {
                 Label("Ready to Adopt", systemImage: "square.and.arrow.down.on.square")
             } description: {
-                Text("\(count) object\(count == 1 ? "" : "s") staged. Preview Changes shows each one as “Adopt”; anything the first deploy would also change is listed with its exact differences.")
+                VStack(spacing: 6) {
+                    Text("\(count) object\(count == 1 ? "" : "s") staged. Preview Changes shows each one as “Adopt”; anything the first deploy would also change is listed with its exact differences.")
+                    if let stagingNote {
+                        Text(stagingNote)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
             }
 
         case .failed(let message):
@@ -232,6 +248,7 @@ struct AdoptView: View {
                 }
                 exportURL = result.outputURL
                 let unmanageable = ExportedObjectInventory.unmanageable(directory: result.outputURL)
+                unmanageableAddresses = Set(unmanageable.keys)
                 alreadyAdopted = Set(((try? ExportedObjectInventory.scan(
                     directory: deployService.adoptedURL(for: tenant))) ?? []).map(\.address))
                 let found = try ExportedObjectInventory.scan(directory: result.outputURL)
@@ -240,10 +257,7 @@ struct AdoptView: View {
                 unmanageableNotes = Dictionary(grouping: unmanageable.values, by: { $0 })
                     .sorted { $0.key < $1.key }
                     .map { "\($0.value.count) object\($0.value.count == 1 ? "" : "s"): \($0.key)" }
-                let adoptedCount = found.count - objects.count
-                if adoptedCount > 0 {
-                    unmanageableNotes.insert("\(adoptedCount) object\(adoptedCount == 1 ? " is" : "s are") already adopted", at: 0)
-                }
+
                 selectedObjects = Set(objects.filter { !$0.hasProvenanceTag }.map(\.address))
                 step = objects.isEmpty
                     ? .failed(alreadyAdopted.isEmpty
@@ -263,8 +277,20 @@ struct AdoptView: View {
     private func stage() {
         guard let exportURL else { return }
         do {
-            let kept = ExportedObjectInventory.withRequiredReferences(
-                directory: exportURL, kept: selectedObjects, excluding: alreadyAdopted)
+            // Objects a block already manages, and those the app cannot
+            // manage, cannot be pulled in for an object that needs them.
+            let blockManaged = Set(objects.filter(\.hasProvenanceTag).map(\.address)).subtracting(selectedObjects)
+            let selection = ExportedObjectInventory.adoptableSelection(
+                directory: exportURL, kept: selectedObjects, alreadyManaged: alreadyAdopted,
+                unavailable: unmanageableAddresses.union(blockManaged))
+            let kept = selection.kept
+            let leftOutNames = objects.filter { selection.leftOut.contains($0.address) }.map(\.displayName).sorted()
+            stagingNote = leftOutNames.isEmpty ? nil
+                : "Not staged — they depend on objects the app cannot adopt: \(leftOutNames.joined(separator: ", "))."
+            guard !kept.isEmpty else {
+                step = .failed(stagingNote ?? "Nothing was selected to adopt.")
+                return
+            }
             try ExportedObjectInventory.pinReferences(directory: exportURL, keeping: kept.union(alreadyAdopted))
             try ExportedObjectInventory.prune(directory: exportURL, keeping: kept)
             try ExportedObjectInventory.normalizeImportBlocks(directory: exportURL)
@@ -272,7 +298,7 @@ struct AdoptView: View {
 
             // Strip provider wiring; the workspace supplies its own.
             let fileManager = FileManager.default
-            for name in ["provider.tf", "variables.tf", "terraform.tfvars", ".terraform.lock.hcl", ".gitignore", ".terraform"] {
+            for name in ["provider.tf", "versions.tf", "variables.tf", "terraform.tfvars", ".terraform.lock.hcl", ".gitignore", ".terraform"] {
                 try? fileManager.removeItem(at: exportURL.appending(path: name))
             }
 

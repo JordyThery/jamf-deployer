@@ -194,6 +194,7 @@ struct TenantDetailView: View {
                                 BaselineEditorView(tenant: tenant, catalog: catalog) {
                                     self.catalog = try? deployService.loadCatalog()
                                 }
+                                .disabled(tenant.handOverPending)
                             } else {
                                 Text("Loading building blocks…")
                                     .font(.callout)

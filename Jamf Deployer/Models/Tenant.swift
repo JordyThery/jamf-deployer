@@ -70,6 +70,7 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
     var handOverPending: Bool
     /// The baseline before Hand Over was prepared, restored on cancel.
     var selectionsBeforeHandOver: [BlockSelection]?
+    var removalsBeforeHandOver: [BlockRemoval]?
     /// Last drift check result ("Changes made in Jamf").
     var driftReport: DriftReport?
     /// Drift the user chose to keep, keyed "address|field|value".
@@ -139,6 +140,7 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         pendingRemovals = try container.decodeIfPresent([BlockRemoval].self, forKey: .pendingRemovals) ?? []
         handOverPending = try container.decodeIfPresent(Bool.self, forKey: .handOverPending) ?? false
         selectionsBeforeHandOver = try container.decodeIfPresent([BlockSelection].self, forKey: .selectionsBeforeHandOver)
+        removalsBeforeHandOver = try container.decodeIfPresent([BlockRemoval].self, forKey: .removalsBeforeHandOver)
         driftReport = try container.decodeIfPresent(DriftReport.self, forKey: .driftReport)
         acknowledgedDrift = try container.decodeIfPresent([String].self, forKey: .acknowledgedDrift) ?? []
         preflight = try container.decodeIfPresent(PreflightSnapshot.self, forKey: .preflight)
