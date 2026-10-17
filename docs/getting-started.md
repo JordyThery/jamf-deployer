@@ -22,7 +22,9 @@ Connecting a Jamf Protect tenant (for the Protect building blocks) works the sam
 
 ## 3. Compose a baseline
 
-Open the tenant's **Baseline** editor:
+First visit to **Building Blocks**: accept the offer to add the **Jamf Deployer Catalog** — the app ships only the Foundation block; enrollment, FileVault, software updates and the rest come from the [published catalog](https://github.com/JordyThery/jamf-deployer-catalog), versioned by release tag.
+
+Then open the tenant's **Baseline** editor:
 
 - Start from a preset — **Standard** (enrollment, FileVault, software updates, CIS Level 1 monitoring, Rosetta 2) or **Minimal** — or pick blocks individually.
 - Each block has plain-language settings and a scope: all computers, a pilot group, or a group of your own. Production tenants default to the pilot scope.

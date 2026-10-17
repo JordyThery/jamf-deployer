@@ -11,14 +11,19 @@ public nonisolated enum ErrorTranslation {
 
     static let table: [(pattern: String, message: String, hint: String?)] = [
         (
-            "401",
+            "status 401",
             "Jamf did not accept the stored credentials.",
             "The API integration may have been rotated or disabled. Update the client secret in the tenant's settings."
         ),
         (
-            "403",
+            "status 403",
             "The API integration is missing a permission for this object.",
             "Open the integration in Jamf Account and grant the permissions listed on the building block."
+        ),
+        (
+            "undeclared input variable",
+            "The block's configuration references a variable it does not declare.",
+            "Usually a block captured by an older app version — re-capture it, or declare the variable in the block folder (Reveal in Finder from its detail view)."
         ),
         (
             "Failed to resolve provider packages",
@@ -41,7 +46,7 @@ public nonisolated enum ErrorTranslation {
             "Try again. Large tenants can need a second attempt."
         ),
         (
-            "429",
+            "status 429",
             "Jamf is rate-limiting requests right now.",
             "Wait a minute and try again; the engine already paces itself."
         ),

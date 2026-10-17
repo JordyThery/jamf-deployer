@@ -320,7 +320,7 @@ struct BlockCaptureTests {
             catalogRootDirectory: destination
         ))
 
-        #expect(result.objectCount == 2)
+        #expect(result.objectCount == 3)
         #expect(result.usesJamfProScope)
         #expect(!result.usesPlatformScope)
 
@@ -331,6 +331,14 @@ struct BlockCaptureTests {
         #expect(!policy.contains(#"["69"]"#))
         #expect(!policy.contains("provider = jamfplatform"))
         #expect(policy.contains("category_id = var.category_id"))
+
+        // Variables the export declares and the configuration references are
+        // carried over (with file paths rewritten); provider credentials and
+        // other unreferenced variables are not.
+        let variables = try String(contentsOf: folder.appending(path: "variables.tf"), encoding: .utf8)
+        #expect(variables.contains(#"variable "pro_icon_icon_18_icon_file_source""#))
+        #expect(variables.contains(#"default     = "files/icons/icon_18.png""#))
+        #expect(!variables.contains("jamfplatform_base_url"))
         #expect(!policy.contains(#"category_id     = "73""#))
 
         let script = try String(contentsOf: folder.appending(path: "pro_script.tf"), encoding: .utf8)
@@ -388,7 +396,7 @@ struct AsBuiltTests {
         #expect(markdown.contains("`jamfplatform_pro_policy`"))
         #expect(markdown.contains("Frequency: Once per computer"))
         #expect(markdown.contains("Scoped:"))
-        #expect(markdown.contains("**2 objects**"))
+        #expect(markdown.contains("**3 objects**"))
     }
 }
 
@@ -435,7 +443,7 @@ struct InventoryTests {
         let dir = try copyFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         let objects = try ExportedObjectInventory.scan(directory: dir)
-        #expect(objects.count == 2)
+        #expect(objects.count == 3)
         let script = try #require(objects.first { $0.resourceType == "jamfplatform_pro_script" })
         #expect(script.displayName == "JD - Install Rosetta 2")
         #expect(script.hasProvenanceTag) // fixture script carries the tag

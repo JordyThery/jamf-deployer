@@ -81,6 +81,7 @@ public nonisolated enum BlockCapture {
         var usesPlatformScope = false
         var usesCategory = false
         var terraformTypes: Set<String> = []
+        var capturedText = ""
 
         // 1. Configuration files, transformed. provider/variables/tfvars and
         //    import blocks stay behind — a block is reusable configuration.
@@ -167,6 +168,7 @@ public nonisolated enum BlockCapture {
             }
 
             try Data(text.utf8).write(to: blockURL.appending(path: name))
+            capturedText += text + "\n"
         }
 
         guard objectCount > 0 else {
@@ -223,6 +225,37 @@ public nonisolated enum BlockCapture {
             }
             """
         }
+        // Variables the exported configuration references beyond the ones
+        // generated above (icon file sources and similar) keep their original
+        // declarations — dropping them breaks the module with "reference to
+        // undeclared input variable".
+        let generated: Set<String> = [
+            "name_prefix", "managed_by_tag", "scope_jamf_pro_group_id",
+            "scope_platform_group_uuid", "category_id",
+        ]
+        var referenced: Set<String> = []
+        for match in capturedText.matches(of: /var\.([a-zA-Z0-9_]+)/) {
+            referenced.insert(String(match.1))
+        }
+        let exportedDeclarations = parseVariableDeclarations(
+            at: request.sourceDirectory.appending(path: "variables.tf")
+        )
+        for name in referenced.subtracting(generated).sorted() {
+            if let declaration = exportedDeclarations[name] {
+                variables += "\n\n" + declaration.replacingOccurrences(of: "support_files/", with: "files/")
+            } else {
+                variables += """
+
+
+                variable "\(name)" {
+                  type    = string
+                  default = ""
+                }
+                """
+                warnings.append("The variable \(name) is referenced but was not declared in the export; it was added with an empty default — review it.")
+            }
+        }
+
         try Data(variables.utf8).write(to: blockURL.appending(path: "variables.tf"))
 
         try Data("""
@@ -308,6 +341,31 @@ public nonisolated enum BlockCapture {
     }
 
     /// Reads the capability set out of jamformer's PERMISSIONS.md.
+    /// Returns each `variable "name" { … }` declaration in a variables file,
+    /// keyed by name. Missing file → empty.
+    static func parseVariableDeclarations(at url: URL) -> [String: String] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+        var declarations: [String: String] = [:]
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var index = 0
+        while index < lines.count {
+            let line = String(lines[index])
+            if let match = line.firstMatch(of: /^\s*variable\s+"([a-zA-Z0-9_]+)"\s*\{/) {
+                var depth = line.filter { $0 == "{" }.count - line.filter { $0 == "}" }.count
+                var block = [line]
+                while depth > 0, index + 1 < lines.count {
+                    index += 1
+                    let next = String(lines[index])
+                    block.append(next)
+                    depth += next.filter { $0 == "{" }.count - next.filter { $0 == "}" }.count
+                }
+                declarations[String(match.1)] = block.joined(separator: "\n")
+            }
+            index += 1
+        }
+        return declarations
+    }
+
     static func parsePermissions(at url: URL) -> [String] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         var inCodeBlock = false

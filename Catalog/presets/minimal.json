@@ -1,7 +1,0 @@
-{
-  "id": "minimal",
-  "name": "Minimal",
-  "summary": "Just the foundation and software updates — a starting point to grow from.",
-  "blocks": ["foundation", "software-updates"],
-  "defaults": {}
-}

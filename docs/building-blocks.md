@@ -2,11 +2,14 @@
 
 A baseline is composed of building blocks. Each block is a self-contained piece of configuration — the objects it creates, the settings you can change, and the device scope it applies to. Blocks declare what they need (products, permissions, other blocks) and the app wires them together.
 
-## The built-in catalog
+## Where blocks come from
+
+The app itself ships exactly one block — **Foundation** (categories, device groups and extension attributes every other block relies on; always part of a baseline). Everything else lives in the **[Jamf Deployer Catalog](https://github.com/JordyThery/jamf-deployer-catalog)**, a public repository versioned by release tag: the Building Blocks library offers to add it on first visit, and tenants pin the tag they use, so a published update never changes a tenant until you opt in.
+
+## The Jamf Deployer Catalog
 
 | Block | Creates | Risk |
 | --- | --- | --- |
-| **Foundation** | Categories, device groups and extension attributes every other block relies on. Always part of a baseline. | Low |
 | **Enrollment** | A computer PreStage for Automated Device Enrollment: supervised, MDM non-removable, consumer setup panes skipped. | Medium |
 | **FileVault** | FileVault with an individual recovery key escrowed to Jamf Pro, enforced by a login policy on the chosen scope. | Medium |
 | **Software Updates** | Declarative software-update settings via a Jamf Blueprint: automatic download and install, with deferral windows you control. | Medium |

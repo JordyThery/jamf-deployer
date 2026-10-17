@@ -12,12 +12,23 @@ struct CatalogView: View {
     @State private var selectedBlock: BlockMetadata?
     @State private var isAddingGitSource = false
     @State private var isManagingSources = false
+    @State private var isAddingOfficialCatalog = false
+    @State private var officialCatalogError: String?
+
+    static let officialCatalogURL = "https://github.com/JordyThery/jamf-deployer-catalog.git"
+
+    private var followsOfficialCatalog: Bool {
+        catalogSources.customSources.contains { $0.gitURL == Self.officialCatalogURL }
+    }
 
     var body: some View {
         Group {
             if let catalog {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        if !followsOfficialCatalog {
+                            officialCatalogBanner
+                        }
                         ForEach(groupedCategories(catalog), id: \.0) { category, blocks in
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(category)
@@ -78,6 +89,56 @@ struct CatalogView: View {
                 catalog = try deployService.loadCatalog()
             } catch {
                 loadError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Offers the published block catalog: the app itself only ships the
+    /// Foundation block.
+    private var officialCatalogBanner: some View {
+        GroupBox {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Get the Jamf Deployer Catalog")
+                        .font(.headline)
+                    Text("Enrollment, FileVault, software updates, CIS Level 1 and more — published as a versioned catalog, so baseline updates are opt-in per tenant.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if let officialCatalogError {
+                        Label(officialCatalogError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                Spacer()
+                Button(isAddingOfficialCatalog ? "Adding…" : "Add Catalog") {
+                    addOfficialCatalog()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isAddingOfficialCatalog)
+            }
+            .padding(6)
+        }
+    }
+
+    private func addOfficialCatalog() {
+        isAddingOfficialCatalog = true
+        officialCatalogError = nil
+        Task {
+            defer { isAddingOfficialCatalog = false }
+            do {
+                guard let latest = try await GitCatalogManager.availableTags(remote: Self.officialCatalogURL).last else {
+                    officialCatalogError = "The catalog repository has no releases yet."
+                    return
+                }
+                _ = try await catalogSources.addGitSource(
+                    name: "Jamf Deployer Catalog",
+                    url: Self.officialCatalogURL,
+                    tag: latest
+                )
+                catalog = try? deployService.loadCatalog()
+            } catch {
+                officialCatalogError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
