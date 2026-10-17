@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import DeployerKit
 import JamfDeployerCore
 
@@ -76,9 +77,18 @@ struct CatalogView: View {
             }
         }
         .sheet(isPresented: $isManagingSources) {
-            ManageSourcesSheet {
-                catalog = try? deployService.loadCatalog()
-            }
+            ManageSourcesSheet(
+                onChanged: { catalog = try? deployService.loadCatalog() },
+                onAddGitCatalog: {
+                    // Opened from the library, not on top of this sheet:
+                    // nested sheets do not reliably receive clicks.
+                    isManagingSources = false
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        isAddingGitSource = true
+                    }
+                }
+            )
         }
         .task {
             do {
@@ -223,6 +233,8 @@ struct BlockDetailSheet: View {
     @State private var editSummary = ""
     @State private var editVersion = ""
     @State private var editCategory = ""
+    @State private var editError: String?
+    private static let log = Logger(subsystem: "be.jordythery.jamf-deployer", category: "catalog")
     @State private var actionError: String?
 
     /// Built-in blocks live inside the app bundle and stay read-only.
@@ -267,6 +279,11 @@ struct BlockDetailSheet: View {
 
     var body: some View {
         SheetFrame(title: block.name, systemImage: "square.grid.2x2") {
+            if isEditingDetails {
+                // Inline rather than a nested sheet: buttons in a sheet
+                // presented from a sheet do not reliably receive clicks.
+                editDetailsForm
+            } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(block.summary)
@@ -314,7 +331,17 @@ struct BlockDetailSheet: View {
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            }
         } footer: {
+            if isEditingDetails {
+                Spacer()
+                Button("Cancel") { editError = nil; isEditingDetails = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { saveDetails() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(editName.isEmpty || editVersion.isEmpty
+                              || editCategory.trimmingCharacters(in: .whitespaces).isEmpty)
+            } else {
             Text("Source: \(catalog?.sourceName(for: block.id) ?? "—") · \(block.id)@\(block.version)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -344,8 +371,8 @@ struct BlockDetailSheet: View {
             }
             Button("Close") { dismiss() }
                 .keyboardShortcut(.cancelAction)
+            }
         }
-        .sheet(isPresented: $isEditingDetails) { editDetailsSheet }
         .confirmationDialog(
             tenantsUsingBlock.isEmpty
                 ? "Delete “\(block.name)”?"
@@ -374,12 +401,11 @@ struct BlockDetailSheet: View {
         }
     }
 
-    private var editDetailsSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Block Details")
-                .font(.headline)
+    private var editDetailsForm: some View {
+        Form {
             TextField("Name", text: $editName)
-            TextField("Summary", text: $editSummary)
+            TextField("Summary", text: $editSummary, axis: .vertical)
+                .lineLimit(1...3)
             HStack {
                 TextField("Category", text: $editCategory)
                 Menu("Existing") {
@@ -392,22 +418,19 @@ struct BlockDetailSheet: View {
             }
             TextField("Version", text: $editVersion)
                 .font(.callout.monospaced())
-                .frame(maxWidth: 140)
-            Text("Deeper changes — settings, scope, the configuration itself — are edited in the block folder (Reveal in Finder).")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack {
-                Spacer()
-                Button("Cancel") { isEditingDetails = false }
-                    .keyboardShortcut(.cancelAction)
-                Button("Save") { saveDetails() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(editName.isEmpty || editVersion.isEmpty
-                              || editCategory.trimmingCharacters(in: .whitespaces).isEmpty)
+            Section {
+                Text("Deeper changes — settings, scope, the configuration itself — are edited in the block folder (Reveal in Finder).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let editError {
+                    Label(editError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .padding(20)
-        .frame(width: 420)
+        .formStyle(.grouped)
     }
 
     private func revealInFinder() {
@@ -416,15 +439,21 @@ struct BlockDetailSheet: View {
     }
 
     private func saveDetails() {
-        guard updateManifest({ object in
-            object["name"] = editName
-            object["summary"] = editSummary
-            object["version"] = editVersion
-            object["category"] = editCategory.trimmingCharacters(in: .whitespaces)
-        }) else {
-            actionError = "The block's details could not be saved. Check that the block folder is writable."
+        do {
+            try writeManifest { object in
+                object["name"] = editName
+                object["summary"] = editSummary
+                object["version"] = editVersion
+                object["category"] = editCategory.trimmingCharacters(in: .whitespaces)
+            }
+        } catch {
+            Self.log.error("Saving details for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            // Shown inside the edit dialog: an alert on this sheet would sit
+            // behind the dialog and never appear.
+            editError = "The details could not be saved: \(error.localizedDescription)"
             return
         }
+        editError = nil
         isEditingDetails = false
         onChanged()
         dismiss()
@@ -489,19 +518,27 @@ struct BlockDetailSheet: View {
         }
     }
 
-    /// Rewrites block.json in place. Returns false when the manifest could
-    /// not be read or written.
-    private func updateManifest(_ mutate: (inout [String: Any]) -> Void) -> Bool {
-        guard let catalog else { return false }
+    /// Rewrites block.json in place; throws with the underlying reason.
+    private func writeManifest(_ mutate: (inout [String: Any]) -> Void) throws {
+        guard let catalog else { throw CocoaError(.fileNoSuchFile) }
         let url = catalog.blockFolderURL(id: block.id).appending(path: "block.json")
-        guard let data = try? Data(contentsOf: url),
-              var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        else { return false }
+        let data = try Data(contentsOf: url)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         mutate(&object)
-        guard let updated = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-              (try? updated.write(to: url)) != nil
-        else { return false }
-        return true
+        let updated = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        try updated.write(to: url, options: .atomic)
+    }
+
+    private func updateManifest(_ mutate: (inout [String: Any]) -> Void) -> Bool {
+        do {
+            try writeManifest(mutate)
+            return true
+        } catch {
+            Self.log.error("Writing block.json for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// Rewrites the captured block's reviewStatus in block.json.
@@ -519,11 +556,11 @@ struct BlockDetailSheet: View {
 /// Lists the custom catalog sources and lets the user detach them.
 struct ManageSourcesSheet: View {
     var onChanged: () -> Void
+    var onAddGitCatalog: () -> Void = {}
     @Environment(CatalogSourceStore.self) private var catalogSources
     @Environment(TenantStore.self) private var tenantStore
     @Environment(\.dismiss) private var dismiss
     @State private var sourcePendingRemoval: CatalogSourceStore.CustomSource?
-    @State private var isAddingGitSource = false
     @State private var addError: String?
 
     var body: some View {
@@ -569,16 +606,13 @@ struct ManageSourcesSheet: View {
         } footer: {
             Button("Add Folder…", systemImage: "folder.badge.plus") { addFolder() }
                 .help("Use a folder on this Mac for your own blocks and presets — new or existing")
-            Button("Add Git Catalog…", systemImage: "arrow.triangle.branch") { isAddingGitSource = true }
+            Button("Add Git Catalog…", systemImage: "arrow.triangle.branch") { onAddGitCatalog() }
                 .help("Follow a building-block catalog published as a Git repository, pinned by release tag")
             Spacer()
             Button("Close") { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
         .frame(width: 600, height: 380)
-        .sheet(isPresented: $isAddingGitSource) {
-            AddGitCatalogSheet { onChanged() }
-        }
         .alert(
             "The folder could not be added",
             isPresented: Binding(get: { addError != nil }, set: { if !$0 { addError = nil } })
