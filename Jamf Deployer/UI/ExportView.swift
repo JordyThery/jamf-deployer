@@ -445,7 +445,8 @@ struct ExportView: View {
                 namePrefix: tenant.namePrefix,
                 sourceDirectory: result.outputURL,
                 catalogRootDirectory: URL(filePath: source.path),
-                secretFindings: result.secretFindings
+                secretFindings: result.secretFindings,
+                originTenantScopeID: tenant.scopeID
             ))
             var selection = BlockSelection(blockID: blockID, scope: "pilot")
             if captured.usesJamfProScope || captured.usesPlatformScope {
@@ -534,9 +535,10 @@ struct ExportView: View {
                 namePrefix: tenant.namePrefix,
                 sourceDirectory: result.outputURL,
                 catalogRootDirectory: URL(filePath: source.path),
-                secretFindings: result.secretFindings
+                secretFindings: result.secretFindings,
+                originTenantScopeID: tenant.scopeID
             ))
-            var outcome = "Captured \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") into “\(source.name)”."
+            var outcome = "Captured \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") into “\(source.name)” — find it in the Building Blocks library."
             if !captured.warnings.isEmpty {
                 outcome += " " + captured.warnings.joined(separator: " ")
             }

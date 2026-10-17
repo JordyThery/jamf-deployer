@@ -41,10 +41,13 @@ Blocks are versioned. When a tenant's catalog source publishes a newer release, 
 
 ## Making your own blocks
 
-Two ways:
+Three ways:
 
-1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block — parameterizing names, categories and scope — and saves it to a catalog source of yours. Captured blocks are marked for review until you approve them.
-2. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
+1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block — parameterizing names, categories and scope — and saves it to a catalog source of yours. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt** there instead (the editor warns about this).
+2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
+3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
+
+Custom blocks are managed from their detail view: edit the name, summary and version in place, reveal the folder in Finder for deeper changes, or delete the block (the app warns when tenants still select it). Sources themselves are managed under **Manage Sources…** in the library's toolbar.
 
 ## Catalog sources
 

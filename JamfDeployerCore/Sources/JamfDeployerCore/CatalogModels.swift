@@ -120,6 +120,9 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     public var reviewStatus: String?
     /// Field-to-setting mappings for "Keep this change".
     public var driftBindings: [DriftBinding]
+    /// Scope ID of the tenant a captured block was exported from; nil for
+    /// authored blocks.
+    public var capturedFromTenant: String?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -143,6 +146,7 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
         acceptsCategory = try container.decodeIfPresent(Bool.self, forKey: .acceptsCategory) ?? false
         reviewStatus = try container.decodeIfPresent(String.self, forKey: .reviewStatus)
         driftBindings = try container.decodeIfPresent([DriftBinding].self, forKey: .driftBindings) ?? []
+        capturedFromTenant = try container.decodeIfPresent(String.self, forKey: .capturedFromTenant)
     }
 
     /// The setting controlling a drifted field, when one is bound.

@@ -56,6 +56,12 @@ public nonisolated enum ErrorTranslation {
             "Check the Protect console URL and API client under the tenant's Day 0 Setup tab."
         ),
         (
+            // Captured live: [DUPLICATE_FIELD] name: duplicate name
+            "DUPLICATE_FIELD",
+            "An object with this name already exists in Jamf.",
+            "Another building block, an adopted object or something created by hand already uses the name. If these objects were captured from this tenant, use Adopt instead of re-deploying the captured block — or set a different name prefix."
+        ),
+        (
             // Captured live: [TENANT_NOT_FOUND] No tenant found for environment '…'
             "TENANT_NOT_FOUND",
             "This environment does not include Jamf Security Cloud.",

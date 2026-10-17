@@ -17,6 +17,9 @@ public nonisolated enum BlockCapture {
         /// The catalog source root the block is saved into.
         public var catalogRootDirectory: URL
         public var secretFindings: [String]
+        /// Scope ID of the tenant the objects were exported from; used to
+        /// warn when the block is enabled in its own origin tenant.
+        public var originTenantScopeID: String?
 
         public init(
             blockID: String,
@@ -25,7 +28,8 @@ public nonisolated enum BlockCapture {
             namePrefix: String,
             sourceDirectory: URL,
             catalogRootDirectory: URL,
-            secretFindings: [String] = []
+            secretFindings: [String] = [],
+            originTenantScopeID: String? = nil
         ) {
             self.blockID = blockID
             self.name = name
@@ -34,6 +38,7 @@ public nonisolated enum BlockCapture {
             self.sourceDirectory = sourceDirectory
             self.catalogRootDirectory = catalogRootDirectory
             self.secretFindings = secretFindings
+            self.originTenantScopeID = originTenantScopeID
         }
     }
 
@@ -247,7 +252,7 @@ public nonisolated enum BlockCapture {
             scope = ["kind": "none"]
         }
 
-        let metadata: [String: Any] = [
+        var metadata: [String: Any] = [
             "id": request.blockID,
             "name": request.name,
             "summary": request.summary,
@@ -265,6 +270,10 @@ public nonisolated enum BlockCapture {
             "settings": [],
             "objectsCreated": terraformTypes.sorted().map { "1+ \($0)" },
         ]
+        if let origin = request.originTenantScopeID {
+            metadata["capturedFromTenant"] = origin
+        }
+
         let json = try JSONSerialization.data(
             withJSONObject: metadata,
             options: [.prettyPrinted, .sortedKeys]

@@ -127,6 +127,15 @@ struct BaselineEditorView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if isSelected, block.capturedFromTenant == tenant.scopeID {
+                Label(
+                    "Captured from this tenant — its objects already exist here and deploying would create duplicates. Use Adopt Existing Configuration to manage the originals instead.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
             if expandedBlockID == block.id, isSelected {
                 BlockSettingsForm(
                     tenant: tenant,
