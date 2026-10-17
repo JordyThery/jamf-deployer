@@ -309,10 +309,16 @@ final class TenantDeployService {
         !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
     }
 
+    /// Whether adopted objects are still managed. After a hand-over the
+    /// folder keeps only `removed` blocks, which manage nothing.
     func hasAdoptedConfig(for tenant: Tenant) -> Bool {
-        let contents = (try? FileManager.default.contentsOfDirectory(
+        let files = (try? FileManager.default.contentsOfDirectory(
             at: adoptedURL(for: tenant), includingPropertiesForKeys: nil)) ?? []
-        return contents.contains { $0.pathExtension == "tf" }
+        return files.contains { file in
+            guard file.pathExtension == "tf",
+                  let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
+            return text.contains(/(?m)^resource\s+"/)
+        }
     }
 
     private func historyURL(for tenant: Tenant) -> URL {
@@ -621,9 +627,9 @@ final class TenantDeployService {
             updated.driftReport = nil
             updated.acknowledgedDrift = []
             updated.lastDriftCheck = .now
-            if updated.blockSelections.isEmpty {
-                // Hand over completed: everything was forgotten; the record
-                // is archived and the tenant is read-only in this app.
+            if updated.blockSelections.isEmpty && !hasAdoptedConfig(for: tenant) {
+                // Hand over completed: no blocks and no adopted objects are
+                // left; the record is archived and the tenant is read-only.
                 updated.mode = .handedOver
             }
         }
