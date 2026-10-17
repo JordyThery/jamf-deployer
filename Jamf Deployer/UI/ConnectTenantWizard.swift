@@ -36,8 +36,10 @@ struct ConnectTenantWizard: View {
     // Step 3
     @State private var clientID = ""
     @State private var clientSecret = ""
-    /// Pasted secrets often carry a trailing space or line break.
+    /// Pasted credentials often carry a stray space or line break.
+    private var trimmedClientID: String { clientID.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedSecret: String { clientSecret.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedScopeID: String { scopeID.trimmingCharacters(in: .whitespacesAndNewlines) }
     @State private var usesLegacyTenantScope = false
     @State private var scopeID = ""
     @State private var fetchedEnvironments: [OrganizationService.Environment] = []
@@ -235,7 +237,7 @@ struct ConnectTenantWizard: View {
             do {
                 fetchedEnvironments = try await OrganizationService.environments(
                     gatewayURL: region.gatewayURL,
-                    clientID: clientID,
+                    clientID: trimmedClientID,
                     clientSecret: trimmedSecret,
                     activityLog: activityLog
                 )
@@ -315,9 +317,9 @@ struct ConnectTenantWizard: View {
         let client = JamfPlatformClient(
             configuration: JamfAPIConfiguration(
                 gatewayURL: region.gatewayURL,
-                clientID: clientID,
+                clientID: trimmedClientID,
                 clientSecret: trimmedSecret,
-                environmentID: usesLegacyTenantScope ? nil : scopeID
+                environmentID: usesLegacyTenantScope ? nil : trimmedScopeID
             ),
             activityLog: activityLog
         )
@@ -404,21 +406,23 @@ struct ConnectTenantWizard: View {
         var tenant = Tenant(
             name: name.trimmingCharacters(in: .whitespaces),
             region: region,
-            clientID: clientID.trimmingCharacters(in: .whitespaces),
-            environmentID: usesLegacyTenantScope ? nil : scopeID.trimmingCharacters(in: .whitespaces),
-            tenantID: usesLegacyTenantScope ? scopeID.trimmingCharacters(in: .whitespaces) : nil,
+            clientID: trimmedClientID,
+            environmentID: usesLegacyTenantScope ? nil : trimmedScopeID,
+            tenantID: usesLegacyTenantScope ? trimmedScopeID : nil,
             isProduction: !isTestTenant
         )
         tenant.preflight = report?.snapshot
+        let protectURL = protectURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if !protectURL.isEmpty {
             tenant.protectURL = protectURL
-            tenant.protectClientID = protectClientID
+            tenant.protectClientID = protectClientID.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         let secrets = TenantSecrets(tenantID: tenant.id)
         secrets.platformClientSecret.save(trimmedSecret)
-        if !protectClientSecret.isEmpty {
-            secrets.protectClientSecret.save(protectClientSecret)
+        let protectSecret = protectClientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !protectSecret.isEmpty {
+            secrets.protectClientSecret.save(protectSecret)
         }
 
         tenantStore.add(tenant)
