@@ -37,9 +37,20 @@ if [ "${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}" = "" ] || [ "${EXPANDED_CODE_SIGN_I
   exit 0
 fi
 
+# Prefer the team's Developer ID Application identity. Archives build with
+# the development identity and Xcode re-signs with Developer ID only at
+# export — which cannot reach inside the mirror's zip archives, so their
+# contents must carry the distribution signature already.
+IDENTITY="$(security find-identity -v -p codesigning | \
+  grep "Developer ID Application" | grep "${DEVELOPMENT_TEAM:-}" | \
+  head -1 | awk '{print $2}')"
+if [ -z "${IDENTITY}" ]; then
+  IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY}"
+fi
+
 sign() {
   codesign --force --options runtime --timestamp \
-    --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "$1"
+    --sign "${IDENTITY}" "$1"
 }
 
 sign "${RESOURCES}/Vendor/opentofu/bin/tofu"
