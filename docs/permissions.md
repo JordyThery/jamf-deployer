@@ -90,6 +90,6 @@ Protect deployment sync, under the Platform client above.
 - The app talks only to your Jamf tenants, your Git remotes (Team Mode and
   Git catalog sources), GitHub's public API (release and component-update
   checks) and HashiCorp's release server when you agree to the Terraform
-  download for exports.
+  download for exports and adoption.
 - No admin rights, no configuration profiles, no system extensions — it is
   an ordinary signed and notarized app.

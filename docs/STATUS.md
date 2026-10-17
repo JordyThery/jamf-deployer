@@ -1,6 +1,6 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-10-17 (1.0.1). Consolidates the open items from every phase report and the 1.0.1 association-fidelity work.
+As of 2026-10-17 (1.0.2). Consolidates the open items from every phase report and the 1.0.x work.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - **protect-baseline block** — no non-production Jamf Protect tenant exists to apply it to. The provider wiring itself *is* live-verified read-only (auth + all four data sources against production).
@@ -45,7 +45,7 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 - **Two blocks owning one tenant-wide setting** are refused when the workspace is generated, with a message naming both blocks.
 - **Name collisions are not detected yet**: selecting the demo catalog's Categories block next to a captured categories block while "apply the tenant prefix to all names" is on can produce identically named categories (both create "<prefix>Enrollment"), and duplicated App Catalog titles (for example "TF - Google Chrome" next to "Google Chrome") collide once rebinding collapses their deployments onto one target group. Jamf rejects the duplicates; deselect the duplicate objects at capture, or skip the prefix option. An editor-level collision warning is planned.
 - **Removing a settings block only stops managing it**: Jamf has no "empty" state for tenant-wide settings, so the provider drops them from state and Jamf keeps the current values. The removal dialog says so.
-- **Deploy history masks sensitive values**: `tofu show -json` prints them in clear text; the copy kept in history (and the team repository) is redacted with the engine's sensitivity markers.
+- **Deploy history and drift mask sensitive values**: `tofu show -json` prints them in clear text; the copy kept in history (and the team repository) is redacted with the engine's sensitivity markers, and Check for Changes shows sensitive fields as ••••••.
 
 ## Upstream dependencies being watched
 - jamfplatform provider pinned at 1.5.0 (released 2026-10-16 — very fresh); blueprints' top-level settings deprecated with a stated removal window (catalog already uses `component_blocks`). Settings → Built-in tools now flags newer upstream releases of OpenTofu, both providers and jamformer (24-hour check).

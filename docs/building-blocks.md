@@ -4,7 +4,7 @@ A baseline is composed of building blocks. Each block is a self-contained piece 
 
 ## Where blocks come from
 
-The app ships the blocks that carry **no configuration opinions of their own** — connector-style blocks you configure entirely yourself, scoped to groups and filed under categories already in your tenant:
+The app ships the blocks that carry **no configuration opinions of their own** — connector-style blocks you configure entirely yourself, scoped to groups and filed under categories already in your tenant or created by another selected block:
 
 | Built-in block | Creates | Impact |
 | --- | --- | --- |
@@ -43,7 +43,7 @@ The built-in App Catalog block picks its apps with a searchable picker, with per
 
 Every block exposes a small set of plain-language settings — toggles, choices, numbers — defined by the block, not by the underlying provider schema. Secret-typed settings (API keys and similar) are stored in your Keychain, never in the tenant record.
 
-Every block is optional, and blocks connect by reference. A block that applies to devices lets you pick its scope per tenant: a group another selected block creates (for example **Device Groups** from the demo catalog), or a group that already exists in the tenant. Platform-scoped blocks (Software Updates, CIS Level 1) currently offer only groups created by another selected block. Blocks that file objects under a category pick it the same way, or use no category. A block starts on its declared default when the block creating it is selected too — FileVault on Pilot and Security, Rosetta 2 on Apple Silicon Macs — and otherwise asks you to choose, so nothing is created just to satisfy a dependency. Blocks that only support smart groups (App Catalog apps) only offer those. Captured blocks that keep their original wiring carry their own scope instead.
+Every block is optional, and blocks connect by reference. A block that applies to devices lets you pick its scope per tenant: a group another selected block creates (for example **Device Groups** from the demo catalog), or a group that already exists in the tenant. Platform-scoped blocks (Software Updates, CIS Level 1) currently offer only groups created by another selected block. Blocks that file objects under a category pick it the same way, or use no category. A block starts on its declared default when the block creating it is selected too — FileVault on Pilot and Security, Rosetta 2 on Apple Silicon Macs — and otherwise asks you to choose, so nothing is created just to satisfy a dependency. Blocks that only support smart groups (App Catalog apps) list only smart groups from the tenant; of the groups another block creates, pick a smart one. Captured blocks that keep their original wiring carry their own scope instead.
 
 In a block's `block.json`, defaults read `"scope": { …, "default": "device-groups/Pilot" }` and `"defaultCategory": "categories/Security"` — the providing block's ID and the object's name from its `provides` list. Presets use the same form in their `scopes` and `categories` maps.
 

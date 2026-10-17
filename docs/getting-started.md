@@ -36,7 +36,7 @@ See [Building Blocks](building-blocks.md) for what each block creates.
 
 Click **Preview Changes** (⌘P). The app generates the configuration, compares it with the tenant, and lists every object it would add, change or remove — grouped by block, with field-level detail. Nothing has happened to the tenant yet.
 
-If the preview looks right, click **Deploy**. Only the previewed plan is applied; if anything changed in between, the deploy stops. The first deploy produces a **recovery sheet** with the passphrase that encrypts this tenant's records — store it somewhere safe. Every deploy is recorded under **History**, with rollback.
+If the preview looks right, click **Deploy**. Only the previewed plan is applied; if anything changed in between, the deploy stops. If Jamf reports a server error for an object it actually created, the app finds it by name after the deploy, and the next preview adopts it instead of creating a duplicate. The first deploy produces a **recovery sheet** with the passphrase that encrypts this tenant's records — store it somewhere safe. Every deploy is recorded under **History**, with rollback.
 
 ## Day 0 checklist
 
@@ -46,6 +46,6 @@ The **Day 0 Setup** tab tracks the things an API cannot fully do — APNs certif
 
 ## From here
 
-- **Check for Changes** (⌘R) shows what was changed directly in Jamf since the last deploy — keep each change or restore the baseline. **Check All Tenants** on the dashboard does the same for the whole fleet. To stop managing a block's objects without touching Jamf, use **Stop Managing** in the baseline. **Hand Over Tenant…** does that for everything — blocks and adopted objects — when another team or tool takes over: it is prepared first, previewed, and can be cancelled until you deploy it.
-- **Export** captures an existing tenant's objects as reusable blocks, documentation or a snapshot; **Adopt Existing Configuration…** (under **Managed in this tenant** on the tenant's Overview) brings hand-configured objects under management without recreating them. Adopted objects are managed as they are — Check for Changes covers them and they need no building block; building blocks are for adding what isn't there yet. **Adopt More…** adds objects later and leaves those already adopted untouched.
+- **Check for Changes** (⌘R) shows what was changed directly in Jamf since the last deploy — keep each change or restore the baseline. **Check All Tenants** on the dashboard does the same for the whole fleet. To stop managing a block's objects without touching Jamf, use **Stop Managing** in the baseline. **Hand Over Tenant…** does that for everything — blocks and adopted objects — when another team or tool takes over: confirm with the tenant name to prepare it, review it with **Preview Hand-Over…** and deploy, or use **Cancel Hand-Over** to restore the baseline. Once deployed, the record is archived.
+- **Export** captures an existing tenant's objects as reusable blocks, documentation or a snapshot; **Adopt Existing Configuration…** (under **Managed in this tenant** on the tenant's Overview) brings hand-configured objects under management without recreating them. Adopted objects are managed as they are — Check for Changes covers them and they need no building block; building blocks are for adding what isn't there yet. **Adopt More…** adds objects later and leaves those already adopted untouched. **Add a Custom Object…** creates an object no block covers yet, from a form built from the provider schema.
 - Working with colleagues? Set up a shared repository: [Team Mode](team-mode.md).
