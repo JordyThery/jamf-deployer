@@ -1211,3 +1211,14 @@ struct AdoptPreparationTests {
         #expect(text.contains(#"icon_file_source = "support_files/icons/icon_1.png""#))
     }
 }
+
+@Suite("Drift noise")
+struct DriftNoiseTests {
+    @Test func categoryNameMirrorsAreNotActionable() {
+        #expect(DriftReportBuilder.isComputed("general.category_name"))
+        #expect(DriftReportBuilder.isComputed("self_service.categories[0].name"))
+        #expect(DriftReportBuilder.isComputed("self_service.categories[12].name"))
+        #expect(!DriftReportBuilder.isComputed("self_service.categories[0].display_in"))
+        #expect(!DriftReportBuilder.isComputed("general.name"))
+    }
+}

@@ -46,6 +46,7 @@ public nonisolated enum DriftReportBuilder {
         "site_name",
         "general.category_name",
         "general.site_name",
+        "self_service.categories[].name",
         "general.trigger",
         "profile_uuid",
         "profile_url",
@@ -61,6 +62,12 @@ public nonisolated enum DriftReportBuilder {
         "deployment_state",
         "updated",
     ]
+
+    /// Matches a field path against the computed list with list positions
+    /// generalized: `self_service.categories[2].name` → `self_service.categories[].name`.
+    static func isComputed(_ path: String) -> Bool {
+        computedAttributePaths.contains(path.replacing(/\[\d+\]/, with: "[]"))
+    }
 
     public static func build(plan: PlanFile, blockNames: [String: String]) -> DriftReport {
         var objects: [DriftedObject] = []
@@ -80,7 +87,7 @@ public nonisolated enum DriftReportBuilder {
                 resourceType: drifted.type,
                 displayName: PreviewBuilder.displayName(for: drifted),
                 fields: fields,
-                isComputedOnly: fields.allSatisfy { computedAttributePaths.contains($0.path) }
+                isComputedOnly: fields.allSatisfy { isComputed($0.path) }
             ))
         }
         return DriftReport(date: .now, objects: objects)
