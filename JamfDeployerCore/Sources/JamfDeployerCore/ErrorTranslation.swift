@@ -21,8 +21,9 @@ public nonisolated enum ErrorTranslation {
             "Open the integration in Jamf Account and grant the permissions listed on the building block."
         ),
         (
-            // jamformer: Pipeline failed: terraform query: … exit status 1
-            "terraform query failed",
+            // jamformer wraps the failure as "terraform query failed: …" or
+            // "Pipeline failed: terraform query: … exit status 1".
+            "terraform query",
             "The exporter could not read one of the selected object types from this tenant.",
             "Settings-style types can be unavailable on some tenants. Deselect the type that fails and export again."
         ),

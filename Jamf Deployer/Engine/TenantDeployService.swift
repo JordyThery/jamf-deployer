@@ -694,13 +694,14 @@ final class TenantDeployService {
         updated.lastDriftCheck = .now
         await refreshTokenExpiry(&updated)
         tenantStore.update(updated)
+        fleetCheckFailures[tenant.id] = nil
     }
 
-    /// Checks every deployed tenant, a few at a time.
     /// Tenants whose last fleet check failed, with a short reason — shown on
     /// the dashboard so a failing check never masquerades as "in sync".
     private(set) var fleetCheckFailures: [UUID: String] = [:]
 
+    /// Checks every deployed tenant, a few at a time.
     func checkAllTenants() async {
         let candidates = tenantStore.tenants.filter {
             !$0.deployedBlockVersions.isEmpty && !$0.isHandedOver

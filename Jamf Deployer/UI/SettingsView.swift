@@ -130,7 +130,7 @@ struct SupportBundleButton: View {
             panel.nameFieldStringValue = "JamfDeployer-Support-\(Date.now.formatted(.iso8601.year().month().day())).zip"
             guard panel.runModal() == .OK, let destination = panel.url else { return }
             let ditto = Process()
-        ditto.standardInput = FileHandle.nullDevice
+            ditto.standardInput = FileHandle.nullDevice
             ditto.executableURL = URL(filePath: "/usr/bin/ditto")
             ditto.arguments = ["-c", "-k", staging.path, destination.path]
             try ditto.run()

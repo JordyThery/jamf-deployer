@@ -139,7 +139,9 @@ struct GeneratorTests {
             providerVersion: "1.5.0"
         )
         let output = try WorkspaceGenerator.generate(input)
-        #expect(output.mainTF.contains("dep_script_ids = module.cap_scripts.script_ids"))
+        #expect(output.mainTF.contains("dep_script_ids"))
+        #expect(output.mainTF.contains("module.cap_scripts.script_ids"))
+        #expect(output.mainTF.contains("module.cap_scripts.script_names"))
     }
 
     @Test func failsOnUnmetDependencies() throws {
@@ -450,10 +452,10 @@ struct BlockCaptureTests {
             resolutionDirectory: full
         ))
         let groups = try String(contentsOf: split.blockFolderURL.appending(path: "device_groups.tf"), encoding: .utf8)
-        #expect(groups.contains(#"criteria = local.dep_extension_attribute_names["Rosetta installed"]"#))
+        #expect(groups.contains(#"criteria = var.dep_extension_attribute_names["Rosetta installed"]"#))
         let variables = try String(contentsOf: split.blockFolderURL.appending(path: "variables.tf"), encoding: .utf8)
         #expect(variables.contains(#"variable "dep_extension_attribute_ids""#))
-        #expect(variables.contains("dep_extension_attribute_names = { for name, id in var.dep_extension_attribute_ids : name => name }"))
+        #expect(variables.contains(#"variable "dep_extension_attribute_names""#))
         let manifest = try JSONSerialization.jsonObject(
             with: Data(contentsOf: split.blockFolderURL.appending(path: "block.json"))) as? [String: Any]
         #expect((manifest?["needs"] as? [String: [String]])?["extension_attribute"] == ["Rosetta installed"])

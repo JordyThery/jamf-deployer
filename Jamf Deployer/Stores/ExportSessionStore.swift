@@ -10,6 +10,9 @@ final class ExportSessionStore {
         var isRunning = false
         var logTail: [String] = []
         var result: JamformerRunner.ExportResult?
+        /// Object types the finished run exported, so returning to the tab
+        /// restores the result under the same derived block ID.
+        var exportedTypes: [String] = []
         var errorMessage: String?
 
         /// Appends a live log line, keeping the tail bounded.
@@ -21,7 +24,9 @@ final class ExportSessionStore {
         }
     }
 
-    private var sessions: [UUID: Session] = [:]
+    // Not observed: inserting a session must not invalidate views mid-update
+    // (the accessor runs during body). Session objects observe themselves.
+    @ObservationIgnored private var sessions: [UUID: Session] = [:]
 
     func session(for tenantID: UUID) -> Session {
         if let existing = sessions[tenantID] { return existing }

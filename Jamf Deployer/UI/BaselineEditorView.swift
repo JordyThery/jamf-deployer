@@ -123,8 +123,12 @@ struct BaselineEditorView: View {
                 .flatMap { $0.provides[depKey] ?? [] })
             let missing = names.filter { !covered.contains($0) }
             guard !missing.isEmpty else { return nil }
-            let kind = depKey.replacingOccurrences(of: "_", with: " ")
-            return "Needs \(kind)s no selected block creates: \(missing.joined(separator: ", ")). Select the block that creates them."
+            let plurals = [
+                "category": "categories", "script": "scripts", "package": "packages",
+                "device_group": "device groups", "extension_attribute": "extension attributes",
+            ]
+            let kind = plurals[depKey] ?? depKey.replacingOccurrences(of: "_", with: " ") + "s"
+            return "Needs \(kind) no selected block creates: \(missing.joined(separator: ", ")). Select the block that creates them."
         }
     }
 

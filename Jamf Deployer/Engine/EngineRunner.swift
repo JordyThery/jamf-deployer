@@ -196,7 +196,10 @@ actor EngineRunner {
     }
 
     nonisolated static func awaitTermination(_ stream: AsyncStream<Void>) async {
-        for await _ in stream { break }
+        // Stream iteration ends early when the awaiting task is cancelled
+        // (closing a sheet cancels its .task). Shield the wait so callers
+        // never read terminationStatus from a still-running child.
+        await Task { for await _ in stream { break } }.value
     }
 
     /// Lines from a pipe via readabilityHandler — deterministic, unlike

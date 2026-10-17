@@ -207,9 +207,10 @@ struct ExportView: View {
         .task {
             resourceTypes = (try? await runner.listResourceTypes(provider: exportProvider)) ?? []
             if case .installed = terraform.status { hasConsentedToTerraform = true }
-            // Returning to a finished export: restore the derived object list.
+            // Returning to a finished export: restore the derived object list
+            // with the types the run actually exported.
             if let result = session.result, exportedObjects.isEmpty {
-                adoptResult(result, types: Array(selectedTypes))
+                adoptResult(result, types: session.exportedTypes)
             }
         }
         .fileExporter(
@@ -308,6 +309,7 @@ struct ExportView: View {
                     return
                 }
                 exportResult = result
+                session.exportedTypes = types
                 adoptResult(result, types: types)
                 activityLog.append(ActivityLogEntry(
                     category: "Export", operation: "export", detail: tenant.name,
@@ -545,7 +547,7 @@ struct ExportView: View {
         Toggle("Rebind scope and category to Foundation (portable block)", isOn: $rebindToFoundation)
             .toggleStyle(.checkbox)
             .font(.callout)
-            .help("Collapses group and category references to Foundation-wired settings. Off, associations are kept and wired between captured blocks.")
+            .help("Collapses group and category references to Foundation-wired settings. When off, associations are kept and wired between captured blocks.")
     }
 
     /// Where captured blocks are saved — shared by both capture modes.

@@ -41,9 +41,15 @@ fi
 # the development identity and Xcode re-signs with Developer ID only at
 # export — which cannot reach inside the mirror's zip archives, so their
 # contents must carry the distribution signature already.
-IDENTITY="$(security find-identity -v -p codesigning | \
-  grep "Developer ID Application" | grep "${DEVELOPMENT_TEAM:-}" | \
-  head -1 | awk '{print $2}')"
+# Without a team ID an empty grep pattern would match any identity on the
+# Mac; fall back to the build's signing identity instead.
+if [ -n "${DEVELOPMENT_TEAM:-}" ]; then
+  IDENTITY="$(security find-identity -v -p codesigning | \
+    grep "Developer ID Application" | grep "${DEVELOPMENT_TEAM}" | \
+    head -1 | awk '{print $2}')"
+else
+  IDENTITY=""
+fi
 if [ -z "${IDENTITY}" ]; then
   IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY}"
 fi

@@ -17,16 +17,12 @@ struct CatalogView: View {
 
     static let demoCatalogURL = "https://github.com/JordyThery/jamf-deployer-catalog.git"
 
-    private var followsDemoCatalog: Bool {
-        catalogSources.customSources.contains { $0.gitURL == Self.demoCatalogURL }
-    }
-
     var body: some View {
         Group {
             if let catalog {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        if !followsDemoCatalog, catalogSources.customSources.isEmpty {
+                        if catalogSources.customSources.isEmpty {
                             demoCatalogBanner
                         }
                         ForEach(groupedCategories(catalog), id: \.0) { category, blocks in
@@ -226,11 +222,23 @@ struct BlockDetailSheet: View {
     @State private var editName = ""
     @State private var editSummary = ""
     @State private var editVersion = ""
+    @State private var actionError: String?
 
     /// Built-in blocks live inside the app bundle and stay read-only.
     private var isBuiltIn: Bool {
         guard let catalog else { return true }
         return catalog.blockFolderURL(id: block.id).path.hasPrefix(EngineLocator.catalogURL.path)
+    }
+
+    /// Blocks from git catalog sources are tag-pinned checkouts; editing or
+    /// deleting them would desync the cache from the published tag. Only
+    /// blocks in local-folder sources can change in place.
+    private var isEditable: Bool {
+        guard let catalog, !isBuiltIn else { return false }
+        let path = catalog.blockFolderURL(id: block.id).path
+        return catalogSources.customSources.contains {
+            $0.kind == .localFolder && path.hasPrefix($0.path)
+        }
     }
 
     /// Tenants whose baseline currently selects this block.
@@ -297,7 +305,7 @@ struct BlockDetailSheet: View {
             if isBuiltIn {
                 Button("Duplicate to My Blocks…") { duplicateToMyBlocks() }
                     .help("Copies this block into one of your catalog sources, where it can be edited freely")
-            } else {
+            } else if isEditable {
                 Button("Reveal in Finder") { revealInFinder() }
                 Button("Edit Details…") {
                     editName = block.name
@@ -306,6 +314,9 @@ struct BlockDetailSheet: View {
                     isEditingDetails = true
                 }
                 Button("Delete Block…", role: .destructive) { isConfirmingDelete = true }
+            } else {
+                Button("Duplicate to My Blocks…") { duplicateToMyBlocks() }
+                    .help("Blocks from a git catalog follow their published tag; duplicate one into a folder source to edit it")
             }
             if block.needsReview {
                 Button("Mark as Reviewed") {
@@ -327,6 +338,14 @@ struct BlockDetailSheet: View {
             Button("Delete Block", role: .destructive) { deleteBlock() }
         } message: {
             Text("The block folder is deleted from its catalog source. Objects already deployed in Jamf are not touched.")
+        }
+        .alert(
+            "Something went wrong",
+            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(actionError ?? "")
         }
         .frame(width: 560, height: 520)
         .task {
@@ -368,10 +387,13 @@ struct BlockDetailSheet: View {
     }
 
     private func saveDetails() {
-        updateManifest { object in
+        guard updateManifest({ object in
             object["name"] = editName
             object["summary"] = editSummary
             object["version"] = editVersion
+        }) else {
+            actionError = "The block's details could not be saved. Check that the block folder is writable."
+            return
         }
         isEditingDetails = false
         onChanged()
@@ -380,9 +402,13 @@ struct BlockDetailSheet: View {
 
     private func deleteBlock() {
         guard let catalog else { return }
-        try? FileManager.default.removeItem(at: catalog.blockFolderURL(id: block.id))
-        onChanged()
-        dismiss()
+        do {
+            try FileManager.default.removeItem(at: catalog.blockFolderURL(id: block.id))
+            onChanged()
+            dismiss()
+        } catch {
+            actionError = "The block could not be deleted: \(error.localizedDescription)"
+        }
     }
 
     /// Copies a built-in block into the first local custom source under a
@@ -409,7 +435,10 @@ struct BlockDetailSheet: View {
     private func duplicate(into source: CatalogSourceStore.CustomSource, catalog: LoadedCatalog) {
         let newID = "\(block.id)-custom"
         let destination = URL(filePath: source.path).appending(path: "blocks/\(newID)")
-        guard !FileManager.default.fileExists(atPath: destination.path) else { return }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            actionError = "\(source.name) already contains a block named \(newID)."
+            return
+        }
         do {
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -426,35 +455,33 @@ struct BlockDetailSheet: View {
             onChanged()
             dismiss()
         } catch {
-            // Leave the sheet open; nothing was changed.
+            actionError = "The block could not be duplicated: \(error.localizedDescription)"
         }
     }
 
-    private func updateManifest(_ mutate: (inout [String: Any]) -> Void) {
-        guard let catalog else { return }
+    /// Rewrites block.json in place. Returns false when the manifest could
+    /// not be read or written.
+    private func updateManifest(_ mutate: (inout [String: Any]) -> Void) -> Bool {
+        guard let catalog else { return false }
         let url = catalog.blockFolderURL(id: block.id).appending(path: "block.json")
         guard let data = try? Data(contentsOf: url),
               var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        else { return }
+        else { return false }
         mutate(&object)
-        if let updated = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
-            try? updated.write(to: url)
-        }
+        guard let updated = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+              (try? updated.write(to: url)) != nil
+        else { return false }
+        return true
     }
 
     /// Rewrites the captured block's reviewStatus in block.json.
     private func markReviewed() {
-        guard let catalog else { return }
-        let url = catalog.blockFolderURL(id: block.id).appending(path: "block.json")
-        guard let data = try? Data(contentsOf: url),
-              var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        else { return }
-        object["reviewStatus"] = "reviewed"
-        if let updated = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
-            try? updated.write(to: url)
-            onChanged()
-            dismiss()
+        guard updateManifest({ $0["reviewStatus"] = "reviewed" }) else {
+            actionError = "The block could not be marked as reviewed. Check that the block folder is writable."
+            return
         }
+        onChanged()
+        dismiss()
     }
 }
 

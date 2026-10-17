@@ -167,6 +167,10 @@ public nonisolated enum WorkspaceGenerator {
                     .map { "module.\(sanitized($0.id)).\(depKey)_ids" }
                     .joined(separator: ", ")
                 arguments.append(("dep_\(depKey)_ids", providers.count == 1 ? maps : "merge(\(maps))"))
+                let nameMaps = providers
+                    .map { "module.\(sanitized($0.id)).\(depKey)_names" }
+                    .joined(separator: ", ")
+                arguments.append(("dep_\(depKey)_names", providers.count == 1 ? nameMaps : "merge(\(nameMaps))"))
                 if depKey == "device_group" {
                     let proMaps = providers
                         .map { "module.\(sanitized($0.id)).device_group_jamf_pro_ids" }
