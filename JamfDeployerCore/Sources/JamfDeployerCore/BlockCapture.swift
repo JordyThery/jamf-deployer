@@ -314,10 +314,16 @@ public nonisolated enum BlockCapture {
         let supportURL = request.sourceDirectory.appending(path: "support_files")
         if fileManager.fileExists(atPath: supportURL.path) {
             let haystack = capturedText + variables
+            // Resolve symlinks on both sides: the enumerator returns
+            // /private/var paths for exports under /var/folders, which would
+            // never prefix-match and silently copy nothing.
+            let base = supportURL.resolvingSymlinksInPath().path
             let enumerator = fileManager.enumerator(at: supportURL, includingPropertiesForKeys: [.isRegularFileKey])
             while let item = enumerator?.nextObject() as? URL {
                 guard (try? item.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-                let relative = item.path.replacingOccurrences(of: supportURL.path + "/", with: "")
+                let resolved = item.resolvingSymlinksInPath().path
+                guard resolved.hasPrefix(base + "/") else { continue }
+                let relative = String(resolved.dropFirst(base.count + 1))
                 guard haystack.contains("files/\(relative)") else { continue }
                 let destination = blockURL.appending(path: "files/\(relative)")
                 try fileManager.createDirectory(

@@ -306,12 +306,19 @@ struct BlockCaptureTests {
             .appending(path: "capture-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: destination) }
 
+        // Capture from the temp directory like the app does: /var/folders is
+        // a symlink to /private/var, which the support-file copy must survive.
+        let source = FileManager.default.temporaryDirectory
+            .appending(path: "capture-src-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: exportFixtureURL(), to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+
         let result = try BlockCapture.capture(BlockCapture.Request(
             blockID: "captured-rosetta",
             name: "Captured Rosetta",
             summary: "Rosetta policy captured from a tenant.",
             namePrefix: "JD - ",
-            sourceDirectory: exportFixtureURL(),
+            sourceDirectory: source,
             catalogRootDirectory: destination
         ))
 
@@ -345,6 +352,10 @@ struct BlockCaptureTests {
         #expect(!prunedPolicy.contains("self_service_icon"))
         #expect(prunedPolicy.contains("jamfplatform_pro_script.jd_install_rosetta_2.id"))
         #expect(result.warnings.contains { $0.contains("Left out 1 object") })
+
+        // Referenced support files follow the block into files/.
+        let copiedScript = folder.appending(path: "files/scripts/JD - Install Rosetta 2.zsh")
+        #expect(FileManager.default.fileExists(atPath: copiedScript.path))
         #expect(variables.contains(#"default     = "files/icons/icon_18.png""#))
         #expect(!variables.contains("jamfplatform_base_url"))
         #expect(!policy.contains(#"category_id     = "73""#))
