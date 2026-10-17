@@ -340,7 +340,9 @@ struct ConnectTenantWizard: View {
         if step == .preflight, let report {
             Text(report.snapshot.allGreen
                 ? "All checks passed."
-                : "Review the items above — you can still add the tenant.")
+                : credentialsFailed
+                    ? "Fix the credentials, then run the checks again."
+                    : "Review the items above — you can still add the tenant.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
