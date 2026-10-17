@@ -4,9 +4,16 @@ A baseline is composed of building blocks. Each block is a self-contained piece 
 
 ## Where blocks come from
 
-The app itself ships exactly one block — **Foundation** (categories, device groups and extension attributes every other block relies on; always part of a baseline). Every other block comes from catalogs you follow: capture your own from a tenant, or publish a catalog repository for your team. Tenants pin the release tag they use, so a published update never changes a tenant until you opt in.
+The app ships the blocks that carry **no configuration opinions of their own** — Foundation plus the connector-style blocks you configure entirely yourself:
 
-The **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** is a worked example of a full baseline — the library offers it on first visit, and its repository doubles as the template for publishing your own.
+| Built-in block | Creates | Risk |
+| --- | --- | --- |
+| **Foundation** | Categories, device groups and extension attributes every other block relies on. Always part of a baseline. | Low |
+| **App Catalog** | Apps from Jamf's App Catalog, installed and kept up to date automatically — no packaging. Pick apps with the built-in picker. | Medium |
+| **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
+| **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
+
+Opinionated configuration — what your FileVault, enrollment or update policy should look like — comes from catalogs you follow: capture blocks from a tenant, or publish a catalog repository for your team. Tenants pin the release tag they use, so a published update never changes a tenant until you opt in. The **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** is a worked example and the template for publishing your own.
 
 ## The demo catalog
 
@@ -17,11 +24,8 @@ The **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** is a
 | **Software Updates** | Declarative software-update settings via a Jamf Blueprint: automatic download and install, with deferral windows you control. | Medium |
 | **Compliance — CIS Level 1** | A compliance benchmark built from the CIS Level 1 baseline. Starts in monitor mode: it reports, it does not change devices. | High |
 | **Rosetta 2** | A script plus check-in policy that installs Rosetta 2 on Apple silicon Macs so Intel-only apps keep working. | Low |
-| **App Catalog** | Apps from Jamf's App Catalog, installed and kept up to date automatically — no packaging. Pick apps with the built-in picker. | Medium |
-| **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
-| **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
 
-The App Catalog block picks its apps with a built-in picker — searchable, with per-app delivery and update behavior:
+The built-in App Catalog block picks its apps with a searchable picker — searchable, with per-app delivery and update behavior:
 
 ![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
 

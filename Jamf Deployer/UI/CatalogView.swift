@@ -93,15 +93,16 @@ struct CatalogView: View {
         }
     }
 
-    /// The app ships only the Foundation block; blocks come from catalogs
-    /// you follow or publish. The demo catalog is a worked example.
+    /// The app ships only the configuration-free blocks; opinionated ones
+    /// come from catalogs you follow or publish. The demo catalog is a
+    /// worked example.
     private var demoCatalogBanner: some View {
         GroupBox {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Blocks come from catalogs")
                         .font(.headline)
-                    Text("The app ships only the Foundation block. Add the demo catalog to try a full baseline (enrollment, FileVault, software updates, CIS Level 1, …) — for real fleets, capture your own blocks or publish your own catalog repository.")
+                    Text("The app ships only blocks without configuration opinions (Foundation, App Catalog, Jamf Protect, Security Cloud). Add the demo catalog to try a full baseline — for real fleets, capture your own blocks or publish your own catalog repository.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     if let demoCatalogError {
