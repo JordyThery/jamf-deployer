@@ -66,6 +66,7 @@ nonisolated enum GitCatalogManager {
     @discardableResult
     private static func git(_ arguments: [String], in directory: URL?) throws -> String {
         let process = Process()
+        process.standardInput = FileHandle.nullDevice
         process.executableURL = URL(filePath: "/usr/bin/git")
         process.arguments = arguments
         if let directory {

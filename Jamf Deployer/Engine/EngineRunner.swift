@@ -76,6 +76,9 @@ actor EngineRunner {
 
         let stdout = Pipe()
         let stderr = Pipe()
+        // No stdin: a TTY here (dev runs from Xcode) switches child tools into
+        // interactive mode and they block waiting for input.
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = stdout
         process.standardError = stderr
 
@@ -142,6 +145,9 @@ actor EngineRunner {
         environment["HOME"] = NSHomeDirectory()
         process.environment = environment
         let stdout = Pipe()
+        // No stdin: a TTY here (dev runs from Xcode) switches child tools into
+        // interactive mode and they block waiting for input.
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = stdout
         try process.run()
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
@@ -162,6 +168,9 @@ actor EngineRunner {
         process.environment = environment
 
         let stdout = Pipe()
+        // No stdin: a TTY here (dev runs from Xcode) switches child tools into
+        // interactive mode and they block waiting for input.
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = stdout
         try process.run()
         // Read fully before waiting, so a large plan cannot deadlock the pipe.

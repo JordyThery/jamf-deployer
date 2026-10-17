@@ -115,6 +115,9 @@ actor JamformerRunner {
 
         let stdout = Pipe()
         let stderr = Pipe()
+        // No stdin: a TTY here (dev runs from Xcode) switches child tools into
+        // interactive mode and they block waiting for input.
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = stdout
         process.standardError = stderr
 
@@ -184,6 +187,8 @@ actor JamformerRunner {
         text = text.replacingOccurrences(
             of: #"\u{1B}\[[0-9;?]*[@-~]"#, with: "", options: .regularExpression)
         // Orphaned sequence bodies whose ESC byte was lost in line splitting.
+        text = text.replacingOccurrences(
+            of: #"\[\?[0-9;]*[a-zA-Z]"#, with: "", options: .regularExpression)
         text = text.replacingOccurrences(
             of: #"\[[0-9]{1,3}(;[0-9]{1,3})*[a-zA-Z]"#, with: "", options: .regularExpression)
         // Stray escapes and carriage returns.

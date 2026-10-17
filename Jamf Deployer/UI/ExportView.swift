@@ -744,6 +744,7 @@ struct ExportView: View {
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
         let ditto = Process()
+        ditto.standardInput = FileHandle.nullDevice
         ditto.executableURL = URL(filePath: "/usr/bin/ditto")
         ditto.arguments = ["-c", "-k", "--sequesterRsrc", result.outputURL.path, destination.path]
         try? ditto.run()

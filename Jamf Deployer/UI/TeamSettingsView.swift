@@ -198,6 +198,7 @@ struct TeamSettingsView: View {
         let stamp = Date.now.formatted(.iso8601.year().month().day().timeSeparator(.omitted).dateTimeSeparator(.standard)).replacingOccurrences(of: ":", with: "")
         let backup = store.deletingLastPathComponent().appending(path: "store-backup-\(stamp).zip")
         let ditto = Process()
+        ditto.standardInput = FileHandle.nullDevice
         ditto.executableURL = URL(filePath: "/usr/bin/ditto")
         ditto.arguments = ["-c", "-k", "--sequesterRsrc", store.path, backup.path]
         try ditto.run()
@@ -212,6 +213,7 @@ struct TeamSettingsView: View {
         try? fileManager.removeItem(at: fresh)
 
         let clone = Process()
+        clone.standardInput = FileHandle.nullDevice
         clone.executableURL = URL(filePath: "/usr/bin/git")
         clone.arguments = ["clone", remote, fresh.path]
         var environment = ProcessInfo.processInfo.environment

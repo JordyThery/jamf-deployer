@@ -80,6 +80,7 @@ final class TerraformManager {
             try zipData.write(to: zipURL)
 
             let unzip = Process()
+        unzip.standardInput = FileHandle.nullDevice
             unzip.executableURL = URL(filePath: "/usr/bin/unzip")
             unzip.arguments = ["-oq", zipURL.path, "-d", staging.path]
             try unzip.run()

@@ -222,6 +222,7 @@ actor GitStoreService {
     private func run(_ arguments: String...) throws -> String {
         guard Self.isGitAvailable else { throw GitError.gitUnavailable }
         let process = Process()
+        process.standardInput = FileHandle.nullDevice
         process.executableURL = URL(filePath: "/usr/bin/git")
         process.arguments = Array(arguments)
         process.currentDirectoryURL = storeURL
