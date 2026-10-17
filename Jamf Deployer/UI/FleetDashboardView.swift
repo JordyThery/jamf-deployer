@@ -146,6 +146,10 @@ struct FleetDashboardView: View {
         if tenant.isHandedOver {
             Label("Handed over", systemImage: "archivebox")
                 .foregroundStyle(.secondary)
+        } else if let failure = deployService.fleetCheckFailure(for: tenant.id) {
+            Label("Check failed", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.orange)
+                .help(failure)
         } else if tenant.lastDeploy == nil {
             if tenant.preflight?.allGreen == false {
                 Label("Check preflight", systemImage: "exclamationmark.triangle.fill")

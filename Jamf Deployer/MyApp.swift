@@ -8,6 +8,7 @@ struct MyApp: App {
     @State private var deployService: TenantDeployService
     @State private var appState = AppState()
     @State private var terraform = TerraformManager()
+    @State private var exportSessions = ExportSessionStore()
     @State private var componentUpdates = ComponentUpdateChecker()
     @State private var catalogSources: CatalogSourceStore
 
@@ -44,6 +45,7 @@ struct MyApp: App {
                 .environment(terraform)
                 .environment(catalogSources)
                 .environment(componentUpdates)
+                .environment(exportSessions)
         }
 
         Window("Activity Log", id: "activity-log") {

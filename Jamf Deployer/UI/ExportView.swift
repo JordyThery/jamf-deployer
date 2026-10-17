@@ -30,10 +30,27 @@ struct ExportView: View {
     @State private var includePackageFiles = false
     @State private var hasConsentedToTerraform = false
 
-    @State private var isRunning = false
-    @State private var logTail: [String] = []
-    @State private var exportResult: JamformerRunner.ExportResult?
-    @State private var errorMessage: String?
+    @Environment(ExportSessionStore.self) private var exportSessions
+
+    // The run's state lives in the session store, so a running export keeps
+    // reporting progress after navigating away from this tab and back.
+    private var session: ExportSessionStore.Session { exportSessions.session(for: tenant.id) }
+    private var isRunning: Bool {
+        get { session.isRunning }
+        nonmutating set { session.isRunning = newValue }
+    }
+    private var logTail: [String] {
+        get { session.logTail }
+        nonmutating set { session.logTail = newValue }
+    }
+    private var exportResult: JamformerRunner.ExportResult? {
+        get { session.result }
+        nonmutating set { session.result = newValue }
+    }
+    private var errorMessage: String? {
+        get { session.errorMessage }
+        nonmutating set { session.errorMessage = newValue }
+    }
 
     // Capture step
     @State private var blockID = ""
@@ -174,6 +191,10 @@ struct ExportView: View {
         .task {
             resourceTypes = (try? await runner.listResourceTypes(provider: exportProvider)) ?? []
             if case .installed = terraform.status { hasConsentedToTerraform = true }
+            // Returning to a finished export: restore the derived object list.
+            if let result = session.result, exportedObjects.isEmpty {
+                adoptResult(result, types: Array(selectedTypes))
+            }
         }
         .fileExporter(
             isPresented: $isExportingDocumentation,
@@ -246,6 +267,7 @@ struct ExportView: View {
         captureOutcome = nil
         logTail = ["Starting export…"]
         let types = Array(selectedTypes)
+        let session = session
         Task {
             defer { isRunning = false }
             do {
@@ -256,20 +278,17 @@ struct ExportView: View {
                     includeResources: types,
                     includePackageFiles: includePackageFiles,
                     skipImportBlocks: kind == .clone,
-                    terraformPath: terraformURL.path
+                    terraformPath: terraformURL.path,
+                    onLine: { line in
+                        Task { @MainActor in session.appendLog(line) }
+                    }
                 )
-                logTail = result.logLines
                 guard result.exitCode == 0 else {
                     errorMessage = "The exporter stopped with an error — see the log above."
                     return
                 }
                 exportResult = result
-                exportedObjects = (try? ExportedObjectInventory.scan(directory: result.outputURL)) ?? []
-                selectedObjects = Set(exportedObjects.map(\.address))
-                if blockName.isEmpty { blockName = "Captured from \(tenant.name)" }
-                if blockID.isEmpty {
-                    blockID = "captured-\(types.sorted().first ?? "objects")"
-                }
+                adoptResult(result, types: types)
                 activityLog.append(ActivityLogEntry(
                     category: "Export", operation: "export", detail: tenant.name,
                     status: 200, duration: nil, note: "\(types.count) object types"
@@ -277,6 +296,17 @@ struct ExportView: View {
             } catch {
                 errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
+        }
+    }
+
+    /// Derives the capture-form state from a finished export — called both
+    /// when the run completes and when the view reappears mid-session.
+    private func adoptResult(_ result: JamformerRunner.ExportResult, types: [String]) {
+        exportedObjects = (try? ExportedObjectInventory.scan(directory: result.outputURL)) ?? []
+        selectedObjects = Set(exportedObjects.map(\.address))
+        if blockName.isEmpty { blockName = "Captured from \(tenant.name)" }
+        if blockID.isEmpty {
+            blockID = "captured-\(types.sorted().first ?? "objects")"
         }
     }
 

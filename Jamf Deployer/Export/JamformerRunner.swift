@@ -46,6 +46,7 @@ actor JamformerRunner {
     }
 
     /// Exports the chosen object types into a fresh temp folder.
+    /// `onLine` receives each output line as it happens, for live progress.
     func export(
         tenant: Tenant,
         clientSecret: String,
@@ -53,7 +54,8 @@ actor JamformerRunner {
         includeResources: [String],
         includePackageFiles: Bool,
         skipImportBlocks: Bool = false,
-        terraformPath: String
+        terraformPath: String,
+        onLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> ExportResult {
         let outputURL = FileManager.default.temporaryDirectory
             .appending(path: "jamf-deployer-export-\(UUID().uuidString)")
@@ -92,12 +94,16 @@ actor JamformerRunner {
             }
         }
 
-        var result = try await run(arguments: arguments, environment: environment)
+        var result = try await run(arguments: arguments, environment: environment, onLine: onLine)
         result.outputURL = outputURL
         return result
     }
 
-    private func run(arguments: [String], environment: [String: String]) async throws -> ExportResult {
+    private func run(
+        arguments: [String],
+        environment: [String: String],
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) async throws -> ExportResult {
         let process = Process()
         process.executableURL = jamformerURL
         process.arguments = arguments
@@ -128,7 +134,9 @@ actor JamformerRunner {
 
         var lines: [String] = []
         for try await line in stdout.fileHandleForReading.bytes.lines {
-            lines.append(stripANSI(line))
+            let clean = stripANSI(line)
+            lines.append(clean)
+            onLine?(clean)
         }
         lines.append(contentsOf: await stderrTask.value.map(stripANSI))
         process.waitUntilExit()

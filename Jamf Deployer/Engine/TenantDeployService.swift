@@ -212,11 +212,14 @@ final class TenantDeployService {
         let fileManager = FileManager.default
         let adopted = adoptedURL(for: tenant)
         let generated = generatedURL(for: tenant)
-        // The engine's lock file records hashes of the bundled provider
-        // archives, which change across app releases (they are re-signed at
-        // build time). Providers only ever install from the bundled mirror,
-        // so the lock is re-derived on every init instead of kept.
+        // The engine's lock file and unpacked provider cache record hashes of
+        // the bundled provider archives, which change across app releases
+        // (they are re-signed at build time). Providers only ever install
+        // from the bundled mirror — cheap and local — so both are re-derived
+        // on every init instead of kept; a stale cache makes init fail with
+        // "does not match the content of the downloaded package".
         try? fileManager.removeItem(at: generated.appending(path: ".terraform.lock.hcl"))
+        try? fileManager.removeItem(at: generated.appending(path: ".terraform"))
         // Clear previously copied adopted files first.
         for stale in (try? fileManager.contentsOfDirectory(at: generated, includingPropertiesForKeys: nil)) ?? []
         where stale.lastPathComponent.hasPrefix("adopted-") {
@@ -694,6 +697,10 @@ final class TenantDeployService {
     }
 
     /// Checks every deployed tenant, a few at a time.
+    /// Tenants whose last fleet check failed, with a short reason — shown on
+    /// the dashboard so a failing check never masquerades as "in sync".
+    private(set) var fleetCheckFailures: [UUID: String] = [:]
+
     func checkAllTenants() async {
         let candidates = tenantStore.tenants.filter {
             !$0.deployedBlockVersions.isEmpty && !$0.isHandedOver
@@ -711,13 +718,25 @@ final class TenantDeployService {
             // Plain child tasks; the engine work happens off-main inside
             // each tenant's runner, so the batch runs concurrently.
             let tasks = batch.map { tenant in
-                Task { try? await self.checkDrift(tenant: tenant) }
+                Task {
+                    do {
+                        try await self.checkDrift(tenant: tenant)
+                        self.fleetCheckFailures[tenant.id] = nil
+                    } catch {
+                        self.fleetCheckFailures[tenant.id] =
+                            (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    }
+                }
             }
             for task in tasks {
                 _ = await task.value
                 fleetCheckProgress?.done += 1
             }
         }
+    }
+
+    func fleetCheckFailure(for tenantID: UUID) -> String? {
+        fleetCheckFailures[tenantID]
     }
 
     private func refreshTokenExpiry(_ tenant: inout Tenant) async {
