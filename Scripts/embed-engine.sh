@@ -1,7 +1,9 @@
 #!/bin/sh
 # Xcode run-script build phase: copies the deployment engine, provider
 # mirror, jamformer and the built-in catalog into the app bundle, then signs
-# the copied executables with the app's identity (required for notarization).
+# every copied executable with the app's identity — including the provider
+# binaries inside the mirror's zip archives, which the notary service
+# inspects and rejects when unsigned.
 #
 # Add as the LAST build phase of the "Jamf Deployer" target with
 # "Based on dependency analysis" unchecked.
@@ -22,15 +24,38 @@ cp -f "${SRC}/Vendor/opentofu/bin/LICENSE" "${RESOURCES}/Vendor/opentofu/bin/LIC
 mkdir -p "${RESOURCES}/Vendor/jamformer"
 cp -f "${SRC}/Vendor/jamformer/jamformer" "${RESOURCES}/Vendor/jamformer/jamformer"
 
+# Provider mirror: the app is arm64-only, so only darwin_arm64 archives are
+# bundled. SHA256SUMS files describe the original archives and are dropped —
+# the mirror's hashes are re-derived by the engine at init.
 rm -rf "${RESOURCES}/Vendor/providers" "${RESOURCES}/Catalog"
-cp -R "${SRC}/Vendor/providers" "${RESOURCES}/Vendor/providers"
+(cd "${SRC}/Vendor" && find providers -name "*_darwin_arm64.zip" -print0 | \
+  xargs -0 -I{} sh -c 'mkdir -p "$0/$(dirname "$1")" && cp -f "$1" "$0/$1"' "${RESOURCES}/Vendor" {})
 cp -R "${SRC}/Catalog" "${RESOURCES}/Catalog"
 
-# Re-sign the copied tools with the app's identity and the hardened runtime
-# so the notary service accepts them. Skipped for ad-hoc debug signing.
-if [ "${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}" != "" ] && [ "${EXPANDED_CODE_SIGN_IDENTITY_NAME}" != "-" ]; then
-  for tool in "${RESOURCES}/Vendor/opentofu/bin/tofu" "${RESOURCES}/Vendor/jamformer/jamformer"; do
-    codesign --force --options runtime --timestamp \
-      --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${tool}"
-  done
+# Debug builds sign ad hoc and skip the notarization-grade signing below.
+if [ "${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}" = "" ] || [ "${EXPANDED_CODE_SIGN_IDENTITY_NAME}" = "-" ]; then
+  exit 0
 fi
+
+sign() {
+  codesign --force --options runtime --timestamp \
+    --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "$1"
+}
+
+sign "${RESOURCES}/Vendor/opentofu/bin/tofu"
+sign "${RESOURCES}/Vendor/jamformer/jamformer"
+
+# Sign the provider binaries inside each mirror archive: unzip, sign every
+# Mach-O, re-zip in place.
+find "${RESOURCES}/Vendor/providers" -name "*.zip" | while read -r archive; do
+  workdir="$(mktemp -d)"
+  unzip -qq "${archive}" -d "${workdir}"
+  find "${workdir}" -type f | while read -r entry; do
+    if file -b "${entry}" | grep -q "Mach-O"; then
+      sign "${entry}"
+    fi
+  done
+  rm -f "${archive}"
+  (cd "${workdir}" && zip -qq -r -X "${archive}" .)
+  rm -rf "${workdir}"
+done

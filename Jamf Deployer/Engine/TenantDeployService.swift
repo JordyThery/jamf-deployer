@@ -212,6 +212,11 @@ final class TenantDeployService {
         let fileManager = FileManager.default
         let adopted = adoptedURL(for: tenant)
         let generated = generatedURL(for: tenant)
+        // The engine's lock file records hashes of the bundled provider
+        // archives, which change across app releases (they are re-signed at
+        // build time). Providers only ever install from the bundled mirror,
+        // so the lock is re-derived on every init instead of kept.
+        try? fileManager.removeItem(at: generated.appending(path: ".terraform.lock.hcl"))
         // Clear previously copied adopted files first.
         for stale in (try? fileManager.contentsOfDirectory(at: generated, includingPropertiesForKeys: nil)) ?? []
         where stale.lastPathComponent.hasPrefix("adopted-") {
