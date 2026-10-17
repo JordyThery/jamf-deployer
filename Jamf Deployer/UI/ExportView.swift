@@ -68,7 +68,10 @@ struct ExportView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 480)
+                .labelsHidden()
+                // Natural width: constraining a segmented control below its
+                // intrinsic size makes it overdraw its layout frame.
+                .fixedSize()
 
                 Picker("From", selection: $exportProvider) {
                     Text("Jamf Pro and Platform").tag("jamfplatform")
