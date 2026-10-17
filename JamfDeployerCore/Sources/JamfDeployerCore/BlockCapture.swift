@@ -82,6 +82,7 @@ public nonisolated enum BlockCapture {
         var usesCategory = false
         var terraformTypes: Set<String> = []
         var capturedText = ""
+        var fileTexts: [(name: String, text: String)] = []
 
         // 1. Configuration files, transformed. provider/variables/tfvars and
         //    import blocks stay behind — a block is reusable configuration.
@@ -92,12 +93,6 @@ public nonisolated enum BlockCapture {
             guard name.hasSuffix(".tf"), !skipped.contains(name), !name.hasSuffix("_import.tf") else { continue }
 
             var text = try String(contentsOf: file, encoding: .utf8)
-
-            // Count objects and record their types.
-            for match in text.matches(of: /resource\s+"([a-z0-9_]+)"\s+"/) {
-                objectCount += 1
-                terraformTypes.insert(String(match.1))
-            }
 
             // The block never pins a provider alias of its own.
             text = text.replacingOccurrences(of: "  provider = jamfplatform\n\n", with: "")
@@ -167,6 +162,64 @@ public nonisolated enum BlockCapture {
                 usesPlatformScope = true
             }
 
+            fileTexts.append((name, text))
+        }
+
+        // 1b. Drop resources that depend on values the export cannot supply.
+        // Jamf never returns icon files: their variables have no default and
+        // no tfvars value, so the resources (and references to them) are
+        // removed rather than captured broken.
+        let exportedDeclarations = parseVariableDeclarations(
+            at: request.sourceDirectory.appending(path: "variables.tf")
+        )
+        let exportedValues = parseTfvars(
+            at: request.sourceDirectory.appending(path: "terraform.tfvars")
+        )
+        let generatedVariables: Set<String> = [
+            "name_prefix", "managed_by_tag", "scope_jamf_pro_group_id",
+            "scope_platform_group_uuid", "category_id",
+        ]
+        var unfillable: Set<String> = []
+        for (_, text) in fileTexts {
+            for match in text.matches(of: /var\.([a-zA-Z0-9_]+)/) {
+                let name = String(match.1)
+                guard !generatedVariables.contains(name) else { continue }
+                let hasDefault = exportedDeclarations[name]?.contains("default") ?? false
+                if !hasDefault && exportedValues[name] == nil {
+                    unfillable.insert(name)
+                }
+            }
+        }
+        var droppedAddresses: [String] = []
+        if !unfillable.isEmpty {
+            // Pass 1: drop whole resources that use an unfillable variable.
+            fileTexts = fileTexts.map { entry in
+                let blocks = ExportedObjectInventory.topLevelBlocks(in: entry.text).filter { block in
+                    let uses = unfillable.contains { block.contains("var.\($0)") }
+                    if uses, let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) {
+                        droppedAddresses.append("\(header.1).\(header.2)")
+                    }
+                    return !uses
+                }
+                return (entry.name, blocks.joined(separator: "\n\n") + "\n")
+            }
+            // Pass 2: strip attribute objects and lines that referenced the
+            // dropped resources.
+            fileTexts = fileTexts.map { entry in
+                (entry.name, Self.strippingReferences(to: droppedAddresses, in: entry.text))
+            }
+            if !droppedAddresses.isEmpty {
+                warnings.append("Left out \(droppedAddresses.count) object\(droppedAddresses.count == 1 ? "" : "s") that need files Jamf does not export (Self Service icons): \(droppedAddresses.joined(separator: ", ")). Set them by hand after deploying.")
+            }
+        }
+
+        // 1c. Write the files and count what survived.
+        for (name, text) in fileTexts {
+            guard text.contains("resource ") || text.contains("data ") else { continue }
+            for match in text.matches(of: /resource\s+"([a-z0-9_]+)"\s+"/) {
+                objectCount += 1
+                terraformTypes.insert(String(match.1))
+            }
             try Data(text.utf8).write(to: blockURL.appending(path: name))
             capturedText += text + "\n"
         }
@@ -227,25 +280,11 @@ public nonisolated enum BlockCapture {
         // generated above (icon file sources and similar) keep their original
         // declarations — dropping them breaks the module with "reference to
         // undeclared input variable".
-        let generated: Set<String> = [
-            "name_prefix", "managed_by_tag", "scope_jamf_pro_group_id",
-            "scope_platform_group_uuid", "category_id",
-        ]
         var referenced: Set<String> = []
         for match in capturedText.matches(of: /var\.([a-zA-Z0-9_]+)/) {
             referenced.insert(String(match.1))
         }
-        let exportedDeclarations = parseVariableDeclarations(
-            at: request.sourceDirectory.appending(path: "variables.tf")
-        )
-        // The exporter puts the variables' actual values in terraform.tfvars
-        // (file paths for icons and similar); a reusable block needs them as
-        // defaults, or the generated module call fails with "missing
-        // required argument".
-        let exportedValues = parseTfvars(
-            at: request.sourceDirectory.appending(path: "terraform.tfvars")
-        )
-        for name in referenced.subtracting(generated).sorted() {
+        for name in referenced.subtracting(generatedVariables).sorted() {
             if var declaration = exportedDeclarations[name] {
                 if !declaration.contains("default"), let value = exportedValues[name],
                    let brace = declaration.range(of: "}", options: .backwards) {
@@ -370,6 +409,45 @@ public nonisolated enum BlockCapture {
     }
 
     /// Reads the capability set out of jamformer's PERMISSIONS.md.
+    /// Removes attribute objects (`foo = { … }`) and single lines that
+    /// reference any of the given resource addresses.
+    static func strippingReferences(to addresses: [String], in text: String) -> String {
+        guard !addresses.isEmpty else { return text }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var kept: [String] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            if line.range(of: #"^\s*[a-zA-Z0-9_]+\s*=\s*\{\s*$"#, options: .regularExpression) != nil {
+                // Collect the balanced attribute object.
+                var depth = 1
+                var chunk = [line]
+                var cursor = index
+                while depth > 0, cursor + 1 < lines.count {
+                    cursor += 1
+                    let next = lines[cursor]
+                    chunk.append(next)
+                    depth += next.filter { $0 == "{" }.count - next.filter { $0 == "}" }.count
+                }
+                let body = chunk.joined(separator: "\n")
+                if addresses.contains(where: { body.contains($0) }) {
+                    index = cursor + 1
+                    continue
+                }
+                kept.append(contentsOf: chunk)
+                index = cursor + 1
+                continue
+            }
+            if addresses.contains(where: { line.contains($0) }) {
+                index += 1
+                continue
+            }
+            kept.append(line)
+            index += 1
+        }
+        return kept.joined(separator: "\n")
+    }
+
     /// Simple `name = "value"` assignments from a tfvars file.
     static func parseTfvars(at url: URL) -> [String: String] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }

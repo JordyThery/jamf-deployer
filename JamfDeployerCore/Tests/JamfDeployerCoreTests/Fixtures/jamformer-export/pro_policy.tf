@@ -26,4 +26,8 @@ resource "jamfplatform_pro_policy" "jd_install_rosetta_2" {
       priority = "After"
     }]
   }
+
+  self_service_icon = {
+    id = jamfplatform_pro_icon.icon_99.id
+  }
 }

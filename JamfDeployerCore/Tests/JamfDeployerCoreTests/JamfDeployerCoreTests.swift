@@ -335,6 +335,16 @@ struct BlockCaptureTests {
         // A declaration without a default gets its value from terraform.tfvars.
         #expect(variables.contains(#"variable "pro_icon_icon_12_icon_file_source""#))
         #expect(variables.contains(#"default = "files/icons/icon_12.png""#))
+
+        // Unfillable (no default, no tfvars value): the icon resource and the
+        // policy's reference to it are left out, with a warning.
+        #expect(!variables.contains("icon_99"))
+        let prunedIcons = try String(contentsOf: folder.appending(path: "pro_icon.tf"), encoding: .utf8)
+        #expect(!prunedIcons.contains("icon_99"))
+        let prunedPolicy = try String(contentsOf: folder.appending(path: "pro_policy.tf"), encoding: .utf8)
+        #expect(!prunedPolicy.contains("self_service_icon"))
+        #expect(prunedPolicy.contains("jamfplatform_pro_script.jd_install_rosetta_2.id"))
+        #expect(result.warnings.contains { $0.contains("Left out 1 object") })
         #expect(variables.contains(#"default     = "files/icons/icon_18.png""#))
         #expect(!variables.contains("jamfplatform_base_url"))
         #expect(!policy.contains(#"category_id     = "73""#))
@@ -394,7 +404,7 @@ struct AsBuiltTests {
         #expect(markdown.contains("`jamfplatform_pro_policy`"))
         #expect(markdown.contains("Frequency: Once per computer"))
         #expect(markdown.contains("Scoped:"))
-        #expect(markdown.contains("**4 objects**"))
+        #expect(markdown.contains("**5 objects**"))
     }
 }
 
@@ -441,7 +451,7 @@ struct InventoryTests {
         let dir = try copyFixture()
         defer { try? FileManager.default.removeItem(at: dir) }
         let objects = try ExportedObjectInventory.scan(directory: dir)
-        #expect(objects.count == 4)
+        #expect(objects.count == 5)
         let script = try #require(objects.first { $0.resourceType == "jamfplatform_pro_script" })
         #expect(script.displayName == "JD - Install Rosetta 2")
         #expect(script.hasProvenanceTag) // fixture script carries the tag
