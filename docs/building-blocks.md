@@ -16,6 +16,12 @@ A baseline is composed of building blocks. Each block is a self-contained piece 
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
 | **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
 
+The App Catalog block picks its apps with a built-in picker — searchable, with per-app delivery and update behavior:
+
+![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
+
+![The baseline editor: blocks with checkboxes and settings, the last deploy result, and the adopt and hand-over actions](screenshot-baseline.png)
+
 ## Settings and scope
 
 Every block exposes a small set of plain-language settings — toggles, choices, numbers — defined by the block, not by the underlying provider schema. Secret-typed settings (API keys and similar) are stored in your Keychain, never in the tenant record.

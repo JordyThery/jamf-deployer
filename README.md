@@ -23,6 +23,12 @@ Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jam
 - **Maintain** — scheduled checks show changes made directly in Jamf; keep them, restore the baseline, or stop managing an object. Baseline updates are reviewed and opted into per block. Every deploy is recorded with history and rollback.
 - **Work as a team** — a shared GitHub repository synchronizes tenants, locks and catalogs across engineers, with credentials shared end-to-end encrypted. See [Team Mode](docs/team-mode.md).
 
+![A tenant in sync with its baseline: connection details, a passing preflight, and the baseline's building blocks with per-block settings](docs/screenshot.png)
+
+The fleet dashboard keeps every tenant's sync state, baseline size and Apple token expirations on one screen:
+
+![The fleet dashboard listing tenants with their sync status, baseline block count, last deploy and ADE token expiration](docs/screenshot-dashboard.png)
+
 ## Documentation
 
 - **[Getting Started](docs/getting-started.md)** — installing, connecting the first tenant, the first deploy

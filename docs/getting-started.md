@@ -40,6 +40,8 @@ If the preview looks right, click **Deploy**. Only the previewed plan is applied
 
 The **Day 0 Setup** tab tracks the things an API cannot fully do — APNs certificate, Apple Business Manager enrollment and VPP tokens, branding — with live status where Jamf exposes it and links to the right console pages where it does not.
 
+![The Day 0 Setup tab: APNs, Automated Device Enrollment, volume purchasing, branding, single sign-on and the Jamf Protect link, each with live status](screenshot-day0.png)
+
 ## From here
 
 - **Check for Changes** (⌘R) shows what was changed directly in Jamf since the last deploy — keep each change, restore the baseline, or stop managing the object.

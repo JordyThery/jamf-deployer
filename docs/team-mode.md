@@ -34,6 +34,8 @@ So a teammate can work on a tenant without re-entering its credentials:
 
 A new engineer appears in the team list after their first sync; an existing member runs **Share Credentials** once to grant them access. GitHub never sees a usable secret.
 
+![Team settings: the team space repository, last sync, and the Sync Now, Leave Team Mode and Share Credentials actions](screenshot-team.png)
+
 ## Setting up
 
 **Create** (first engineer): Settings → Team → **Create Team Space…** — point it at an empty private GitHub repository (the app can create one via `gh`). The existing local store is pushed as-is.
