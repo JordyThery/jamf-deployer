@@ -93,8 +93,8 @@ struct TeamSettingsView: View {
             Text("Team")
         } footer: {
             Text(deployService.isTeamMode
-                ? "Tenant records, history and presets sync through the team space. Credentials never sync — each engineer keeps secrets in their own Keychain."
-                : "A team space is a Git repository (GitHub works great) that this Mac's tenants, history and presets sync through. Git authentication uses your existing git/gh/SSH setup. A full backup is made before anything changes.")
+                ? "Tenant records, history and the list of catalog sources sync through the team space. Credentials never sync — each engineer keeps secrets in their own Keychain."
+                : "A team space is a Git repository (GitHub works great) that this Mac's tenants, history and catalog sources sync through. Git authentication uses your existing git/gh/SSH setup. A full backup is made before anything changes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
