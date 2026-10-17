@@ -85,6 +85,10 @@ public nonisolated enum BlockCapture {
             "enrollment invitations are tenant-specific and expire",
         "jamfplatform_pro_allowed_file_extension":
             "Jamf creates the default allowed file extensions in every tenant",
+        "jamfplatform_pro_cloud_distribution_point":
+            "every Jamf cloud tenant already has its cloud distribution point configured",
+        "jamfplatform_cbengine_benchmark":
+            "compliance benchmarks build on a source baseline Jamf does not export — recreate them from the benchmark catalog",
     ]
 
     /// ID→name knowledge from a full export: import files carry the Jamf
@@ -157,6 +161,18 @@ public nonisolated enum BlockCapture {
                 }
             }
         }
+        // Resources the transforms below leave out must not count as local,
+        // or references in files processed earlier would miss their rewrite.
+        localAddresses = localAddresses.filter { address in
+            let type = String(address.split(separator: ".").first ?? "")
+            if Self.unportableTypes.keys.contains(type) { return false }
+            if type == "jamfplatform_device_group",
+               table.nameByAddress[address]?.hasPrefix("All Managed ") == true { return false }
+            if type == "jamfplatform_pro_computer_extension_attribute",
+               let name = table.nameByAddress[address]?.lowercased(),
+               name.hasPrefix("jamf patch ") || name.hasPrefix("jamf-patch-") { return false }
+            return true
+        }
 
         // 1. Configuration files, transformed. provider/variables/tfvars and
         //    import blocks stay behind — a block is reusable configuration.
@@ -181,6 +197,55 @@ public nonisolated enum BlockCapture {
                 text = kept.isEmpty ? "" : kept.joined(separator: "\n\n") + "\n"
                 warnings.append("Left out \(dropped) object\(dropped == 1 ? "" : "s") from \(name): \(reason).")
             }
+
+            // Objects Jamf derives from other objects are left out too:
+            // built-in device groups exist in every tenant (references
+            // resolve by lookup), patch titles create their own "Jamf Patch"
+            // reporting attributes, and a login page without the disclaimer
+            // fields Jamf leaves out of exports cannot apply.
+            if text.contains("resource \"jamfplatform_device_group\"")
+                || text.contains("resource \"jamfplatform_pro_computer_extension_attribute\"")
+                || text.contains("resource \"jamfplatform_pro_login_page_settings\"") {
+                let blocks = ExportedObjectInventory.topLevelBlocks(in: text)
+                var builtinDropped = 0
+                var patchDropped = 0
+                var kept: [String] = []
+                for block in blocks {
+                    func dropAddress() {
+                        if let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) {
+                            localAddresses.remove("\(header.1).\(header.2)")
+                        }
+                    }
+                    if block.hasPrefix("resource \"jamfplatform_device_group\""),
+                       block.range(of: #"\n\s+name\s+= "All Managed "#, options: .regularExpression) != nil {
+                        builtinDropped += 1
+                        dropAddress()
+                        continue
+                    }
+                    if block.hasPrefix("resource \"jamfplatform_pro_computer_extension_attribute\""),
+                       block.range(of: #"\n\s+name\s+= "jamf[- ]patch[- ]"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                        patchDropped += 1
+                        dropAddress()
+                        continue
+                    }
+                    if block.hasPrefix("resource \"jamfplatform_pro_login_page_settings\""),
+                       !block.contains("disclaimer_heading") {
+                        warnings.append("Left out the login page settings: Jamf does not export the required disclaimer text. Configure the login page by hand after deploying.")
+                        dropAddress()
+                        continue
+                    }
+                    kept.append(block)
+                }
+                if kept.count != blocks.count {
+                    text = kept.isEmpty ? "" : kept.joined(separator: "\n\n") + "\n"
+                }
+                if builtinDropped > 0 {
+                    warnings.append("Left out \(builtinDropped) built-in device group\(builtinDropped == 1 ? "" : "s"): Jamf creates the All Managed groups in every tenant, so references find them by name.")
+                }
+                if patchDropped > 0 {
+                    warnings.append("Left out \(patchDropped) Jamf Patch extension attribute\(patchDropped == 1 ? "" : "s"): patch software titles recreate their own reporting attributes.")
+                }
+            }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
 
             // Name prefix: every quoted string that starts with the tenant's
@@ -201,6 +266,18 @@ public nonisolated enum BlockCapture {
                     with: "$1${var.name_prefix}",
                     options: .regularExpression
                 )
+            }
+
+            // Icon IDs never match across tenants and the icon files are not
+            // exportable; the server would silently drop the reference and the
+            // provider would report an inconsistent result on every apply.
+            if text.range(of: #"\n\s*self_service_icon\s*= \{[^{}]*\}"#, options: .regularExpression) != nil {
+                text = text.replacingOccurrences(
+                    of: #"\n\s*self_service_icon\s*= \{[^{}]*\}"#,
+                    with: "",
+                    options: .regularExpression
+                )
+                warnings.append("Left out Self Service icon references in \(name): icons do not transfer between tenants. Set icons by hand after deploying.")
             }
 
             // Jamf trims trailing whitespace on descriptions; keeping it makes
