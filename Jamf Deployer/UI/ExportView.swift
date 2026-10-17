@@ -158,7 +158,7 @@ struct ExportView: View {
                                 }
                             }
                         }
-                        .frame(maxHeight: 180)
+                        .frame(minHeight: 120, maxHeight: .infinity)
                     }
                     Toggle("Include package files (downloads installers from the distribution point)", isOn: $includePackageFiles)
                         .font(.callout)
@@ -298,7 +298,11 @@ struct ExportView: View {
                     }
                 )
                 guard result.exitCode == 0 else {
-                    errorMessage = "The exporter stopped with an error — see the log above."
+                    if let known = ErrorTranslation.translateIfKnown(result.logLines.suffix(25).joined(separator: "\n")) {
+                        errorMessage = known.message + (known.hint.map { " \($0)" } ?? "")
+                    } else {
+                        errorMessage = "The exporter stopped with an error — see the log below."
+                    }
                     return
                 }
                 exportResult = result
@@ -532,12 +536,14 @@ struct ExportView: View {
     @ViewBuilder
     private var sourcePickerRow: some View {
         HStack {
-            if catalogSources.customSources.isEmpty {
+            // Folder sources only: git catalogs are read-only checkouts.
+            let folders = catalogSources.customSources.filter { $0.kind == .localFolder }
+            if folders.isEmpty {
                 Button("Choose a Folder for Your Blocks…") { addSource() }
                     .help("Captured blocks are saved into a catalog folder you own")
             } else {
                 Picker("Save into", selection: $selectedSourceID) {
-                    ForEach(catalogSources.customSources) { source in
+                    ForEach(folders) { source in
                         Text(source.name).tag(Optional(source.id))
                     }
                 }
@@ -677,7 +683,10 @@ struct ExportView: View {
     }
 
     private var effectiveSourceID: UUID? {
-        selectedSourceID ?? catalogSources.customSources.first?.id
+        let folders = catalogSources.customSources.filter { $0.kind == .localFolder }
+        // Never resolve to a git source, even if one was somehow selected.
+        if let id = selectedSourceID, folders.contains(where: { $0.id == id }) { return id }
+        return folders.first?.id
     }
 
     private func addSource() {

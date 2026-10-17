@@ -21,6 +21,12 @@ public nonisolated enum ErrorTranslation {
             "Open the integration in Jamf Account and grant the permissions listed on the building block."
         ),
         (
+            // jamformer: Pipeline failed: terraform query: … exit status 1
+            "terraform query failed",
+            "The exporter could not read one of the selected object types from this tenant.",
+            "Settings-style types can be unavailable on some tenants. Deselect the type that fails and export again."
+        ),
+        (
             "undeclared input variable",
             "The block's configuration references a variable it does not declare.",
             "Usually a block captured by an older app version — re-capture it, or declare the variable in the block folder (Reveal in Finder from its detail view)."
@@ -90,12 +96,18 @@ public nonisolated enum ErrorTranslation {
     ]
 
     public static func translate(_ raw: String) -> Translation {
-        for entry in table where raw.localizedCaseInsensitiveContains(entry.pattern) {
-            return Translation(message: entry.message, hint: entry.hint)
-        }
-        return Translation(
+        translateIfKnown(raw) ?? Translation(
             message: "Something went wrong while talking to Jamf.",
             hint: "Open the technical details to see the exact error, or create a support bundle."
         )
+    }
+
+    /// The table match alone — nil when the error is unrecognized, so
+    /// callers can keep their own context-specific fallback.
+    public static func translateIfKnown(_ raw: String) -> Translation? {
+        for entry in table where raw.localizedCaseInsensitiveContains(entry.pattern) {
+            return Translation(message: entry.message, hint: entry.hint)
+        }
+        return nil
     }
 }
