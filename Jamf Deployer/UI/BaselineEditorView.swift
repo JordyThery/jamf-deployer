@@ -97,6 +97,22 @@ struct BaselineEditorView: View {
         }
     }
 
+    /// The first required setting that has no value yet — the same condition
+    /// the generator enforces, caught here before a preview is attempted.
+    private func firstMissingRequiredSetting(_ block: BlockMetadata, selection: BlockSelection?) -> BlockSetting? {
+        block.settings.first { setting in
+            guard setting.required, setting.type != .bool else { return false }
+            if setting.type == .secret {
+                let stored = TenantSecrets(tenantID: tenant.id)
+                    .blockSetting(blockID: block.id, key: setting.key)
+                    .load()
+                return (stored ?? "").isEmpty
+            }
+            let value = selection?.settings[setting.key] ?? setting.default
+            return value.isEmpty
+        }
+    }
+
     /// Selections that resolve to a catalog block on this Mac.
     private var availableSelectionCount: Int {
         tenant.blockSelections.filter { selection in
@@ -168,6 +184,15 @@ struct BaselineEditorView: View {
                 Label("Also selects \(missing) — this block needs it.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if isSelected, let missing = firstMissingRequiredSetting(block, selection: selection) {
+                Label(
+                    "“\(missing.title)” needs a value before this block can deploy — open Settings.",
+                    systemImage: "exclamationmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
             }
 
             if isSelected, block.capturedFromTenant == tenant.scopeID {
