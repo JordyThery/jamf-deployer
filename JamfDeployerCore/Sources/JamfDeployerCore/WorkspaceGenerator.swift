@@ -64,6 +64,8 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     case unknownScope(block: String, scope: String)
     case missingRequiredSetting(block: String, setting: String)
     case unmetDependencies(block: String, type: String, names: [String])
+    /// Two selected blocks manage the same tenant-wide setting.
+    case conflictingSettings(type: String, blocks: [String])
 
     public var errorDescription: String? {
         switch self {
@@ -75,6 +77,8 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
             "The block \"\(block)\" needs a value for its \"\(setting)\" setting."
         case .unmetDependencies(let block, let type, let names):
             "The block \"\(block)\" references \(type.replacingOccurrences(of: "_", with: " "))s no selected block creates: \(names.joined(separator: ", ")). Select the block that creates them, or remove this block."
+        case .conflictingSettings(let type, let blocks):
+            "The blocks \(blocks.map { "\"\($0)\"" }.joined(separator: " and ")) both manage the tenant's \(type.replacingOccurrences(of: "jamfplatform_pro_", with: "").replacingOccurrences(of: "_", with: " ")). A setting can belong to one block only — deselect one of them."
         }
     }
 }
@@ -291,6 +295,27 @@ public nonisolated enum WorkspaceGenerator {
 
     /// Writes the generated configuration and copies the pinned block
     /// folders into `<workspace>/modules/`, replacing previous contents.
+    /// Tenant-wide settings exist once per tenant; two blocks managing the
+    /// same one would overwrite each other on every deploy.
+    static func checkSettingOwnership(selections: [GeneratedSelection], catalog: LoadedCatalog) throws {
+        var owners: [String: [String]] = [:]
+        for selection in selections {
+            let folder = selection.folderURL ?? catalog.blockFolderURL(id: selection.block.id)
+            guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { continue }
+            var types: Set<String> = []
+            for file in files where file.pathExtension == "tf" {
+                guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                for match in text.matches(of: /resource\s+"([a-z0-9_]+)"\s+"singleton"/) {
+                    types.insert(String(match.1))
+                }
+            }
+            for type in types { owners[type, default: []].append(selection.block.id) }
+        }
+        if let (type, blocks) = owners.sorted(by: { $0.key < $1.key }).first(where: { $0.value.count > 1 }) {
+            throw WorkspaceGeneratorError.conflictingSettings(type: type, blocks: blocks)
+        }
+    }
+
     public static func materialize(
         _ output: Output,
         selections: [GeneratedSelection],
@@ -298,6 +323,7 @@ public nonisolated enum WorkspaceGenerator {
         workspaceURL: URL
     ) throws {
         let fileManager = FileManager.default
+        try checkSettingOwnership(selections: selections, catalog: catalog)
         try fileManager.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
 
         try Data(output.providersTF.utf8).write(

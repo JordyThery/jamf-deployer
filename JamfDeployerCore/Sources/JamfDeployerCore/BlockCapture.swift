@@ -111,11 +111,14 @@ public nonisolated enum BlockCapture {
     }
 
     public enum CaptureError: LocalizedError {
-        case nothingToCapture
+        /// Carries the reasons objects were left out, when there were any.
+        case nothingToCapture(reasons: [String] = [])
         case invalidBlockID
 
         public var errorDescription: String? {
             switch self {
+            case .nothingToCapture(let reasons) where !reasons.isEmpty:
+                "Nothing in this export can be captured. " + reasons.joined(separator: " ")
             case .nothingToCapture:
                 "The export contains no objects to capture."
             case .invalidBlockID:
@@ -495,7 +498,7 @@ public nonisolated enum BlockCapture {
 
         guard objectCount > 0 else {
             try? fileManager.removeItem(at: blockURL)
-            throw CaptureError.nothingToCapture
+            throw CaptureError.nothingToCapture(reasons: warnings)
         }
 
         // What this block provides to others: name→resource maps per type.

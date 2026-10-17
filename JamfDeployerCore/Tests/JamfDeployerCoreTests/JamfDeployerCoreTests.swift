@@ -157,6 +157,32 @@ struct GeneratorTests {
         }
     }
 
+    @Test func refusesTwoBlocksOwningOneSetting() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "ownership-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var selections: [GeneratedSelection] = []
+        for id in ["checkin-a", "checkin-b"] {
+            let folder = root.appending(path: id)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(#"resource "jamfplatform_pro_computer_check_in_settings" "singleton" {}"#.utf8)
+                .write(to: folder.appending(path: "settings.tf"))
+            selections.append(GeneratedSelection(
+                block: try Self.metadata(#"{"id": "\#(id)", "name": "\#(id)"}"#),
+                settings: [:], scope: "pilot", folderURL: folder))
+        }
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ", selections: selections, providerVersion: "1.5.0"))
+        #expect(throws: WorkspaceGeneratorError.self) {
+            try WorkspaceGenerator.materialize(
+                output, selections: selections, catalog: try Self.catalog(),
+                workspaceURL: root.appending(path: "workspace"))
+        }
+        // One owner is fine.
+        try WorkspaceGenerator.materialize(
+            output, selections: [selections[0]], catalog: try Self.catalog(),
+            workspaceURL: root.appending(path: "workspace-single"))
+    }
+
     @Test func generatesFullBaseline() throws {
         let catalog = try Self.catalog()
         let input = WorkspaceInput(
