@@ -10,12 +10,42 @@ public nonisolated struct GeneratedSelection: Sendable {
     /// Overrides the catalog's folder for this block — used when a selection
     /// is pinned to a different catalog tag than the tenant default.
     public var folderURL: URL?
+    /// An existing group in the tenant the block is scoped to, by the ID
+    /// kind the block's scope variable takes. Replaces the Foundation group.
+    public var existingScopeID: String?
+    /// An existing category in the tenant ("-1" for none). Replaces the
+    /// Foundation category.
+    public var existingCategoryID: String?
+    /// A group another selected block creates.
+    public var providedScope: ProvidedObject?
+    /// A category another selected block creates.
+    public var providedCategory: ProvidedObject?
 
-    public init(block: BlockMetadata, settings: [String: String], scope: String, folderURL: URL? = nil) {
+    public init(
+        block: BlockMetadata,
+        settings: [String: String],
+        scope: String,
+        folderURL: URL? = nil,
+        existingScopeID: String? = nil,
+        existingCategoryID: String? = nil,
+        providedScope: ProvidedObject? = nil,
+        providedCategory: ProvidedObject? = nil
+    ) {
         self.block = block
         self.settings = settings
         self.scope = scope
         self.folderURL = folderURL
+        self.existingScopeID = existingScopeID
+        self.existingCategoryID = existingCategoryID
+        self.providedScope = providedScope
+        self.providedCategory = providedCategory
+    }
+
+    /// Whether this selection takes anything from the Foundation block.
+    public var wiresThroughFoundation: Bool {
+        block.wiresThroughFoundation(
+            usesExistingScope: existingScopeID != nil || providedScope != nil,
+            usesExistingCategory: existingCategoryID != nil || providedCategory != nil)
     }
 }
 
@@ -62,6 +92,7 @@ public nonisolated struct BlockRemoval: Codable, Sendable, Equatable {
 public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     case missingFoundation
     case unknownScope(block: String, scope: String)
+    case scopeNotChosen(block: String)
     case missingRequiredSetting(block: String, setting: String)
     case unmetDependencies(block: String, type: String, names: [String])
     /// Two selected blocks manage the same tenant-wide setting.
@@ -70,9 +101,11 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .missingFoundation:
-            "A selected block scopes or categorizes through Foundation, so the Foundation block must be selected too."
+            "A selected block scopes or categorizes through Foundation, so the Foundation block must be selected too. Foundation comes with the demo catalog — or pick existing groups and categories in the block's settings."
         case .unknownScope(let block, let scope):
             "The block \"\(block)\" is scoped to \"\(scope)\", which the Foundation block does not provide."
+        case .scopeNotChosen(let block):
+            "The block \"\(block)\" has no scope yet. Open its settings and choose a group."
         case .missingRequiredSetting(let block, let setting):
             "The block \"\(block)\" needs a value for its \"\(setting)\" setting."
         case .unmetDependencies(let block, let type, let names):
@@ -88,7 +121,7 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
 /// variables fed through TF_VAR_* environment variables.
 public nonisolated enum WorkspaceGenerator {
     /// Foundation group keys → output name stems.
-    static let foundationGroups = ["pilot", "all_macs", "laptops", "desktops", "apple_silicon"]
+    public static let foundationGroups = ["pilot", "all_macs", "laptops", "desktops", "apple_silicon"]
 
     public struct Output: Sendable {
         public var providersTF: String
@@ -102,12 +135,8 @@ public nonisolated enum WorkspaceGenerator {
         // Foundation is needed only when a selected block wires to it:
         // Foundation-scoped blocks, Foundation categories, or an explicit
         // requirement. Fidelity-captured baselines bring their own groups
-        // and categories.
-        let needsFoundation = input.selections.contains { selection in
-            selection.block.scope.kind != .none
-                || selection.block.acceptsCategory
-                || selection.block.requires.contains("foundation")
-        }
+        // and categories, and blocks can point at existing ones instead.
+        let needsFoundation = input.selections.contains(where: \.wiresThroughFoundation)
         if needsFoundation,
            !input.selections.contains(where: { $0.block.id == "foundation" }) {
             throw WorkspaceGeneratorError.missingFoundation
@@ -140,6 +169,19 @@ public nonisolated enum WorkspaceGenerator {
                 break
             case .jamfProGroup, .platformGroup:
                 guard let variable = block.scope.variable else { break }
+                if let existing = selection.existingScopeID {
+                    arguments.append((variable, hclString(existing)))
+                    break
+                }
+                if let provided = selection.providedScope {
+                    let provider = try Self.provider(of: provided, kind: "device_group", for: block.id, in: input)
+                    let map = block.scope.kind == .jamfProGroup ? "device_group_jamf_pro_ids" : "device_group_ids"
+                    arguments.append((variable, "module.\(sanitized(provider.id)).\(map)[\(hclString(provided.name))]"))
+                    break
+                }
+                if selection.scope.isEmpty {
+                    throw WorkspaceGeneratorError.scopeNotChosen(block: block.id)
+                }
                 guard Self.foundationGroups.contains(selection.scope) else {
                     throw WorkspaceGeneratorError.unknownScope(block: block.id, scope: selection.scope)
                 }
@@ -149,7 +191,12 @@ public nonisolated enum WorkspaceGenerator {
 
             // Category wiring: blocks that accept a category get the one
             // matching their catalog category, when foundation provides it.
-            if block.acceptsCategory {
+            if block.acceptsCategory, let existing = selection.existingCategoryID {
+                arguments.append(("category_id", hclString(existing)))
+            } else if block.acceptsCategory, let provided = selection.providedCategory {
+                let provider = try Self.provider(of: provided, kind: "category", for: block.id, in: input)
+                arguments.append(("category_id", "module.\(sanitized(provider.id)).category_ids[\(hclString(provided.name))]"))
+            } else if block.acceptsCategory {
                 let key = foundationCategoryKey(for: block.category)
                 arguments.append(("category_id", "module.foundation.category_\(key)_id"))
             }
@@ -349,6 +396,16 @@ public nonisolated enum WorkspaceGenerator {
             if $1.block.id == "foundation" { return false }
             return $0.block.id < $1.block.id
         }
+    }
+
+    /// The selected block that creates a referenced group or category.
+    static func provider(of object: ProvidedObject, kind: String, for blockID: String, in input: WorkspaceInput) throws -> BlockMetadata {
+        guard let provider = input.selections.map(\.block).first(where: { $0.id == object.blockID }),
+              (provider.provides[kind] ?? []).contains(object.name)
+        else {
+            throw WorkspaceGeneratorError.unmetDependencies(block: blockID, type: kind, names: [object.name])
+        }
+        return provider
     }
 
     static func foundationCategoryKey(for category: String) -> String {

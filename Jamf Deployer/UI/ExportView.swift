@@ -470,13 +470,12 @@ struct ExportView: View {
                 secretFindings: result.secretFindings,
                 originTenantScopeID: tenant.scopeID
             ))
-            target.blockSelections.append(BlockSelection(blockID: blockID, scope: "pilot"))
-            // Clones keep their own groups and categories; Foundation is only
-            // added when the capture collapsed scope onto it.
-            let needsFoundation = captured.usesJamfProScope || captured.usesPlatformScope
-            if needsFoundation, !target.blockSelections.contains(where: { $0.blockID == "foundation" }) {
-                target.blockSelections.insert(BlockSelection(blockID: "foundation"), at: 0)
-            }
+            // Clones keep their own groups and categories; a capture that
+            // collapsed scope onto a variable leaves the group to be chosen
+            // on the destination tenant.
+            var selection = BlockSelection(blockID: blockID, scope: "")
+            if captured.usesCategory { selection.existingCategory = .noCategory }
+            target.blockSelections.append(selection)
             tenantStore.update(target)
             captureOutcome = "Staged \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") on “\(target.name)”. Open that tenant and Preview Changes to deploy the clone."
             activityLog.append(ActivityLogEntry(
@@ -543,10 +542,10 @@ struct ExportView: View {
             .toggleStyle(.checkbox)
             .font(.callout)
             .help("Prefixes every captured name; otherwise only names that already carry this tenant's prefix are parameterized")
-        Toggle("Rebind scope and category to Foundation (portable block)", isOn: $rebindToFoundation)
+        Toggle("Choose scope and category per tenant (portable block)", isOn: $rebindToFoundation)
             .toggleStyle(.checkbox)
             .font(.callout)
-            .help("Collapses group and category references to Foundation-wired settings. When off, associations are kept and wired between captured blocks.")
+            .help("Replaces the captured group and category references with a scope and category you pick on each tenant. When off, associations are kept and wired between captured blocks.")
     }
 
     /// Where captured blocks are saved — shared by both capture modes.

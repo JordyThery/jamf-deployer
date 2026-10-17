@@ -281,14 +281,23 @@ final class TenantDeployService {
                         block: block,
                         settings: selection.settings,
                         scope: selection.scope,
-                        folderURL: sourceCatalog.blockFolderURL(id: selection.blockID)
+                        folderURL: sourceCatalog.blockFolderURL(id: selection.blockID),
+                        existingScopeID: selection.existingScope?.id,
+                        existingCategoryID: selection.existingCategory?.id,
+                        providedScope: selection.providedScope,
+                        providedCategory: selection.providedCategory
                     )
                 }
             }
             guard let block = catalog.block(id: selection.blockID) else {
                 throw DeployError.blockMissingFromCatalog(selection.blockID)
             }
-            return GeneratedSelection(block: block, settings: selection.settings, scope: selection.scope)
+            return GeneratedSelection(
+                block: block, settings: selection.settings, scope: selection.scope,
+                existingScopeID: selection.existingScope?.id,
+                existingCategoryID: selection.existingCategory?.id,
+                providedScope: selection.providedScope,
+                providedCategory: selection.providedCategory)
         }
     }
 
@@ -319,6 +328,15 @@ final class TenantDeployService {
                   let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
             return text.contains(/(?m)^resource\s+"/)
         }
+    }
+
+    /// Adopted objects by plain-language type, most common first.
+    func adoptedSummary(for tenant: Tenant) -> [(label: String, count: Int)] {
+        let objects = (try? ExportedObjectInventory.scan(directory: adoptedURL(for: tenant))) ?? []
+        let counts = Dictionary(grouping: objects, by: \.resourceType).mapValues(\.count)
+        return counts
+            .map { (label: BlockCapture.objectLabel(for: $0.key), count: $0.value) }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.label < $1.label }
     }
 
     private func historyURL(for tenant: Tenant) -> URL {

@@ -64,7 +64,9 @@ struct BaselineEditorView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(selection.blockID)
                                 .font(.callout.monospaced())
-                            Text("Selected on this tenant, but not in any catalog this Mac follows. Add the catalog it comes from, or remove it from the baseline.")
+                            Text(selection.blockID == "foundation"
+                                ? "Foundation now comes with the demo catalog. Add it in Building Blocks → Manage Sources to keep managing it here."
+                                : "Selected on this tenant, but not in any catalog this Mac follows. Add the catalog it comes from, or remove it from the baseline.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -73,12 +75,22 @@ struct BaselineEditorView: View {
                             .foregroundStyle(.orange)
                     }
                     Spacer()
-                    Button("Remove from Baseline", role: .destructive) {
+                    // A deployed block's configuration is gone with its
+                    // catalog, so it can only be released, never deleted.
+                    let isDeployed = tenant.deployedBlockVersions[selection.blockID] != nil
+                    Button(isDeployed ? "Stop Managing" : "Remove from Baseline", role: isDeployed ? nil : .destructive) {
                         var updated = tenant
                         updated.blockSelections.removeAll { $0.blockID == selection.blockID }
+                        if isDeployed {
+                            updated.pendingRemovals.removeAll { $0.blockID == selection.blockID }
+                            updated.pendingRemovals.append(BlockRemoval(blockID: selection.blockID, keepInJamf: true))
+                        }
                         tenantStore.update(updated)
                     }
                     .controlSize(.small)
+                    .help(isDeployed
+                        ? "Its objects stay in Jamf; the next deploy stops tracking them"
+                        : "Removes the selection; nothing was deployed for it")
                 }
                 .padding(10)
                 .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
@@ -160,7 +172,8 @@ struct BaselineEditorView: View {
     private func blockRow(_ block: BlockMetadata) -> some View {
         let selection = selectionIndex[block.id]
         let isSelected = selection != nil || block.alwaysOn
-        let prerequisitesMissing = block.requires.filter { selectionIndex[$0] == nil && $0 != "foundation" }
+        let prerequisitesMissing = block.requires.filter { selectionIndex[$0] == nil && catalog.block(id: $0) != nil }
+        let prerequisitesUnavailable = block.requires.filter { catalog.block(id: $0) == nil }
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
@@ -215,6 +228,21 @@ struct BaselineEditorView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if isSelected, let missing = prerequisitesUnavailable.first {
+                Label(
+                    "Needs “\(missing)”, which no catalog on this Mac provides\(missing == "foundation" ? " — Foundation comes with the demo catalog. Add it in Building Blocks → Manage Sources" : ""). Or remove this block.",
+                    systemImage: "exclamationmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
+            if isSelected, let selection, let message = scopeProblem(block, selection: selection) {
+                Label(message, systemImage: "exclamationmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
             if isSelected, let missing = firstMissingRequiredSetting(block, selection: selection) {
                 Label(
                     "“\(missing.title)” needs a value before this block can deploy — open Settings.",
@@ -245,7 +273,9 @@ struct BaselineEditorView: View {
                 BlockSettingsForm(
                     tenant: tenant,
                     block: block,
-                    selection: selection ?? BlockSelection(blockID: block.id, scope: block.scope.default ?? "pilot")
+                    selection: selection ?? defaultSelection(for: block, selectedIDs: selectedIDs),
+                    foundationSelected: foundationSelected,
+                    providers: providerChoices(excluding: block.id)
                 )
                 .padding(.leading, 22)
             }
@@ -263,11 +293,22 @@ struct BaselineEditorView: View {
             // Pull in prerequisites first.
             for requirement in block.requires where selectionIndex[requirement] == nil {
                 if let required = catalog.block(id: requirement) {
-                    updated.blockSelections.append(defaultSelection(for: required))
+                    updated.blockSelections.append(defaultSelection(for: required, selectedIDs: selectedIDs))
                 }
             }
-            updated.blockSelections.append(defaultSelection(for: block))
+            let selectedAfter = selectedIDs.union([block.id] + block.requires)
+            let selection = defaultSelection(for: block, selectedIDs: selectedAfter)
+            updated.blockSelections.append(selection)
+            // Blocks waiting for a group or category this block creates pick
+            // up their declared default now.
+            for index in updated.blockSelections.indices {
+                guard let other = catalog.block(id: updated.blockSelections[index].blockID) else { continue }
+                Self.adoptDefaults(of: other, into: &updated.blockSelections[index], from: block)
+            }
             tenantStore.update(updated)
+            if scopeProblem(block, selection: selection) != nil {
+                expandedBlockID = block.id
+            }
         } else {
             // Refuse removal while another selected block requires this one.
             let dependents = updated.blockSelections.compactMap { catalog.block(id: $0.blockID) }
@@ -291,26 +332,119 @@ struct BaselineEditorView: View {
         tenantStore.update(updated)
     }
 
-    private func defaultSelection(for block: BlockMetadata) -> BlockSelection {
+    private var selectedIDs: Set<String> {
+        Set(tenant.blockSelections.map(\.blockID))
+    }
+
+    /// Foundation is usable only when it is selected and a followed
+    /// catalog provides it.
+    private var foundationSelected: Bool {
+        selectionIndex["foundation"] != nil && catalog.block(id: "foundation") != nil
+    }
+
+    /// A block's starting selection. Scope and category follow the block's
+    /// declared defaults when the block creating them is selected too;
+    /// otherwise the user picks (an existing group, no category).
+    private func defaultSelection(for block: BlockMetadata, selectedIDs: Set<String>) -> BlockSelection {
         var settings: [String: String] = [:]
         for setting in block.settings where !setting.default.isEmpty {
             settings[setting.key] = setting.default
         }
-        // Safe default: pilot scope unless the block declares otherwise.
-        let scope = block.scope.default ?? "pilot"
-        return BlockSelection(blockID: block.id, settings: settings, scope: scope)
+        let withFoundation = selectedIDs.contains("foundation") && catalog.block(id: "foundation") != nil
+        var selection = BlockSelection(blockID: block.id, settings: settings, scope: "")
+        if block.scope.kind != .none {
+            if let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)) {
+                if selectedIDs.contains(provided.blockID) { selection.providedScope = provided }
+            } else if withFoundation {
+                selection.scope = block.scope.default ?? "pilot"
+            }
+        }
+        if block.acceptsCategory {
+            if let provided = block.defaultCategory.flatMap(ProvidedObject.init(reference:)),
+               selectedIDs.contains(provided.blockID) {
+                selection.providedCategory = provided
+            } else if !withFoundation {
+                selection.existingCategory = .noCategory
+            }
+        }
+        return selection
+    }
+
+    /// Fills an unchosen scope, or the "no category" placeholder, with the
+    /// block's default when `provider` is the block that creates it.
+    static func adoptDefaults(of block: BlockMetadata, into selection: inout BlockSelection, from provider: BlockMetadata) {
+        if block.scope.kind != .none, selection.existingScope == nil, selection.providedScope == nil,
+           selection.scope.isEmpty,
+           let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)),
+           provided.blockID == provider.id {
+            selection.providedScope = provided
+        }
+        if block.acceptsCategory, selection.existingCategory == .noCategory || selection.existingCategory == nil && selection.providedCategory == nil,
+           let provided = block.defaultCategory.flatMap(ProvidedObject.init(reference:)),
+           provided.blockID == provider.id {
+            selection.existingCategory = nil
+            selection.providedCategory = provided
+        }
+    }
+
+    static func wiresThroughFoundation(_ block: BlockMetadata, _ selection: BlockSelection) -> Bool {
+        block.wiresThroughFoundation(
+            usesExistingScope: selection.existingScope != nil || selection.providedScope != nil,
+            usesExistingCategory: selection.existingCategory != nil || selection.providedCategory != nil)
+    }
+
+    /// Selected blocks that create groups or categories other blocks can use.
+    private func providerChoices(excluding blockID: String) -> [BlockSettingsForm.Provider] {
+        tenant.blockSelections.compactMap { catalog.block(id: $0.blockID) }
+            .filter { $0.id != blockID }
+            .compactMap { block in
+                let groups = block.provides["device_group"] ?? []
+                let categories = block.provides["category"] ?? []
+                guard !groups.isEmpty || !categories.isEmpty else { return nil }
+                return BlockSettingsForm.Provider(blockID: block.id, blockName: block.name, groups: groups, categories: categories)
+            }
+    }
+
+    /// Why the block's scope or category cannot deploy yet, if so.
+    private func scopeProblem(_ block: BlockMetadata, selection: BlockSelection) -> String? {
+        if block.scope.kind != .none, selection.existingScope == nil, selection.providedScope == nil, selection.scope.isEmpty {
+            return "Choose which group this block applies to — open Settings."
+        }
+        for (provided, kind) in [(selection.providedScope, "group"), (selection.providedCategory, "category")] {
+            guard let provided else { continue }
+            if selectionIndex[provided.blockID] == nil {
+                let providerName = catalog.block(id: provided.blockID)?.name ?? provided.blockID
+                return "Uses the \(kind) “\(provided.name)” from \(providerName), which is not selected. Select it, or pick another \(kind) in Settings."
+            }
+        }
+        if Self.wiresThroughFoundation(block, selection), !foundationSelected, block.id != "foundation" {
+            return "Uses Foundation groups or categories, but Foundation is not selected. Pick other ones in Settings."
+        }
+        return nil
     }
 
     private func apply(_ preset: Preset) {
         var updated = tenant
+        let presetIDs = Set(preset.blocks)
         updated.blockSelections = preset.blocks.compactMap { blockID in
             guard let block = catalog.block(id: blockID) else { return nil }
-            var selection = defaultSelection(for: block)
+            var selection = defaultSelection(for: block, selectedIDs: presetIDs)
             for (key, value) in preset.defaults[blockID] ?? [:] {
                 selection.settings[key] = value
             }
-            if let scope = preset.scopes[blockID] {
-                selection.scope = scope
+            if let scope = preset.scopes[blockID], block.scope.kind != .none {
+                if let provided = ProvidedObject(reference: scope) {
+                    selection.providedScope = provided
+                    selection.scope = ""
+                } else if presetIDs.contains("foundation") {
+                    selection.providedScope = nil
+                    selection.scope = scope
+                }
+            }
+            if let category = preset.categories[blockID], block.acceptsCategory,
+               let provided = ProvidedObject(reference: category) {
+                selection.existingCategory = nil
+                selection.providedCategory = provided
             }
             return selection
         }
@@ -321,12 +455,28 @@ struct BaselineEditorView: View {
 /// Native controls for one block's settings and scope.
 struct BlockSettingsForm: View {
     @Environment(TenantStore.self) private var tenantStore
+    @Environment(ActivityLog.self) private var activityLog
 
     let tenant: Tenant
     let block: BlockMetadata
     let selection: BlockSelection
+    /// Foundation's groups and categories are offered only when the
+    /// baseline includes it.
+    var foundationSelected = false
+    /// Other selected blocks that create groups or categories.
+    var providers: [Provider] = []
+
+    struct Provider: Hashable {
+        var blockID: String
+        var blockName: String
+        var groups: [String]
+        var categories: [String]
+    }
 
     @State private var isPickingApps = false
+    @State private var groups: [ExistingObjectService.ComputerGroup]?
+    @State private var categories: [ExistingObjectRef]?
+    @State private var lookupError: String?
 
     private static let scopeChoices: [(key: String, label: String)] = [
         ("pilot", "Pilot"),
@@ -339,20 +489,15 @@ struct BlockSettingsForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if block.scope.kind != .none {
-                // App Installers only accept smart groups; the static Pilot
-                // group is withheld for those blocks.
-                let choices = block.scope.smartOnly
-                    ? Self.scopeChoices.filter { $0.key != "pilot" }
-                    : Self.scopeChoices
-                Picker("Scope", selection: scopeBinding) {
-                    ForEach(choices, id: \.key) { choice in
-                        Text(choice.label).tag(choice.key)
-                    }
-                }
-                .frame(maxWidth: 360)
-                .help(tenant.isProduction
-                    ? "Production tenants default to the Pilot group — widen the scope once the pilot looks good."
-                    : "The device group this block applies to.")
+                scopePicker
+            }
+            if block.acceptsCategory {
+                categoryPicker
+            }
+            if let lookupError {
+                Label("Existing groups and categories could not be loaded: \(lookupError)", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
 
             let sections = Dictionary(grouping: block.settings, by: \.section)
@@ -370,13 +515,170 @@ struct BlockSettingsForm: View {
             }
         }
         .controlSize(.small)
+        .task(id: tenant.id) { await loadExistingObjects() }
+    }
+
+    // MARK: Scope and category
+
+    /// Existing groups need a Jamf Pro group ID; Platform-scoped blocks
+    /// keep Foundation groups only.
+    private var offersExistingGroups: Bool {
+        block.scope.kind == .jamfProGroup
+    }
+
+    private var foundationScopeChoices: [(key: String, label: String)] {
+        // App Installers only accept smart groups; the static Pilot group is
+        // withheld for those blocks.
+        block.scope.smartOnly ? Self.scopeChoices.filter { $0.key != "pilot" } : Self.scopeChoices
+    }
+
+    private var existingGroupChoices: [ExistingObjectRef] {
+        var choices = (groups ?? [])
+            .filter { !block.scope.smartOnly || $0.isSmart }
+            .map(\.ref)
+        if let current = selection.existingScope, !choices.contains(current) {
+            choices.insert(current, at: 0)
+        }
+        return choices
+    }
+
+    private var scopePicker: some View {
+        Picker("Scope", selection: scopeBinding) {
+            if selection.existingScope == nil, selection.providedScope == nil, selection.scope.isEmpty {
+                Text("Choose a group…").tag("")
+            }
+            if foundationSelected || Self.scopeChoices.contains(where: { $0.key == selection.scope }) && selection.existingScope == nil && selection.providedScope == nil {
+                Section("Foundation") {
+                    ForEach(foundationScopeChoices, id: \.key) { choice in
+                        Text(choice.label).tag("foundation:\(choice.key)")
+                    }
+                }
+            }
+            ForEach(providers.filter { !$0.groups.isEmpty }, id: \.blockID) { provider in
+                Section("Created by \(provider.blockName)") {
+                    ForEach(provider.groups, id: \.self) { name in
+                        Text(name).tag("provided:\(provider.blockID)/\(name)")
+                    }
+                }
+            }
+            if let provided = selection.providedScope,
+               !providers.contains(where: { $0.blockID == provided.blockID && $0.groups.contains(provided.name) }) {
+                Text("\(provided.name) (block not selected)").tag("provided:\(provided.reference)")
+            }
+            if offersExistingGroups {
+                Section(groups == nil && lookupError == nil ? "In this tenant (loading…)" : "In this tenant") {
+                    ForEach(existingGroupChoices, id: \.id) { group in
+                        Text(group.name).tag("existing:\(group.id)")
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 420)
+        .help(block.scope.smartOnly
+            ? "The smart group this block applies to: one another selected block creates, or one already in the tenant. App Installers need a smart group."
+            : "The group this block applies to: one another selected block creates, or one already in the tenant.")
     }
 
     private var scopeBinding: Binding<String> {
         Binding(
-            get: { selection.scope },
-            set: { newValue in mutateSelection { $0.scope = newValue } }
+            get: {
+                if let existing = selection.existingScope { return "existing:\(existing.id)" }
+                if let provided = selection.providedScope { return "provided:\(provided.reference)" }
+                return selection.scope.isEmpty ? "" : "foundation:\(selection.scope)"
+            },
+            set: { tag in
+                mutateSelection { selection in
+                    if tag.hasPrefix("existing:") {
+                        let id = String(tag.dropFirst("existing:".count))
+                        selection.existingScope = existingGroupChoices.first { $0.id == id }
+                        selection.providedScope = nil
+                        selection.scope = ""
+                    } else if tag.hasPrefix("provided:") {
+                        selection.providedScope = ProvidedObject(reference: String(tag.dropFirst("provided:".count)))
+                        selection.existingScope = nil
+                        selection.scope = ""
+                    } else if tag.hasPrefix("foundation:") {
+                        selection.existingScope = nil
+                        selection.providedScope = nil
+                        selection.scope = String(tag.dropFirst("foundation:".count))
+                    }
+                }
+            }
         )
+    }
+
+    private var categoryChoices: [ExistingObjectRef] {
+        var choices = [ExistingObjectRef.noCategory] + (categories ?? [])
+        if let current = selection.existingCategory, !choices.contains(current) {
+            choices.insert(current, at: 1)
+        }
+        return choices
+    }
+
+    private var categoryPicker: some View {
+        Picker("Category", selection: categoryBinding) {
+            if foundationSelected || selection.existingCategory == nil && selection.providedCategory == nil {
+                Text("Foundation: \(block.category)").tag("foundation")
+            }
+            ForEach(providers.filter { !$0.categories.isEmpty }, id: \.blockID) { provider in
+                Section("Created by \(provider.blockName)") {
+                    ForEach(provider.categories, id: \.self) { name in
+                        Text(name).tag("provided:\(provider.blockID)/\(name)")
+                    }
+                }
+            }
+            if let provided = selection.providedCategory,
+               !providers.contains(where: { $0.blockID == provided.blockID && $0.categories.contains(provided.name) }) {
+                Text("\(provided.name) (block not selected)").tag("provided:\(provided.reference)")
+            }
+            Section("In this tenant") {
+                ForEach(categoryChoices, id: \.id) { category in
+                    Text(category.name).tag("existing:\(category.id)")
+                }
+            }
+        }
+        .frame(maxWidth: 420)
+        .help("The Jamf Pro category this block's objects are filed under.")
+    }
+
+    private var categoryBinding: Binding<String> {
+        Binding(
+            get: {
+                if let existing = selection.existingCategory { return "existing:\(existing.id)" }
+                if let provided = selection.providedCategory { return "provided:\(provided.reference)" }
+                return "foundation"
+            },
+            set: { tag in
+                mutateSelection { selection in
+                    if tag.hasPrefix("existing:") {
+                        let id = String(tag.dropFirst("existing:".count))
+                        selection.existingCategory = categoryChoices.first { $0.id == id }
+                        selection.providedCategory = nil
+                    } else if tag.hasPrefix("provided:") {
+                        selection.providedCategory = ProvidedObject(reference: String(tag.dropFirst("provided:".count)))
+                        selection.existingCategory = nil
+                    } else {
+                        selection.existingCategory = nil
+                        selection.providedCategory = nil
+                    }
+                }
+            }
+        )
+    }
+
+    private func loadExistingObjects() async {
+        guard offersExistingGroups || block.acceptsCategory else { return }
+        do {
+            if offersExistingGroups {
+                groups = try await ExistingObjectService.computerGroups(tenant: tenant, activityLog: activityLog)
+            }
+            if block.acceptsCategory {
+                categories = try await ExistingObjectService.categories(tenant: tenant, activityLog: activityLog)
+            }
+            lookupError = nil
+        } catch {
+            lookupError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     @ViewBuilder
@@ -486,7 +788,12 @@ struct SavePresetSheet: View {
         Preset.capturing(
             name: name.trimmingCharacters(in: .whitespaces),
             summary: summary.trimmingCharacters(in: .whitespaces),
-            selections: tenant.blockSelections.map { ($0.blockID, $0.settings, $0.scope) },
+            selections: tenant.blockSelections.map {
+                Preset.PresetSelection(
+                    blockID: $0.blockID, settings: $0.settings,
+                    scope: $0.existingScope == nil ? $0.scope : "",
+                    providedScope: $0.providedScope, providedCategory: $0.providedCategory)
+            },
             blocks: catalog.blocks)
     }
 

@@ -107,6 +107,8 @@ public nonisolated enum BlockCapture {
         public var objectCount: Int
         public var usesJamfProScope: Bool
         public var usesPlatformScope: Bool
+        /// The block takes a category chosen per tenant.
+        public var usesCategory: Bool = false
         public var warnings: [String]
     }
 
@@ -806,9 +808,9 @@ public nonisolated enum BlockCapture {
 
         let scope: [String: Any]
         if usesJamfProScope {
-            scope = ["kind": "jamfProGroup", "variable": "scope_jamf_pro_group_id", "default": "pilot"]
+            scope = ["kind": "jamfProGroup", "variable": "scope_jamf_pro_group_id"]
         } else if usesPlatformScope {
-            scope = ["kind": "platformGroup", "variable": "scope_platform_group_uuid", "default": "pilot"]
+            scope = ["kind": "platformGroup", "variable": "scope_platform_group_uuid"]
         } else {
             scope = ["kind": "none"]
         }
@@ -821,7 +823,7 @@ public nonisolated enum BlockCapture {
             "version": "0.1.0",
             "needs": needs.mapValues { Array($0).sorted() },
             "provides": provides.mapValues { $0.map(\.name).sorted() },
-            "requires": (usesJamfProScope || usesPlatformScope) ? ["foundation"] : [],
+            "requires": [],
             "conflicts": [],
             "products": ["jamf-pro", "jamf-platform"],
             "permissions": permissions,
@@ -874,6 +876,7 @@ public nonisolated enum BlockCapture {
             objectCount: objectCount,
             usesJamfProScope: usesJamfProScope,
             usesPlatformScope: usesPlatformScope,
+            usesCategory: usesCategory,
             warnings: warnings
         )
     }
@@ -1220,7 +1223,7 @@ public nonisolated enum BlockCapture {
     }
 
     /// Plain-language label for a provider type: `jamfplatform_pro_macos_configuration_profile` → "macOS configuration profile".
-    static func objectLabel(for type: String) -> String {
+    public static func objectLabel(for type: String) -> String {
         var words = type
             .replacingOccurrences(of: "jamfplatform_pro_", with: "")
             .replacingOccurrences(of: "jamfplatform_", with: "")

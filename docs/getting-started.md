@@ -22,12 +22,12 @@ Connecting a Jamf Protect tenant (for the Protect building blocks) is an optiona
 
 ## 3. Compose a baseline
 
-First visit to **Building Blocks**: the app ships only the configuration-free blocks (Foundation, App Catalog, Jamf Protect, Security Cloud) — add the **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** to try a full baseline (enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings, Self Service maintenance and macOS version groups — versioned by release tag). For real fleets, capture your own blocks or publish your own catalog — the demo repository is the template.
+First visit to **Building Blocks**: the app ships only the configuration-free blocks (App Catalog, Jamf Protect, Security Cloud) — add the **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** to try a full baseline (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings, Self Service maintenance and macOS version groups — versioned by release tag). For real fleets, capture your own blocks or publish your own catalog — the demo repository is the template.
 
-Then compose the baseline in the tenant's **Overview** tab:
+Then compose the baseline in the tenant's **Overview** tab, under **Add from the catalog**:
 
-- Start from a preset offered by your catalog — the demo catalog ships **Standard** (enrollment, FileVault, software updates, CIS Level 1 monitoring, Rosetta 2), **Minimal** and **Complete** — or pick blocks individually.
-- Each block has plain-language settings and a scope — one of Foundation's groups: Pilot, All Managed Macs, Laptops, Desktops or Apple Silicon Macs. New selections start on Pilot unless the block sets its own default (App Catalog apps start on All Managed Macs).
+- Start from a preset offered by your catalog — the demo catalog ships **Standard** (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1 monitoring, Rosetta 2), **Minimal** and **Complete** — or pick blocks individually.
+- Each block has plain-language settings and, where it applies to devices, a scope: a group another selected block creates (the demo catalog's **Device Groups**: Pilot, All Managed Macs, Laptops, Desktops, Apple Silicon Macs) or a group already in the tenant. Blocks that file objects under a category pick one the same way. A block starts on its declared default when the block creating it is selected — FileVault on Pilot, for example — and otherwise asks you to choose.
 - Blocks marked high-risk (compliance, endpoint security) start in monitor or report-only mode.
 
 See [Building Blocks](building-blocks.md) for what each block creates.
@@ -47,5 +47,5 @@ The **Day 0 Setup** tab tracks the things an API cannot fully do — APNs certif
 ## From here
 
 - **Check for Changes** (⌘R) shows what was changed directly in Jamf since the last deploy — keep each change or restore the baseline. **Check All Tenants** on the dashboard does the same for the whole fleet. To stop managing a block's objects without touching Jamf, use **Stop Managing** in the baseline.
-- **Export** captures an existing tenant's objects as reusable blocks, documentation or a snapshot; **Adopt** brings hand-configured objects under management without recreating them.
+- **Export** captures an existing tenant's objects as reusable blocks, documentation or a snapshot; **Adopt** brings hand-configured objects under management without recreating them. Adopted objects are managed as they are — Check for Changes covers them and they need no building block; the tenant's Overview lists them under **Managed in this tenant**, while building blocks are for adding what isn't there yet.
 - Working with colleagues? Set up a shared repository: [Team Mode](team-mode.md).

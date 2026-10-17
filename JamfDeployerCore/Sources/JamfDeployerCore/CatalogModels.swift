@@ -129,6 +129,9 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     public var needs: [String: [String]]
     /// Object names this block creates per dependency type.
     public var provides: [String: [String]]
+    /// Category used when the block providing it is selected, as
+    /// "<blockID>/<category name>".
+    public var defaultCategory: String?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -155,6 +158,7 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
         capturedFromTenant = try container.decodeIfPresent(String.self, forKey: .capturedFromTenant)
         needs = try container.decodeIfPresent([String: [String]].self, forKey: .needs) ?? [:]
         provides = try container.decodeIfPresent([String: [String]].self, forKey: .provides) ?? [:]
+        defaultCategory = try container.decodeIfPresent(String.self, forKey: .defaultCategory)
     }
 
     /// The setting controlling a drifted field, when one is bound.
@@ -174,6 +178,45 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     }
 }
 
+/// A group or category another selected block creates, by that block's
+/// ID and the object's name in its `provides`.
+public nonisolated struct ProvidedObject: Codable, Sendable, Hashable {
+    public var blockID: String
+    public var name: String
+
+    public init(blockID: String, name: String) {
+        self.blockID = blockID
+        self.name = name
+    }
+
+    /// "<blockID>/<name>", as written in block defaults and presets.
+    public var reference: String { "\(blockID)/\(name)" }
+
+    /// Parses "<blockID>/<name>"; nil for anything else (legacy Foundation
+    /// keys have no slash).
+    public init?(reference: String) {
+        guard let slash = reference.firstIndex(of: "/") else { return nil }
+        let blockID = String(reference[..<slash])
+        let name = String(reference[reference.index(after: slash)...])
+        guard !blockID.isEmpty, !name.isEmpty else { return nil }
+        self.init(blockID: blockID, name: name)
+    }
+}
+
+public nonisolated extension BlockMetadata {
+    /// Whether a selection of this block takes anything from Foundation.
+    /// Scope and category come from Foundation unless the selection points
+    /// at existing objects; a "foundation" requirement on a block with
+    /// neither is a dependency in its own right.
+    func wiresThroughFoundation(usesExistingScope: Bool, usesExistingCategory: Bool) -> Bool {
+        let scopeViaFoundation = scope.kind != .none && !usesExistingScope
+        let categoryViaFoundation = acceptsCategory && !usesExistingCategory
+        let explicitRequirement = requires.contains("foundation")
+            && scope.kind == .none && !acceptsCategory
+        return scopeViaFoundation || categoryViaFoundation || explicitRequirement
+    }
+}
+
 /// presets/<id>.json — a named list of blocks plus default settings.
 public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
     public var id: String
@@ -181,12 +224,17 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
     public var summary: String
     public var blocks: [String]
     public var defaults: [String: [String: String]]
-    /// Scope per block, where it differs from the block's own default.
+    /// Scope per block, where it differs from the block's own default: a
+    /// group another preset block creates ("<blockID>/<name>"), or a
+    /// legacy Foundation group key.
     public var scopes: [String: String]
+    /// Category per block, as "<blockID>/<category name>".
+    public var categories: [String: String]
 
     public init(
         id: String, name: String, summary: String, blocks: [String],
-        defaults: [String: [String: String]] = [:], scopes: [String: String] = [:]
+        defaults: [String: [String: String]] = [:], scopes: [String: String] = [:],
+        categories: [String: String] = [:]
     ) {
         self.id = id
         self.name = name
@@ -194,6 +242,7 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
         self.blocks = blocks
         self.defaults = defaults
         self.scopes = scopes
+        self.categories = categories
     }
 
     public init(from decoder: Decoder) throws {
@@ -204,6 +253,7 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
         blocks = try container.decodeIfPresent([String].self, forKey: .blocks) ?? []
         defaults = try container.decodeIfPresent([String: [String: String]].self, forKey: .defaults) ?? [:]
         scopes = try container.decodeIfPresent([String: String].self, forKey: .scopes) ?? [:]
+        categories = try container.decodeIfPresent([String: String].self, forKey: .categories) ?? [:]
     }
 
     /// A preset capturing a baseline: its blocks in order, the non-secret
@@ -213,12 +263,14 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
     public static func capturing(
         name: String,
         summary: String,
-        selections: [(blockID: String, settings: [String: String], scope: String)],
+        selections: [PresetSelection],
         blocks: [BlockMetadata]
     ) -> Preset {
         let byID = Dictionary(blocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let presetBlocks = Set(selections.map(\.blockID))
         var defaults: [String: [String: String]] = [:]
         var scopes: [String: String] = [:]
+        var categories: [String: String] = [:]
         for selection in selections {
             guard let block = byID[selection.blockID] else { continue }
             var changed: [String: String] = [:]
@@ -228,13 +280,44 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
                 }
             }
             if !changed.isEmpty { defaults[block.id] = changed }
-            if block.scope.kind != .none, selection.scope != (block.scope.default ?? "pilot") {
-                scopes[block.id] = selection.scope
+            // Only references that travel: groups and categories created by
+            // blocks in the preset, or Foundation keys. Existing objects are
+            // tenant-specific.
+            if block.scope.kind != .none {
+                if let provided = selection.providedScope, presetBlocks.contains(provided.blockID) {
+                    if provided.reference != block.scope.default { scopes[block.id] = provided.reference }
+                } else if WorkspaceGenerator.foundationGroups.contains(selection.scope),
+                          selection.scope != (block.scope.default ?? "pilot") {
+                    scopes[block.id] = selection.scope
+                }
+            }
+            if block.acceptsCategory, let provided = selection.providedCategory,
+               presetBlocks.contains(provided.blockID), provided.reference != block.defaultCategory {
+                categories[block.id] = provided.reference
             }
         }
         return Preset(
             id: identifier(for: name), name: name, summary: summary,
-            blocks: selections.map(\.blockID), defaults: defaults, scopes: scopes)
+            blocks: selections.map(\.blockID), defaults: defaults, scopes: scopes, categories: categories)
+    }
+
+    public struct PresetSelection: Sendable {
+        public var blockID: String
+        public var settings: [String: String]
+        public var scope: String
+        public var providedScope: ProvidedObject?
+        public var providedCategory: ProvidedObject?
+
+        public init(
+            blockID: String, settings: [String: String], scope: String,
+            providedScope: ProvidedObject? = nil, providedCategory: ProvidedObject? = nil
+        ) {
+            self.blockID = blockID
+            self.settings = settings
+            self.scope = scope
+            self.providedScope = providedScope
+            self.providedCategory = providedCategory
+        }
     }
 
     /// File-safe preset ID derived from its name.

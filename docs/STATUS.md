@@ -40,7 +40,7 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 
 ## Composition
 - **Two blocks owning one tenant-wide setting** are refused when the workspace is generated, with a message naming both blocks.
-- **Name collisions are not detected yet**: selecting Foundation next to a captured categories block while "apply the tenant prefix to all names" is on can produce identically named categories (both create "<prefix>Enrollment"), and duplicated App Catalog titles (for example "TF - Google Chrome" next to "Google Chrome") collide once rebinding collapses their deployments onto one target group. Jamf rejects the duplicates; deselect the duplicate objects at capture, or skip the prefix option. An editor-level collision warning is planned.
+- **Name collisions are not detected yet**: selecting the demo catalog's Categories block next to a captured categories block while "apply the tenant prefix to all names" is on can produce identically named categories (both create "<prefix>Enrollment"), and duplicated App Catalog titles (for example "TF - Google Chrome" next to "Google Chrome") collide once rebinding collapses their deployments onto one target group. Jamf rejects the duplicates; deselect the duplicate objects at capture, or skip the prefix option. An editor-level collision warning is planned.
 - **Removing a settings block only stops managing it**: Jamf has no "empty" state for tenant-wide settings, so the provider drops them from state and Jamf keeps the current values. The removal dialog says so.
 - **Deploy history masks sensitive values**: `tofu show -json` prints them in clear text; the copy kept in history (and the team repository) is redacted with the engine's sensitivity markers.
 

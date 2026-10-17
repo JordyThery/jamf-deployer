@@ -108,7 +108,7 @@ struct CatalogView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Blocks come from catalogs")
                         .font(.headline)
-                    Text("The app ships only blocks without configuration opinions (Foundation, App Catalog, Jamf Protect, Security Cloud). Add the demo catalog to try a full baseline — for real fleets, capture your own blocks or publish your own catalog repository.")
+                    Text("The app ships only blocks without configuration opinions (App Catalog, Jamf Protect, Security Cloud) — they use the groups and categories already in your tenant. Add the demo catalog for Foundation and a full baseline — for real fleets, capture your own blocks or publish your own catalog repository.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     if let demoCatalogError {

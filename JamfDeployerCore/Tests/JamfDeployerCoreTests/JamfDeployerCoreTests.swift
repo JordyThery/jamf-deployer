@@ -288,6 +288,102 @@ struct AppCatalogTests {
         #expect(output.mainTF.contains("titleName") && output.mainTF.contains("Google Chrome"))
     }
 
+    @Test func existingGroupAndCategoryNeedNoFoundation() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        let block = try #require(catalog.block(id: "app-catalog"))
+        let selection = GeneratedSelection(
+            block: block, settings: [:], scope: "",
+            existingScopeID: "1", existingCategoryID: "467")
+        #expect(!selection.wiresThroughFoundation)
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ", selections: [selection], providerVersion: "1.5.0"))
+        #expect(output.mainTF.contains(/scope_jamf_pro_group_id\s*=\s*"1"/))
+        #expect(output.mainTF.contains(/category_id\s*=\s*"467"/))
+        #expect(!output.mainTF.contains("module.foundation"))
+    }
+
+    @Test func existingGroupWithFoundationCategoryStillNeedsFoundation() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        let block = try #require(catalog.block(id: "app-catalog"))
+        let selection = GeneratedSelection(block: block, settings: [:], scope: "", existingScopeID: "1")
+        #expect(selection.wiresThroughFoundation)
+        #expect(throws: WorkspaceGeneratorError.self) {
+            try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "JD - ", selections: [selection], providerVersion: "1.5.0"))
+        }
+    }
+
+    @Test func unchosenScopeIsReported() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        let block = try #require(catalog.block(id: "app-catalog"))
+        let input = WorkspaceInput(
+            namePrefix: "JD - ",
+            selections: [
+                GeneratedSelection(block: catalog.block(id: "foundation")!, settings: [:], scope: "pilot"),
+                GeneratedSelection(block: block, settings: [:], scope: ""),
+            ],
+            providerVersion: "1.5.0")
+        #expect {
+            try WorkspaceGenerator.generate(input)
+        } throws: { error in
+            if case WorkspaceGeneratorError.scopeNotChosen(block: "app-catalog") = error { return true }
+            return false
+        }
+    }
+
+    @Test func presetsCarryOnlyFoundationScopes() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        let preset = Preset.capturing(
+            name: "Mixed", summary: "",
+            selections: [.init(blockID: "app-catalog", settings: [:], scope: "")],
+            blocks: catalog.blocks)
+        #expect(preset.scopes.isEmpty)
+    }
+
+    @Test func scopesAndCategoriesFromAnotherBlock() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        var groups = try #require(catalog.block(id: "protect-baseline"))
+        groups.id = "device-groups"
+        groups.provides = ["device_group": ["All Macs"], "category": ["Apps"]]
+        let appCatalog = try #require(catalog.block(id: "app-catalog"))
+        let selection = GeneratedSelection(
+            block: appCatalog, settings: [:], scope: "",
+            providedScope: ProvidedObject(blockID: "device-groups", name: "All Macs"),
+            providedCategory: ProvidedObject(blockID: "device-groups", name: "Apps"))
+        #expect(!selection.wiresThroughFoundation)
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ",
+            selections: [GeneratedSelection(block: groups, settings: [:], scope: ""), selection],
+            providerVersion: "1.5.0"))
+        #expect(output.mainTF.contains(#"module.device_groups.device_group_jamf_pro_ids["All Macs"]"#))
+        #expect(output.mainTF.contains(#"module.device_groups.category_ids["Apps"]"#))
+
+        // The providing block must be selected and create the named object.
+        #expect(throws: WorkspaceGeneratorError.self) {
+            try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "JD - ", selections: [selection], providerVersion: "1.5.0"))
+        }
+        #expect(ProvidedObject(reference: "device-groups/All Macs") == ProvidedObject(blockID: "device-groups", name: "All Macs"))
+        #expect(ProvidedObject(reference: "all_macs") == nil)
+    }
+
+    @Test func presetsCarryProvidedReferences() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        var groups = try #require(catalog.block(id: "protect-baseline"))
+        groups.id = "device-groups"
+        let preset = Preset.capturing(
+            name: "Wired", summary: "",
+            selections: [
+                .init(blockID: "device-groups", settings: [:], scope: ""),
+                .init(blockID: "app-catalog", settings: [:], scope: "",
+                      providedScope: ProvidedObject(blockID: "device-groups", name: "All Macs"),
+                      providedCategory: ProvidedObject(blockID: "elsewhere", name: "Apps")),
+            ],
+            blocks: catalog.blocks + [groups])
+        #expect(preset.scopes == ["app-catalog": "device-groups/All Macs"])
+        #expect(preset.categories.isEmpty)
+    }
+
     @Test func appCatalogScopeIsSmartOnly() throws {
         let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
         let block = try #require(catalog.block(id: "app-catalog"))
@@ -542,7 +638,7 @@ struct BlockCaptureTests {
         #expect(needs?["script"] == ["JD - Install Rosetta 2"])
         #expect(needs?["package"] == ["JD - Test Package"])
         #expect(needs?["category"] == nil)
-        #expect((manifest?["requires"] as? [String]) == ["foundation"])
+        #expect((manifest?["requires"] as? [String]) == [])
     }
 
     @Test func prestigeWiresToDestinationEnrollmentInstance() throws {
@@ -665,7 +761,8 @@ struct BlockCaptureTests {
         #expect(metadata.needsReview)
         #expect(metadata.scope.kind == .jamfProGroup)
         #expect(metadata.permissions.contains("policies:read"))
-        #expect(metadata.requires == ["foundation"])
+        #expect(metadata.requires.isEmpty)
+        #expect(metadata.scope.default == nil)
         #expect(metadata.acceptsCategory)
     }
 
@@ -1078,8 +1175,8 @@ struct PresetCaptureTests {
             name: "Office Macs — 2026",
             summary: "Our standard.",
             selections: [
-                (blockID: "checkin", settings: ["check_in_frequency": "30", "api_key": "s3cret"], scope: "pilot"),
-                (blockID: "rosetta", settings: [:], scope: "laptops"),
+                .init(blockID: "checkin", settings: ["check_in_frequency": "30", "api_key": "s3cret"], scope: "pilot"),
+                .init(blockID: "rosetta", settings: [:], scope: "laptops"),
             ],
             blocks: Self.blocks)
         #expect(preset.id == "office-macs-2026")
@@ -1103,7 +1200,7 @@ struct PresetCaptureTests {
 
         let preset = Preset.capturing(
             name: "Office Macs", summary: "",
-            selections: [(blockID: "rosetta", settings: [:], scope: "laptops")],
+            selections: [.init(blockID: "rosetta", settings: [:], scope: "laptops")],
             blocks: Self.blocks)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -1117,8 +1214,8 @@ struct PresetCaptureTests {
     @Test func unchangedDefaultsStayOut() {
         let preset = Preset.capturing(
             name: "", summary: "",
-            selections: [(blockID: "checkin", settings: ["check_in_frequency": "15"], scope: "pilot"),
-                         (blockID: "rosetta", settings: [:], scope: "apple_silicon")],
+            selections: [.init(blockID: "checkin", settings: ["check_in_frequency": "15"], scope: "pilot"),
+                         .init(blockID: "rosetta", settings: [:], scope: "apple_silicon")],
             blocks: Self.blocks)
         #expect(preset.id == "preset")
         #expect(preset.defaults.isEmpty)

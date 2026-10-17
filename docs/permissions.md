@@ -27,13 +27,15 @@ tenant's baseline actually contains. Checking for changes needs only the
 
 | Block | Privileges |
 | --- | --- |
-| Foundation | `categories`, `device-groups`, `extension-attributes` (create/read/update/delete), `self-service:read` |
+| Device Groups | `device-groups` (create/read/update/delete) |
+| Categories | `categories` (create/read/update/delete) |
+| Extension Attributes | `extension-attributes` (create/read/update/delete) |
 | Enrollment | `prestage-enrollments` (create/read/update/delete), `device-enrollment-program-instances:read` |
 | FileVault | `disk-encryption-configurations`, `policies` (create/read/update/delete) |
 | Software Updates | `blueprints` (create/read/update/delete), `device-groups:read` |
 | Compliance — CIS Level 1 | `compliance-benchmarks` (create/read/update/delete), `device-groups:read` |
 | Rosetta 2 | `scripts`, `policies` (create/read/update/delete) |
-| App Catalog | `applications` (create/read/update/delete), `smart-computer-groups:read` |
+| App Catalog | `applications` (create/read/update/delete), `smart-computer-groups:read`; `computer-groups:read` and `categories:read` to list existing groups and categories |
 | Security Cloud | `uem-connections`, `activation-profiles` (create/read/update/delete), `tenant-id:read` |
 | Jamf Protect Baseline | none on the Platform client — see the Protect client below |
 

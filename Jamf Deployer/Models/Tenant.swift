@@ -149,6 +149,16 @@ nonisolated struct BlockSelection: Codable, Sendable, Equatable {
     /// When set, this block stays on a specific catalog tag instead of the
     /// tenant's source pin — the per-block update opt-in.
     var sourceTag: String?
+    /// An existing group in the tenant the block is scoped to, instead of a
+    /// Foundation group.
+    var existingScope: ExistingObjectRef?
+    /// An existing category in the tenant (ID "-1" for none), instead of
+    /// the Foundation category.
+    var existingCategory: ExistingObjectRef?
+    /// A group another selected block creates.
+    var providedScope: ProvidedObject?
+    /// A category another selected block creates.
+    var providedCategory: ProvidedObject?
 
     init(blockID: String, sourceID: String = "official", settings: [String: String] = [:], scope: String = "pilot", sourceTag: String? = nil) {
         self.blockID = blockID
@@ -165,7 +175,20 @@ nonisolated struct BlockSelection: Codable, Sendable, Equatable {
         settings = try container.decodeIfPresent([String: String].self, forKey: .settings) ?? [:]
         scope = try container.decodeIfPresent(String.self, forKey: .scope) ?? "pilot"
         sourceTag = try container.decodeIfPresent(String.self, forKey: .sourceTag)
+        existingScope = try container.decodeIfPresent(ExistingObjectRef.self, forKey: .existingScope)
+        existingCategory = try container.decodeIfPresent(ExistingObjectRef.self, forKey: .existingCategory)
+        providedScope = try container.decodeIfPresent(ProvidedObject.self, forKey: .providedScope)
+        providedCategory = try container.decodeIfPresent(ProvidedObject.self, forKey: .providedCategory)
     }
+}
+
+/// An object that already exists in the tenant, referenced by its Jamf ID.
+/// The name is kept for display; the ID is what deploys use.
+nonisolated struct ExistingObjectRef: Codable, Sendable, Equatable, Hashable {
+    var id: String
+    var name: String
+
+    static let noCategory = ExistingObjectRef(id: "-1", name: "No category")
 }
 
 /// The dashboard-relevant outcome of the last deploy.

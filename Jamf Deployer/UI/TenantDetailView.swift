@@ -28,6 +28,7 @@ struct TenantDetailView: View {
     @State private var handOverTypedName = ""
     @State private var keepOutcomes: [String: String] = [:]
     @State private var catalog: LoadedCatalog?
+    @State private var adoptedSummary: [(label: String, count: Int)] = []
 
     private var tenant: Tenant? {
         tenantStore.tenant(id: tenantID)
@@ -180,8 +181,15 @@ struct TenantDetailView: View {
                         }
                     }
 
-                    GroupBox("Baseline") {
+                    if !tenant.isHandedOver {
+                        managedSection(tenant)
+                    }
+
+                    GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
+                            Text("Building blocks add new objects and settings to this tenant. Objects that already exist don't need a block — adopt them instead.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
                             if let catalog {
                                 BaselineEditorView(tenant: tenant, catalog: catalog) {
                                     self.catalog = try? deployService.loadCatalog()
@@ -194,6 +202,8 @@ struct TenantDetailView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(4)
+                    } label: {
+                        Text("Add from the catalog")
                     }
 
                     if let deploy = tenant.lastDeploy {
@@ -208,29 +218,6 @@ struct TenantDetailView: View {
                             .padding(4)
                         }
                     }
-                    if !tenant.isHandedOver {
-                        GroupBox("Adopt existing configuration") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(deployService.hasAdoptedConfig(for: tenant)
-                                    ? "Adopted objects are part of this tenant's record. Run the wizard again to adopt more."
-                                    : "Already configured by hand? Bring existing objects under management without recreating anything.")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                HStack {
-                                    Button("Adopt Existing Configuration…", systemImage: "square.and.arrow.down.on.square") {
-                                        isAdopting = true
-                                    }
-                                    Button("Add a Custom Object…", systemImage: "plus.rectangle.on.rectangle") {
-                                        isAddingCustomObject = true
-                                    }
-                                    .help("Create an object the catalog doesn't cover yet — the form comes from the live provider schema, no configuration language needed")
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(4)
-                        }
-                    }
-
                     if deployService.isManaged(tenant) && !tenant.isHandedOver {
                         GroupBox("Hand over") {
                             VStack(alignment: .leading, spacing: 8) {
@@ -302,6 +289,9 @@ struct TenantDetailView: View {
             .task {
                 catalog = try? deployService.loadCatalog()
             }
+            .task(id: "\(tenant.lastDeploy?.date.timeIntervalSince1970 ?? 0)|\(isAdopting)|\(isPreviewing)") {
+                adoptedSummary = deployService.adoptedSummary(for: tenant)
+            }
         } else {
             ContentUnavailableView(
                 "No Tenant Selected",
@@ -309,6 +299,60 @@ struct TenantDetailView: View {
                 description: Text("Choose a tenant in the sidebar.")
             )
         }
+    }
+
+    /// What the app manages in this tenant, and how to bring more in.
+    @ViewBuilder
+    private func managedSection(_ tenant: Tenant) -> some View {
+        let adoptedCount = adoptedSummary.reduce(0) { $0 + $1.count }
+        let blockCount = tenant.deployedBlockVersions.count
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                if adoptedCount == 0 && blockCount == 0 {
+                    Text("Nothing in this tenant is managed yet. Already configured by hand? Adopt the existing objects — nothing is recreated. For what isn't there yet, add building blocks below.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(managedSummaryText(tenant, adoptedCount: adoptedCount, blockCount: blockCount))
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !adoptedSummary.isEmpty {
+                        let shown = adoptedSummary.prefix(8)
+                        let more = adoptedSummary.count - shown.count
+                        Text(shown.map { "\($0.label) (\($0.count))" }.joined(separator: " · ")
+                            + (more > 0 ? " · and \(more) more type\(more == 1 ? "" : "s")" : ""))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                HStack {
+                    Button(adoptedCount == 0 ? "Adopt Existing Configuration…" : "Adopt More…", systemImage: "square.and.arrow.down.on.square") {
+                        isAdopting = true
+                    }
+                    .help("Bring objects that already exist in Jamf under management, without recreating them")
+                    Button("Add a Custom Object…", systemImage: "plus.rectangle.on.rectangle") {
+                        isAddingCustomObject = true
+                    }
+                    .help("Create an object the catalog doesn't cover yet — the form comes from the live provider schema, no configuration language needed")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        } label: {
+            Text("Managed in this tenant")
+        }
+    }
+
+    private func managedSummaryText(_ tenant: Tenant, adoptedCount: Int, blockCount: Int) -> String {
+        var parts: [String] = []
+        if adoptedCount > 0 { parts.append("\(adoptedCount) adopted object\(adoptedCount == 1 ? "" : "s")") }
+        if blockCount > 0 { parts.append("\(blockCount) building block\(blockCount == 1 ? "" : "s")") }
+        let subject = parts.joined(separator: " and ")
+        if tenant.lastDeploy == nil {
+            return "\(subject) staged — Preview Changes to bring them under management. Nothing is recreated."
+        }
+        return "\(subject) managed by this app. Check for Changes compares them with Jamf, and you can keep or undo any change made there. Adopted objects need no building block."
     }
 
     private func indicator(for outcome: PreflightCheck.Outcome) -> StatusIndicator {
