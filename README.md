@@ -27,8 +27,9 @@ Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jam
 
 - **[Getting Started](docs/getting-started.md)** — installing, connecting the first tenant, the first deploy
 - **[Building Blocks](docs/building-blocks.md)** — what each block does, settings and scope, presets, making your own blocks and catalogs
+- **[Permissions](docs/permissions.md)** — the API client privileges each block and feature needs, scoped to least privilege
 - **[Team Mode](docs/team-mode.md)** — the shared repository, locks, encrypted credential sharing, joining and leaving
-- **[Working without the app](docs/ejecting.md)** — using a tenant's configuration and state in plain OpenTofu or CI; there is no lock-in
+- **[Switching to plain Terraform](docs/ejecting.md)** — taking a tenant's configuration and state to a Terraform or OpenTofu workflow; there is no lock-in
 
 ## Requirements
 

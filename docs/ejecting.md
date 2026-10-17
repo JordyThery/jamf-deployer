@@ -1,79 +1,105 @@
-# Leaving Jamf Deployer: running your tenants on plain OpenTofu
+# Switching to plain Terraform
 
-Jamf Deployer never locks you in. Every tenant workspace is a standard
-OpenTofu root module, and the record of what the app manages is a standard
-(encrypted) state file. This guide takes a tenant from the app to a plain
-command-line or CI setup with full continuity — nothing is recreated.
+Jamf Deployer never locks you in. Every tenant workspace is a standard root
+module, and the record of what the app manages is a standard state file.
+This guide takes a tenant out of the app and into a plain **HashiCorp
+Terraform** or **OpenTofu** workflow — command line or CI — with full
+continuity: nothing is recreated, the state carries over.
 
 ## What you need
 
 1. The tenant's workspace folder. Solo installs:
    `~/Library/Application Support/Jamf Deployer/store/tenants/<id>/`
    — team installs: the same path inside the team repository.
-2. The tenant's **recovery sheet** (saved when you first deployed). It holds
-   the passphrase that encrypts the state file. Without it, the state is
+2. The tenant's **recovery sheet** (saved at first deploy). It holds the
+   passphrase that encrypts the state file. Without it the state is
    unreadable — by anyone, including the app.
-3. The tenant's Jamf API credentials (Jamf Deployer kept them in your
-   Keychain; they never lived in any file).
-4. OpenTofu 1.13 or newer (`brew install opentofu`).
+3. The tenant's Jamf API credentials (the app kept them in your Keychain;
+   they never lived in any file).
 
-## Steps
+## Step 1 — copy the workspace out
 
 ```sh
-# 1. Copy the configuration and the record out of the app's store.
 cp -R "…/store/tenants/<id>/generated" ~/my-tenant
 cp -R "…/store/tenants/<id>/state"     ~/my-tenant-state
 cd ~/my-tenant
+```
 
-# 2. Point the configuration at the copied record.
-#    generated/providers.tf already contains:
-#      backend "local" { path = "../state/terraform.tfstate" }
-#    Adjust the path if you placed the state elsewhere.
+`generated/providers.tf` already points the local backend at
+`../state/terraform.tfstate`; adjust the path if you placed the state
+elsewhere. The providers are declared as `jamf/jamfplatform` and
+`Jamf-Concepts/jamfprotect`, which resolve on **both** the Terraform and
+OpenTofu public registries — the configuration itself needs no edits.
 
-# 3. Provide the same environment the app provided.
+## Step 2 — provide the same environment the app provided
+
+```sh
 export JAMFPLATFORM_BASE_URL="https://eu.api.jamfcloud.com"   # your region
 export JAMFPLATFORM_CLIENT_ID="…"
 export JAMFPLATFORM_CLIENT_SECRET="…"
 export JAMFPLATFORM_ENVIRONMENT_ID="…"                        # or JAMFPLATFORM_TENANT_ID
 # Jamf Protect blocks additionally need:
 # export JAMFPROTECT_URL=… JAMFPROTECT_CLIENT_ID=… JAMFPROTECT_CLIENT_SECRET=…
+```
 
+Secret-typed block settings (if any) arrive the same way, as `TF_VAR_…`
+variables — the generated `variables.tf` lists them.
+
+## Step 3 — decrypt the state once
+
+The app encrypts state with OpenTofu's native state encryption, which
+HashiCorp Terraform cannot read. Decrypt it once with OpenTofu
+(`brew install opentofu`), then it is an ordinary state file:
+
+```sh
 export TF_ENCRYPTION='
 key_provider "pbkdf2" "passphrase" {
   passphrase = "<passphrase from the recovery sheet>"
 }
-method "aes_gcm" "default" {
+method "aes_gcm" "old" {
   keys = key_provider.pbkdf2.passphrase
 }
+method "unencrypted" "plain" {}
 state {
-  method   = method.aes_gcm.default
-  enforced = true
+  method   = method.unencrypted.plain
+  fallback { method = method.aes_gcm.old }
 }
 plan {
-  method   = method.aes_gcm.default
-  enforced = true
+  method   = method.unencrypted.plain
+  fallback { method = method.aes_gcm.old }
 }'
 
-# 4. Initialize and verify.
-tofu init          # providers install from the public OpenTofu registry
-tofu plan          # should report no changes if the tenant is in sync
+tofu init
+tofu apply -refresh-only   # reads encrypted, writes plaintext
+unset TF_ENCRYPTION
 ```
 
-From here on it is ordinary OpenTofu: edit the HCL, plan, apply, move the
-state to any backend you like (`tofu init -migrate-state`).
+Staying on OpenTofu instead? Skip this step and keep the original
+`TF_ENCRYPTION` block (with `aes_gcm` as the active method) — everything
+else in this guide applies unchanged.
+
+## Step 4 — run it under Terraform
+
+```sh
+terraform init    # providers install from registry.terraform.io
+terraform plan    # should report no changes if the tenant is in sync
+```
+
+From here it is an ordinary Terraform project: edit the HCL, move the state
+to any backend (`terraform init -migrate-state`), wire the environment
+variables through your CI's secret store, re-encrypt with your own tooling
+if your pipeline calls for it.
 
 ## Good to know
 
 - **You own the configuration now.** The app regenerated `generated/` from
-  its model on every run; after ejecting, the HCL is yours to edit and the
-  app's record of that tenant should be removed (or handed over) to avoid
-  two owners.
-- **OpenTofu, not HashiCorp Terraform.** The state is encrypted with
-  OpenTofu's native state encryption, which HashiCorp Terraform cannot
-  read. To move to Terraform, first migrate the encryption off
-  (an OpenTofu encryption `fallback` migration to an unencrypted target),
-  then treat the usual OpenTofu→Terraform compatibility notes as applying.
-- **Secrets stay yours.** The app never wrote credentials to disk; wire the
-  environment variables through your CI's secret store the same way.
-- **History**: the `history/` folders next to the workspace are plain JSON
-  and remain readable forever, with or without the app.
+  its model on every run; after switching, the HCL is yours to edit, and the
+  app's record of that tenant should be removed or handed over so there is
+  only one owner.
+- **Building blocks become modules.** The `modules/` folder inside the
+  workspace contains each block as a plain module — keep, rename or inline
+  them as you prefer.
+- **History stays readable.** The `history/` folders next to the workspace
+  are plain JSON and remain useful forever, with or without the app.
+- **Credentials and permissions** are unchanged: the same API clients keep
+  working, with the privileges listed in [Permissions](permissions.md).
