@@ -129,19 +129,17 @@ actor JamformerRunner {
         let stderrHandle = stderr.fileHandleForReading
         let stderrTask = Task<[String], Never> {
             var collected: [String] = []
-            do {
-                for try await line in stderrHandle.bytes.lines {
-                    let clean = Self.stripTerminalNoise(line)
-                    guard !clean.isEmpty else { continue }
-                    collected.append(clean)
-                    onLine?(clean)
-                }
-            } catch {}
+            for await line in EngineRunner.lines(from: stderrHandle) {
+                let clean = Self.stripTerminalNoise(line)
+                guard !clean.isEmpty else { continue }
+                collected.append(clean)
+                onLine?(clean)
+            }
             return collected
         }
 
         var lines: [String] = []
-        for try await line in stdout.fileHandleForReading.bytes.lines {
+        for await line in EngineRunner.lines(from: stdout.fileHandleForReading) {
             let clean = Self.stripTerminalNoise(line)
             guard !clean.isEmpty else { continue }
             lines.append(clean)

@@ -97,17 +97,13 @@ actor EngineRunner {
         let stderrHandle = stderr.fileHandleForReading
         let stderrTask = Task<[String], Never> {
             var lines: [String] = []
-            do {
-                for try await line in stderrHandle.bytes.lines {
-                    lines.append(line)
-                }
-            } catch {
-                // Partial stderr is still useful; ignore read errors.
+            for await line in Self.lines(from: stderrHandle) {
+                lines.append(line)
             }
             return lines
         }
 
-        for try await line in stdout.fileHandleForReading.bytes.lines {
+        for await line in Self.lines(from: stdout.fileHandleForReading) {
             rawLines.append(line)
             guard line.hasPrefix("{"),
                   let event = try? decoder.decode(EngineStreamEvent.self, from: Data(line.utf8))
@@ -201,5 +197,32 @@ actor EngineRunner {
 
     nonisolated static func awaitTermination(_ stream: AsyncStream<Void>) async {
         for await _ in stream { break }
+    }
+
+    /// Lines from a pipe via readabilityHandler — deterministic, unlike
+    /// FileHandle.bytes, whose iterator can fail to start consuming and
+    /// leave the child blocked on a full pipe.
+    nonisolated static func lines(from handle: FileHandle) -> AsyncStream<String> {
+        AsyncStream { continuation in
+            nonisolated(unsafe) var buffer = Data()
+            handle.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    if !buffer.isEmpty, let line = String(data: buffer, encoding: .utf8) {
+                        continuation.yield(line)
+                    }
+                    handle.readabilityHandler = nil
+                    continuation.finish()
+                    return
+                }
+                buffer.append(data)
+                while let newline = buffer.firstIndex(of: 0x0A) {
+                    let lineData = buffer[buffer.startIndex..<newline]
+                    let line = String(data: lineData, encoding: .utf8) ?? ""
+                    buffer.removeSubrange(buffer.startIndex...newline)
+                    continuation.yield(line)
+                }
+            }
+        }
     }
 }
