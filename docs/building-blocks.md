@@ -24,6 +24,12 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Software Updates** | Declarative software-update settings via a Jamf Blueprint: automatic download and install, with deferral windows you control. | Medium |
 | **Compliance — CIS Level 1** | A compliance benchmark built from the CIS Level 1 baseline. Starts in monitor mode: it reports, it does not change devices. | High |
 | **Rosetta 2** | A script plus check-in policy that installs Rosetta 2 on Apple silicon Macs so Intel-only apps keep working. | Low |
+| **Check-in & Inventory** | Check-in frequency, whether startup and login run policies, and what inventory Macs report. Tenant-wide setting. | Low |
+| **Re-enrollment** | What Jamf Pro clears when a Mac enrolls again, so reused Macs start with a clean record. Tenant-wide setting. | Low |
+| **Local Admin Password Rotation** | Rotates managed local admin passwords on a schedule and after each viewing. Tenant-wide setting. | Medium |
+| **Self Service App** | Installs Self Service on every Mac; landing page and notifications. Tenant-wide setting. | Low |
+| **Self Service Maintenance** | "Update inventory" and "Flush DNS cache" items users run when support asks. | Low |
+| **macOS Version Groups** | Smart groups for Macs on the current macOS and Macs below your supported minimum. | Low |
 
 The built-in App Catalog block picks its apps with a searchable picker — searchable, with per-app delivery and update behavior:
 
@@ -45,10 +51,11 @@ A tenant-wide setting can belong to one block only: selecting two blocks that ma
 
 ## Presets
 
-Presets come from the catalogs you follow. The demo catalog ships two:
+Presets come from the catalogs you follow. The demo catalog ships three:
 
 - **Standard** — foundation, enrollment, FileVault, software updates, CIS Level 1 (monitor), Rosetta 2.
 - **Minimal** — foundation and software updates; a starting point to grow from.
+- **Complete** — everything in the demo catalog: Standard plus the tenant settings, Self Service maintenance and macOS version groups.
 
 A preset is just a starting selection. Everything stays editable afterwards.
 
