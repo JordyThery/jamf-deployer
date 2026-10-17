@@ -544,8 +544,11 @@ final class TenantDeployService {
         let entryID = DeployHistoryEntry.makeID()
         let entryURL = historyURL(for: tenant).appending(path: entryID)
         try? FileManager.default.createDirectory(at: entryURL, withIntermediateDirectories: true)
-        if let planData = try? await runner.showPlanData(planFileName: session.planFileName) {
-            try? planData.write(to: entryURL.appending(path: "plan.json"))
+        // The engine prints sensitive values in clear text; history (and the
+        // team repository) only ever gets the redacted copy.
+        if let planData = try? await runner.showPlanData(planFileName: session.planFileName),
+           let redacted = PlanRedactor.redact(planData) {
+            try? redacted.write(to: entryURL.appending(path: "plan.json"))
         }
         let logText = result.rawLines.joined(separator: "\n")
         try? Data(logText.utf8).write(to: entryURL.appending(path: "log.jsonl"))

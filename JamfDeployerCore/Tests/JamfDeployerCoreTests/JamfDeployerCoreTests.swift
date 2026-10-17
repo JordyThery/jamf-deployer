@@ -937,3 +937,31 @@ struct ErrorTranslationTests {
         #expect(!translated.message.isEmpty)
     }
 }
+
+@Suite("Plan redaction")
+struct PlanRedactionTests {
+    @Test func masksSensitiveValuesFromRealEngineOutput() throws {
+        // Captured from `tofu show -json`: a sensitive root variable passed
+        // into a module, the way secret block settings are wired.
+        let raw = fixtureData("plan-with-secret.json")
+        #expect(String(decoding: raw, as: UTF8.self).contains("SUPERSECRET-123"))
+
+        let redacted = try #require(PlanRedactor.redact(raw))
+        let text = String(decoding: redacted, as: UTF8.self)
+        #expect(!text.contains("SUPERSECRET-123"))
+        #expect(text.contains(PlanRedactor.placeholder))
+        // Non-sensitive content survives, and the result still decodes as a plan.
+        #expect(text.contains("module.blk.terraform_data.x"))
+        _ = try JSONDecoder().decode(PlanFile.self, from: redacted)
+    }
+
+    @Test func masksNestedPathsOnly() {
+        let value: [String: Any] = ["name": "visible", "payload": ["password": "p", "user": "u"]]
+        let mask: [String: Any] = ["payload": ["password": true]]
+        let result = PlanRedactor.masked(value, mask) as? [String: Any]
+        #expect(result?["name"] as? String == "visible")
+        let payload = result?["payload"] as? [String: Any]
+        #expect(payload?["password"] as? String == PlanRedactor.placeholder)
+        #expect(payload?["user"] as? String == "u")
+    }
+}
