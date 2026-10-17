@@ -33,6 +33,11 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 - No app-target unit tests (needs a test target added in Xcode); JamfDeployerCore carries 49 tests, DeployerKit 4.
 - App Sandbox is off by design (child-process engine); Developer ID + notarisation is the distribution model.
 
+## Adopting an existing tenant
+- Live-verified on a content-rich tenant: all 99 exporter types discovered (494 objects), 487 adopted with an import-only preview (no creates or deletes), deployed, converged to "No changes", and a change made directly in Jamf was detected and restored.
+- Adopt leaves out what the app cannot manage, with a note: objects whose secret values Jamf never exports (activation code, ADE server token, GSX credentials) and enrollment invitations. References from adopted objects to anything left out are pointed at the object's existing Jamf ID, and values the export supplies are written into the adopted configuration.
+- Importing PreStages clears their empty account-settings and location sections, which the exporter omits; the values involved are defaults.
+
 ## Composition
 - **Two blocks owning one tenant-wide setting** are refused when the workspace is generated, with a message naming both blocks.
 - **Name collisions are not detected yet**: selecting Foundation next to a captured categories block while "apply the tenant prefix to all names" is on can produce identically named categories (both create "<prefix>Enrollment"), and duplicated App Catalog titles (for example "TF - Google Chrome" next to "Google Chrome") collide once rebinding collapses their deployments onto one target group. Jamf rejects the duplicates; deselect the duplicate objects at capture, or skip the prefix option. An editor-level collision warning is planned.

@@ -127,7 +127,7 @@ struct FleetDashboardView: View {
                     Label("Check All Tenants", systemImage: "arrow.clockwise")
                 }
             }
-            .disabled(deployService.fleetCheckProgress != nil || tenantStore.tenants.allSatisfy { $0.deployedBlockVersions.isEmpty })
+            .disabled(deployService.fleetCheckProgress != nil || !tenantStore.tenants.contains { deployService.isManaged($0) })
             .help("Compare every deployed tenant against its record (a few at a time) and flag changes made in Jamf")
         }
     }
@@ -179,7 +179,7 @@ struct FleetDashboardView: View {
     @ViewBuilder
     private func baselineCell(for tenant: Tenant) -> some View {
         if tenant.deployedBlockVersions.isEmpty {
-            Text("—").foregroundStyle(.secondary)
+            Text(deployService.isManaged(tenant) ? "Adopted only" : "—").foregroundStyle(.secondary)
         } else {
             let updates = catalog.map { catalog in
                 tenant.deployedBlockVersions.filter { id, version in

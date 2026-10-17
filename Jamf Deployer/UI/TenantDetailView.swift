@@ -258,8 +258,8 @@ struct TenantDetailView: View {
                 } label: {
                     Label("Check for Changes", systemImage: "arrow.clockwise")
                 }
-                .disabled(tenant.deployedBlockVersions.isEmpty || isCheckingDrift || deployService.isBusy || tenant.isHandedOver)
-                .help(tenant.deployedBlockVersions.isEmpty
+                .disabled(!deployService.isManaged(tenant) || isCheckingDrift || deployService.isBusy || tenant.isHandedOver)
+                .help(!deployService.isManaged(tenant)
                     ? "Deploy a baseline first, then check for changes made in Jamf"
                     : "Compare the tenant against its record and list changes made in Jamf")
 

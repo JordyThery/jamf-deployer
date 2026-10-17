@@ -27,13 +27,14 @@ struct AdoptView: View {
     @State private var step: Step = .pickTypes
     @State private var resourceTypes: [JamformerRunner.ResourceType] = []
     @State private var selectedTypes: Set<String> = [
-        "category", "script", "policy", "smart_computer_group",
-        "static_computer_group", "computer_extension_attribute",
+        "category", "script", "policy", "device_groups", "computer_extension_attribute",
     ]
     @State private var typeFilter = ""
     @State private var exportURL: URL?
     @State private var objects: [ExportedObject] = []
     @State private var selectedObjects: Set<String> = []
+    /// Objects left out because the app cannot manage them, by reason.
+    @State private var unmanageableNotes: [String] = []
     @State private var logTail: [String] = []
 
     private let runner = JamformerRunner()
@@ -121,6 +122,12 @@ struct AdoptView: View {
                     Button("None") { selectedObjects = [] }
                 }
                 .controlSize(.small)
+                if !unmanageableNotes.isEmpty {
+                    Text("Left out — the app cannot manage these: " + unmanageableNotes.joined(separator: "; ") + ". They stay in Jamf unchanged.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 List(objects) { object in
                     HStack(spacing: 8) {
                         Toggle(isOn: Binding(
@@ -204,7 +211,9 @@ struct AdoptView: View {
               let terraformURL = terraform.binaryURL else { return }
         step = .discovering
         logTail = []
-        let types = Array(selectedTypes)
+        // Only names the exporter offers: an unknown name aborts the export.
+        let available = Set(resourceTypes.map(\.filterKey))
+        let types = available.isEmpty ? Array(selectedTypes) : Array(selectedTypes.intersection(available))
         Task {
             do {
                 let result = try await runner.export(
@@ -220,7 +229,12 @@ struct AdoptView: View {
                     return
                 }
                 exportURL = result.outputURL
+                let unmanageable = ExportedObjectInventory.unmanageable(directory: result.outputURL)
                 objects = try ExportedObjectInventory.scan(directory: result.outputURL)
+                    .filter { unmanageable[$0.address] == nil }
+                unmanageableNotes = Dictionary(grouping: unmanageable.values, by: { $0 })
+                    .sorted { $0.key < $1.key }
+                    .map { "\($0.value.count) object\($0.value.count == 1 ? "" : "s"): \($0.key)" }
                 selectedObjects = Set(objects.filter { !$0.hasProvenanceTag }.map(\.address))
                 step = objects.isEmpty
                     ? .failed("No objects of the chosen types were found.")
@@ -238,8 +252,10 @@ struct AdoptView: View {
     private func stage() {
         guard let exportURL else { return }
         do {
+            try ExportedObjectInventory.pinReferences(directory: exportURL, keeping: selectedObjects)
             try ExportedObjectInventory.prune(directory: exportURL, keeping: selectedObjects)
             try ExportedObjectInventory.normalizeImportBlocks(directory: exportURL)
+            try ExportedObjectInventory.inlineVariables(directory: exportURL)
 
             // Strip provider wiring; the workspace supplies its own.
             let fileManager = FileManager.default

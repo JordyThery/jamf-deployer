@@ -302,6 +302,13 @@ final class TenantDeployService {
         tenantStore.workspaceURL(for: tenant).appending(path: "adopted")
     }
 
+    /// Whether the app manages anything in the tenant: deployed blocks, or
+    /// adopted configuration that has been deployed. A tenant brought in
+    /// entirely through Adopt has no blocks but is fully managed.
+    func isManaged(_ tenant: Tenant) -> Bool {
+        !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
+    }
+
     func hasAdoptedConfig(for tenant: Tenant) -> Bool {
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: adoptedURL(for: tenant), includingPropertiesForKeys: nil)) ?? []
@@ -695,7 +702,7 @@ final class TenantDeployService {
     /// Runs a refresh-only plan and stores what changed outside the app.
     /// Also refreshes the Apple token expiry shown on the dashboard.
     func checkDrift(tenant: Tenant) async throws {
-        guard !tenant.deployedBlockVersions.isEmpty else { return }
+        guard isManaged(tenant) else { return }
         guard !activePreviewTenants.contains(tenant.id) else {
             throw DeployError.previewInProgress
         }
@@ -765,7 +772,7 @@ final class TenantDeployService {
     /// Checks every deployed tenant, a few at a time.
     func checkAllTenants() async {
         let candidates = tenantStore.tenants.filter {
-            !$0.deployedBlockVersions.isEmpty && !$0.isHandedOver
+            isManaged($0) && !$0.isHandedOver
                 && !activePreviewTenants.contains($0.id)
         }
         guard !candidates.isEmpty else { return }

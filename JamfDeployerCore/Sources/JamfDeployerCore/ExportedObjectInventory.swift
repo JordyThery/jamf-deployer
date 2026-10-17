@@ -46,6 +46,90 @@ public nonisolated enum ExportedObjectInventory {
 
     /// Rewrites the export so only `keptAddresses` remain; matching import
     /// blocks follow their resources automatically.
+    /// Objects in an export the app cannot manage, with the reason: those
+    /// referencing values Jamf never exports (tokens, passwords — variables
+    /// with neither a default nor a tfvars value) and types the provider
+    /// cannot express as exported. Adopting them would break the preview.
+    public static func unmanageable(directory: URL) -> [String: String] {
+        let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
+        let values = BlockCapture.parseTfvars(at: directory.appending(path: "terraform.tfvars"))
+        func hasValue(_ name: String) -> Bool {
+            if values[name] != nil { return true }
+            return declarations[name]?.range(of: #"(?m)^\s*default\s*="#, options: .regularExpression) != nil
+        }
+        var result: [String: String] = [:]
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf") {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            for block in topLevelBlocks(in: text) {
+                guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) else { continue }
+                let address = "\(header.1).\(header.2)"
+                if header.1 == "jamfplatform_pro_computer_invitation" {
+                    result[address] = "enrollment invitations cannot be managed as exported"
+                    continue
+                }
+                let missing = block.matches(of: /var\.([a-zA-Z0-9_]+)/).map { String($0.1) }.filter { !hasValue($0) }
+                if !missing.isEmpty {
+                    result[address] = "Jamf does not export its secret values (tokens, passwords)"
+                }
+            }
+        }
+        return result
+    }
+
+    /// Replaces `var.NAME` references whose value the export supplies
+    /// (terraform.tfvars, or a declared default) with that value, so adopted
+    /// configuration stands alone once the export's variables.tf is dropped.
+    public static func inlineVariables(directory: URL) throws {
+        let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
+        let values = BlockCapture.parseTfvars(at: directory.appending(path: "terraform.tfvars"))
+        var literal: [String: String] = [:]
+        for (name, declaration) in declarations {
+            if let value = values[name] {
+                literal[name] = "\"\(value)\""
+            } else if let match = declaration.firstMatch(of: /(?m)^\s*default\s*=\s*(.+?)\s*$/) {
+                literal[name] = String(match.1)
+            }
+        }
+        for (name, value) in values where literal[name] == nil { literal[name] = "\"\(value)\"" }
+        guard !literal.isEmpty else { return }
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf")
+            && !["variables.tf", "provider.tf"].contains(file.lastPathComponent) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            let updated = BlockCapture.replacing(in: text, pattern: #"\bvar\.([a-zA-Z0-9_]+)\b"#) { match in
+                literal[match[1]]
+            }
+            if updated != text { try Data(updated.utf8).write(to: file) }
+        }
+    }
+
+    /// Points `.id` references to objects that will not be adopted at the
+    /// object's existing Jamf ID (from its import block), so adopted
+    /// objects keep working when what they reference stays unmanaged. Run
+    /// before `prune`, which removes those import blocks.
+    public static func pinReferences(directory: URL, keeping kept: Set<String>) throws {
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        var ids: [String: String] = [:]
+        for file in files where file.lastPathComponent.hasSuffix("_import.tf") {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for block in topLevelBlocks(in: text) {
+                guard let to = block.firstMatch(of: /\bto\s*=\s*([a-z0-9_]+\.[A-Za-z0-9_-]+)/),
+                      let id = block.firstMatch(of: /\bid\s*=\s*"([^"]+)"/) else { continue }
+                ids[String(to.1)] = String(id.1)
+            }
+        }
+        let leftOut = ids.filter { !kept.contains($0.key) }
+        guard !leftOut.isEmpty else { return }
+        for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf") {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            let updated = BlockCapture.replacing(in: text, pattern: #"\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.id\b"#) { match in
+                leftOut[match[1]].map { "\"\($0)\"" }
+            }
+            if updated != text { try Data(updated.utf8).write(to: file) }
+        }
+    }
+
     public static func prune(directory: URL, keeping keptAddresses: Set<String>) throws {
         for file in try configurationFiles(in: directory, includeImports: true) {
             let text = try String(contentsOf: file, encoding: .utf8)

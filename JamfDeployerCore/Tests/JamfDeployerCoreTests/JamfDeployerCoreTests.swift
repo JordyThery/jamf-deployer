@@ -1143,3 +1143,71 @@ struct CapturedMetadataTests {
         #expect(BlockCapture.objectLabel(for: "jamfplatform_pro_sso_failover_url") == "SSO failover URL")
     }
 }
+
+@Suite("Adopting existing objects")
+struct AdoptPreparationTests {
+    static func export() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "adopt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(#"""
+        resource "jamfplatform_pro_automated_device_enrollment" "abm" {
+          name         = "Apple Business Manager"
+          server_token = var.abm_server_token
+        }
+
+        resource "jamfplatform_pro_computer_prestage_enrollment" "default" {
+          display_name                          = "Default"
+          device_enrollment_program_instance_id = jamfplatform_pro_automated_device_enrollment.abm.id
+        }
+
+        resource "jamfplatform_pro_icon" "icon_1" {
+          icon_file_source = var.icon_1_source
+        }
+
+        resource "jamfplatform_pro_computer_invitation" "all_0" {
+          invitation_type = "DEP_ENROLL"
+        }
+        """#.utf8).write(to: dir.appending(path: "main.tf"))
+        try Data(#"""
+        import {
+          identity = {
+            id = "7"
+          }
+          to = jamfplatform_pro_automated_device_enrollment.abm
+        }
+        """#.utf8).write(to: dir.appending(path: "main_import.tf"))
+        try Data(#"""
+        variable "abm_server_token" {
+          type      = string
+          sensitive = true
+        }
+
+        variable "icon_1_source" {
+          type    = string
+          default = "support_files/icons/icon_1.png"
+        }
+        """#.utf8).write(to: dir.appending(path: "variables.tf"))
+        return dir
+    }
+
+    @Test func findsObjectsTheAppCannotManage() throws {
+        let dir = try Self.export()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let unmanageable = ExportedObjectInventory.unmanageable(directory: dir)
+        #expect(Set(unmanageable.keys) == [
+            "jamfplatform_pro_automated_device_enrollment.abm",
+            "jamfplatform_pro_computer_invitation.all_0",
+        ])
+    }
+
+    @Test func pinsReferencesAndInlinesValues() throws {
+        let dir = try Self.export()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let kept: Set<String> = ["jamfplatform_pro_computer_prestage_enrollment.default", "jamfplatform_pro_icon.icon_1"]
+        try ExportedObjectInventory.pinReferences(directory: dir, keeping: kept)
+        try ExportedObjectInventory.inlineVariables(directory: dir)
+        let text = try String(contentsOf: dir.appending(path: "main.tf"), encoding: .utf8)
+        #expect(text.contains(#"device_enrollment_program_instance_id = "7""#))
+        #expect(text.contains(#"icon_file_source = "support_files/icons/icon_1.png""#))
+    }
+}
