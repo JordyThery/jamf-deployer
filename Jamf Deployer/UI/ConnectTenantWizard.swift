@@ -259,7 +259,7 @@ struct ConnectTenantWizard: View {
             } header: {
                 Text("Jamf Protect (optional)")
             } footer: {
-                Text("Create the API client in the Protect console under Administration → API Clients. You can also add this later from the tenant's settings.")
+                Text("Create the API client in the Protect console under Administration → API Clients. You can also add this later in the tenant's Day 0 Setup tab.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

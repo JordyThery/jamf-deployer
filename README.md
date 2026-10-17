@@ -20,7 +20,7 @@ Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jam
 
 - **Set up** — connect a tenant with Jamf Platform API credentials, pick a preset or compose a baseline from building blocks — the app ships the configuration-free blocks (Foundation, App Catalog apps, Jamf Protect, Security Cloud); opinionated ones come from catalogs you publish — the versioned [demo catalog](https://github.com/JordyThery/jamf-deployer-catalog) (enrollment, FileVault, software updates, CIS Level 1, Rosetta 2) is a worked example and the template — preview, deploy. A Day 0 checklist covers what an API cannot: APNs, Apple Business Manager tokens, branding.
 - **Export** — turn an existing tenant's objects into reusable building blocks that keep their wiring — one export can become several blocks, or a full tenant clone — plus documentation or a point-in-time snapshot; adopt hand-configured objects into management without recreating them.
-- **Maintain** — scheduled checks show changes made directly in Jamf; keep them, restore the baseline, or stop managing an object. Baseline updates are reviewed and opted into per block. Every deploy is recorded with history and rollback.
+- **Maintain** — on-demand checks (one tenant, or the whole fleet from the dashboard) show changes made directly in Jamf; keep a change or restore the baseline. Baseline updates are reviewed and opted into per block. Every deploy is recorded with history and rollback.
 - **Work as a team** — a shared GitHub repository synchronizes tenants, locks and catalogs across engineers, with credentials shared end-to-end encrypted. See [Team Mode](docs/team-mode.md).
 
 ![A tenant in sync with its baseline: connection details, a passing preflight, and the baseline's building blocks with per-block settings](docs/screenshot.png)
@@ -45,15 +45,15 @@ The fleet dashboard keeps every tenant's sync state, baseline size and Apple tok
 
 ## Security
 
-- **Credentials never touch disk.** API secrets live in your Mac's Keychain and are handed to the deployment engine as environment variables for the duration of a run — never written to configuration, logs or state.
+- **Credentials never touch disk.** API secrets live in your Mac's Keychain and are handed to the deployment engine as environment variables for the duration of a run — never written to configuration, logs or state. Deploy history keeps a copy of each applied plan with every sensitive value masked.
 - **Tenant records are encrypted.** The engine's state and plan files are encrypted with a per-tenant passphrase (PBKDF2 + AES-GCM); a recovery sheet is produced at first deploy. Without the passphrase the record is unreadable, including by the app.
 - **Nothing deploys without a preview.** The app only ever applies the exact plan you approved; there is no auto-apply.
 - **Team sharing is end-to-end encrypted.** Shared credentials are sealed per engineer (Curve25519 + ChaCha20-Poly1305); the repository carries only ciphertext, and private keys never leave each engineer's Keychain.
-- The app talks exclusively to your Jamf tenants, your Git remote (Team Mode), and GitHub's API for release and component-update checks.
+- The app talks only to your Jamf tenants, your Git remotes (Team Mode and Git catalog sources), GitHub's API for release and component-update checks, and HashiCorp's release server when you agree to the Terraform download for exports.
 
 ## Building
 
-Open the project in Xcode 26 or later, run `Vendor/fetch.sh` once to download the engine, providers and jamformer, then build the `Jamf Deployer` scheme. Exporting existing tenants optionally uses HashiCorp Terraform, which the app downloads on first use with your consent (it is BUSL-licensed and never bundled).
+Open the project in Xcode 27 or later, run `Vendor/fetch.sh` once to download the engine, providers and jamformer, then build the `Jamf Deployer` scheme. Exporting existing tenants optionally uses HashiCorp Terraform, which the app downloads on first use with your consent (it is BUSL-licensed and never bundled).
 
 ## Acknowledgements
 

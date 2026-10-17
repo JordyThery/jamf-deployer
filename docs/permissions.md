@@ -8,15 +8,16 @@ has no access of its own.
 
 Connecting a tenant takes one API client (client ID + secret) for the Jamf
 Platform API gateway. The connect wizard's preflight probes the essentials
-and names any missing privilege, so a too-narrow client fails visibly before
-anything is saved.
+and names any missing privilege before you save; you can still add the tenant
+and fix the integration's permissions later.
 
 ### Always needed
 
 | Used for | Privileges |
 | --- | --- |
 | Connection check, Jamf Pro version | Read access to the Jamf Pro API (version endpoint) |
-| Preflight and Day 0 status | `categories:read`, `scripts:read`, `device-enrollment-program-instances:read`, `volume-purchasing-locations:read` |
+| Preflight | `categories:read`, `scripts:read`, `device-enrollment-program-instances:read`, `volume-purchasing-locations:read`, `applications:read` |
+| Day 0 status (optional) | Read access for what each checklist row shows — server URL, Self Service branding, single sign-on, Jamf Protect integration, App Installers. Rows without access show as unknown. |
 
 ### Per building block
 
@@ -74,7 +75,9 @@ Protect deployment sync, under the Platform client above.
 
 - Secrets are stored in the **login Keychain** under the app's own items;
   nothing is shared with other apps.
-- The app talks exclusively to your Jamf tenants, your Git remote (Team
-  Mode) and GitHub's public API (release and component-update checks).
+- The app talks only to your Jamf tenants, your Git remotes (Team Mode and
+  Git catalog sources), GitHub's public API (release and component-update
+  checks) and HashiCorp's release server when you agree to the Terraform
+  download for exports.
 - No admin rights, no configuration profiles, no system extensions — it is
   an ordinary signed and notarized app.

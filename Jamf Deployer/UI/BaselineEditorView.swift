@@ -93,7 +93,7 @@ struct BaselineEditorView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Remove from Tenant deletes the block's objects from Jamf on the next deploy. Stop Managing leaves everything in Jamf untouched — the app just stops tracking it. The preview shows exactly what happens either way.")
+            Text("Remove from Tenant deletes the block's objects from Jamf on the next deploy; tenant-wide settings keep their current values. Stop Managing leaves everything in Jamf untouched — the app just stops tracking it. The preview shows exactly what happens either way.")
         }
     }
 

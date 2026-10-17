@@ -10,7 +10,8 @@ continuity: nothing is recreated, the state carries over.
 
 1. The tenant's workspace folder. Solo installs:
    `~/Library/Application Support/Jamf Deployer/store/tenants/<id>/`
-   — team installs: the same path inside the team repository.
+   — team installs: the same path, on a Mac that has run a preview for the
+   tenant (`generated/` is rebuilt locally and is not in the repository).
 2. The tenant's **recovery sheet** (saved at first deploy). It holds the
    passphrase that encrypts the state file. Without it the state is
    unreadable — by anyone, including the app.
@@ -20,14 +21,17 @@ continuity: nothing is recreated, the state carries over.
 ## Step 1 — copy the workspace out
 
 ```sh
-cp -R "…/store/tenants/<id>/generated" ~/my-tenant
-cp -R "…/store/tenants/<id>/state"     ~/my-tenant-state
-cd ~/my-tenant
+mkdir ~/my-tenant
+cp -R "…/store/tenants/<id>/generated" ~/my-tenant/generated
+cp -R "…/store/tenants/<id>/state"     ~/my-tenant/state
+cd ~/my-tenant/generated
+rm -rf .terraform .terraform.lock.hcl plan.bin drift.bin
 ```
 
-`generated/providers.tf` already points the local backend at
-`../state/terraform.tfstate`; adjust the path if you placed the state
-elsewhere. The providers are declared as `jamf/jamfplatform` and
+Remove the lock file: it records checksums of the app's bundled provider
+copies, which the public registries' packages do not match, so `init` would
+refuse them. `generated/providers.tf` points the local backend at
+`../state/terraform.tfstate`, which the layout above keeps intact. The providers are declared as `jamf/jamfplatform` and
 `Jamf-Concepts/jamfprotect`, which resolve on **both** the Terraform and
 OpenTofu public registries — the configuration itself needs no edits.
 
@@ -43,7 +47,8 @@ export JAMFPLATFORM_ENVIRONMENT_ID="…"                        # or JAMFPLATFOR
 ```
 
 Secret-typed block settings (if any) arrive the same way, as `TF_VAR_…`
-variables — the generated `variables.tf` lists them.
+variables — `generated/main.tf` declares them at the top as sensitive
+variables named `<block>_<setting>`.
 
 ## Step 3 — decrypt the state once
 
@@ -85,6 +90,15 @@ terraform init    # providers install from registry.terraform.io
 terraform plan    # should report no changes if the tenant is in sync
 ```
 
+The state still names the providers by their OpenTofu registry address, so
+`terraform init` installs each one twice. Point the state at Terraform's
+registry once to tidy that up:
+
+```sh
+terraform state replace-provider \
+  registry.opentofu.org/jamf/jamfplatform registry.terraform.io/jamf/jamfplatform
+```
+
 From here it is an ordinary Terraform project: edit the HCL, move the state
 to any backend (`terraform init -migrate-state`), wire the environment
 variables through your CI's secret store, re-encrypt with your own tooling
@@ -100,6 +114,7 @@ if your pipeline calls for it.
   workspace contains each block as a plain module — keep, rename or inline
   them as you prefer.
 - **History stays readable.** The `history/` folders next to the workspace
-  are plain JSON and remain useful forever, with or without the app.
+  are plain JSON (sensitive values masked) and remain useful forever, with
+  or without the app.
 - **Credentials and permissions** are unchanged: the same API clients keep
   working, with the privileges listed in [Permissions](permissions.md).

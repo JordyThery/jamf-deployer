@@ -470,12 +470,11 @@ struct ExportView: View {
                 secretFindings: result.secretFindings,
                 originTenantScopeID: tenant.scopeID
             ))
-            var selection = BlockSelection(blockID: blockID, scope: "pilot")
-            if captured.usesJamfProScope || captured.usesPlatformScope {
-                selection.scope = "pilot"
-            }
-            target.blockSelections.append(selection)
-            if !target.blockSelections.contains(where: { $0.blockID == "foundation" }) {
+            target.blockSelections.append(BlockSelection(blockID: blockID, scope: "pilot"))
+            // Clones keep their own groups and categories; Foundation is only
+            // added when the capture collapsed scope onto it.
+            let needsFoundation = captured.usesJamfProScope || captured.usesPlatformScope
+            if needsFoundation, !target.blockSelections.contains(where: { $0.blockID == "foundation" }) {
                 target.blockSelections.insert(BlockSelection(blockID: "foundation"), at: 0)
             }
             tenantStore.update(target)
