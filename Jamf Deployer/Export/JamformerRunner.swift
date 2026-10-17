@@ -121,6 +121,7 @@ actor JamformerRunner {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        let terminated = EngineRunner.installTerminationWait(process)
         try process.run()
 
         // Drain stderr concurrently so neither pipe can fill and deadlock —
@@ -147,7 +148,7 @@ actor JamformerRunner {
             onLine?(clean)
         }
         lines.append(contentsOf: await stderrTask.value)
-        process.waitUntilExit()
+        await EngineRunner.awaitTermination(terminated)
 
         // The gitleaks-based scan is always on; collect what it reported.
         var findings: [String] = []

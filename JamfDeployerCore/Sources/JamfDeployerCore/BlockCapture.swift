@@ -238,8 +238,22 @@ public nonisolated enum BlockCapture {
         let exportedDeclarations = parseVariableDeclarations(
             at: request.sourceDirectory.appending(path: "variables.tf")
         )
+        // The exporter puts the variables' actual values in terraform.tfvars
+        // (file paths for icons and similar); a reusable block needs them as
+        // defaults, or the generated module call fails with "missing
+        // required argument".
+        let exportedValues = parseTfvars(
+            at: request.sourceDirectory.appending(path: "terraform.tfvars")
+        )
         for name in referenced.subtracting(generated).sorted() {
-            if let declaration = exportedDeclarations[name] {
+            if var declaration = exportedDeclarations[name] {
+                if !declaration.contains("default"), let value = exportedValues[name],
+                   let brace = declaration.range(of: "}", options: .backwards) {
+                    declaration.replaceSubrange(
+                        brace.lowerBound..<brace.lowerBound,
+                        with: "  default = \(hclStringLiteral(value))\n"
+                    )
+                }
                 variables += "\n\n" + declaration.replacingOccurrences(of: "support_files/", with: "files/")
             } else {
                 variables += """
@@ -356,6 +370,24 @@ public nonisolated enum BlockCapture {
     }
 
     /// Reads the capability set out of jamformer's PERMISSIONS.md.
+    /// Simple `name = "value"` assignments from a tfvars file.
+    static func parseTfvars(at url: URL) -> [String: String] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+        var values: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            if let match = line.firstMatch(of: /^\s*([a-zA-Z0-9_]+)\s*=\s*"(.*)"\s*$/) {
+                values[String(match.1)] = String(match.2)
+            }
+        }
+        return values
+    }
+
+    static func hclStringLiteral(_ value: String) -> String {
+        "\"" + value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+
     /// Returns each `variable "name" { … }` declaration in a variables file,
     /// keyed by name. Missing file → empty.
     static func parseVariableDeclarations(at url: URL) -> [String: String] {

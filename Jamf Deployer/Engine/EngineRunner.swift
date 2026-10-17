@@ -82,6 +82,7 @@ actor EngineRunner {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        let terminated = Self.installTerminationWait(process)
         try process.run()
         currentProcess = process
         defer { currentProcess = nil }
@@ -120,7 +121,7 @@ actor EngineRunner {
 
         rawLines.append(contentsOf: await stderrTask.value)
 
-        process.waitUntilExit()
+        await Self.awaitTermination(terminated)
         let status = process.terminationStatus
         let result = RunResult(
             exitCode: status,
@@ -149,9 +150,10 @@ actor EngineRunner {
         // interactive mode and they block waiting for input.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = stdout
+        let terminated = Self.installTerminationWait(process)
         try process.run()
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        await Self.awaitTermination(terminated)
         return data
     }
 
@@ -172,15 +174,32 @@ actor EngineRunner {
         // interactive mode and they block waiting for input.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = stdout
+        let terminated = Self.installTerminationWait(process)
         try process.run()
         // Read fully before waiting, so a large plan cannot deadlock the pipe.
         let collected = stdout.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        await Self.awaitTermination(terminated)
         return collected
     }
 
     /// Decoded `tofu show -json <planFile>`.
     func showPlan(planFileName: String) async throws -> PlanFile {
         try JSONDecoder().decode(PlanFile.self, from: try await showPlanData(planFileName: planFileName))
+    }
+
+    /// Awaits child termination via the termination handler. `waitUntilExit`
+    /// spins a runloop that can miss the notification on Swift-concurrency
+    /// threads, hanging after the child has already exited.
+    nonisolated static func installTerminationWait(_ process: Process) -> AsyncStream<Void> {
+        let (stream, continuation) = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in
+            continuation.yield(())
+            continuation.finish()
+        }
+        return stream
+    }
+
+    nonisolated static func awaitTermination(_ stream: AsyncStream<Void>) async {
+        for await _ in stream { break }
     }
 }
