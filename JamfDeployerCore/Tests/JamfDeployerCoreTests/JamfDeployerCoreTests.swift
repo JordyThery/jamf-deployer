@@ -1125,3 +1125,21 @@ struct PresetCaptureTests {
         #expect(preset.scopes.isEmpty)
     }
 }
+
+@Suite("Captured block metadata")
+struct CapturedMetadataTests {
+    @Test func permissionsComePerResourceType() throws {
+        let url = fixtureURL("permissions-table.md")
+        let byType = BlockCapture.parsePermissionsByType(at: url)
+        #expect(byType["jamfplatform_pro_re_enrollment_settings"] == ["re-enrollment:read"])
+        #expect(byType["jamfplatform_pro_category"] == ["categories:read", "self-service:read"])
+        #expect(byType["jamfplatform_pro_icon"] == nil)
+    }
+
+    @Test func labelsReadAsPlainLanguage() {
+        #expect(BlockCapture.objectLabel(for: "jamfplatform_pro_macos_configuration_profile") == "macOS configuration profile")
+        #expect(BlockCapture.objectLabel(for: "jamfplatform_pro_app_installer_settings") == "App installer settings")
+        #expect(BlockCapture.objectLabel(for: "jamfplatform_device_group") == "Device group")
+        #expect(BlockCapture.objectLabel(for: "jamfplatform_pro_sso_failover_url") == "SSO failover URL")
+    }
+}

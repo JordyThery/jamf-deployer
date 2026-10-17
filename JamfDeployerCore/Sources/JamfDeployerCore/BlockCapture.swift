@@ -144,6 +144,8 @@ public nonisolated enum BlockCapture {
         var usesPlatformScope = false
         var usesCategory = false
         var terraformTypes: Set<String> = []
+        var typeCounts: [String: Int] = [:]
+        var singletonTypes: Set<String> = []
         var capturedText = ""
         var fileTexts: [(name: String, text: String)] = []
         var needs: [String: Set<String>] = [:]
@@ -488,9 +490,11 @@ public nonisolated enum BlockCapture {
         // 1c. Write the files and count what survived.
         for (name, text) in fileTexts {
             guard text.contains("resource ") || text.contains("data ") else { continue }
-            for match in text.matches(of: /resource\s+"([a-z0-9_]+)"\s+"/) {
+            for match in text.matches(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) {
                 objectCount += 1
                 terraformTypes.insert(String(match.1))
+                typeCounts[String(match.1), default: 0] += 1
+                if match.2 == "singleton" { singletonTypes.insert(String(match.1)) }
             }
             try Data(text.utf8).write(to: blockURL.appending(path: name))
             capturedText += text + "\n"
@@ -777,10 +781,25 @@ public nonisolated enum BlockCapture {
         }
         """.utf8).write(to: blockURL.appending(path: "versions.tf"))
 
-        // 4. block.json, including the permissions the export recorded.
-        let permissions = parsePermissions(
-            at: request.sourceDirectory.appending(path: "PERMISSIONS.md")
-        )
+        // 4. block.json, including the permissions the export recorded —
+        // narrowed to this block's own types, with the write actions a
+        // deploy needs (tenant-wide settings are only read and updated).
+        let permissionsURL = request.sourceDirectory.appending(path: "PERMISSIONS.md")
+        let byType = parsePermissionsByType(at: permissionsURL)
+        var permissions: [String] = []
+        if byType.isEmpty {
+            permissions = parsePermissions(at: permissionsURL)
+        } else {
+            var set: Set<String> = []
+            for type in terraformTypes {
+                let actions = singletonTypes.contains(type) ? ["read", "update"] : ["create", "read", "update", "delete"]
+                for capability in byType[type] ?? [] {
+                    let name = capability.split(separator: ":").first.map(String.init) ?? capability
+                    for action in actions { set.insert("\(name):\(action)") }
+                }
+            }
+            permissions = set.sorted()
+        }
         if permissions.isEmpty {
             warnings.append("No PERMISSIONS.md found in the export — the block lists no permissions.")
         }
@@ -820,7 +839,7 @@ public nonisolated enum BlockCapture {
                 "description": "Name of this tenant's Automated Device Enrollment instance. PreStage enrollments attach to it, so the tenant needs its ADE token uploaded first.",
                 "section": "Enrollment",
             ]] : [],
-            "objectsCreated": terraformTypes.sorted().map { "1+ \($0)" },
+            "objectsCreated": typeCounts.sorted { $0.key < $1.key }.map { "\(objectLabel(for: $0.key)) (\($0.value))" },
         ]
         if let origin = request.originTenantScopeID {
             metadata["capturedFromTenant"] = origin
@@ -1185,6 +1204,33 @@ public nonisolated enum BlockCapture {
             index += 1
         }
         return declarations
+    }
+
+    /// Capabilities per resource type from the export's PERMISSIONS.md
+    /// table (`| `type` | `cap:read`<br>`cap:read` | … |`).
+    static func parsePermissionsByType(at url: URL) -> [String: [String]] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+        var result: [String: [String]] = [:]
+        for line in text.split(separator: "\n") {
+            guard let row = line.firstMatch(of: /^\|\s*`([a-z0-9_]+)`\s*\|([^|]*)\|/) else { continue }
+            let capabilities = row.2.matches(of: /`([a-z0-9-]+:[a-z]+)`/).map { String($0.1) }
+            if !capabilities.isEmpty { result[String(row.1), default: []].append(contentsOf: capabilities) }
+        }
+        return result
+    }
+
+    /// Plain-language label for a provider type: `jamfplatform_pro_macos_configuration_profile` → "macOS configuration profile".
+    static func objectLabel(for type: String) -> String {
+        var words = type
+            .replacingOccurrences(of: "jamfplatform_pro_", with: "")
+            .replacingOccurrences(of: "jamfplatform_", with: "")
+            .split(separator: "_").map(String.init)
+        words = words.map { ["macos": "macOS", "ios": "iOS", "sso": "SSO", "smtp": "SMTP", "gsx": "GSX", "mdm": "MDM", "url": "URL", "ldap": "LDAP"][$0] ?? $0 }
+        var label = words.joined(separator: " ")
+        if let first = label.first, first.isLowercase, !label.hasPrefix("macOS"), !label.hasPrefix("iOS") {
+            label = first.uppercased() + label.dropFirst()
+        }
+        return label
     }
 
     static func parsePermissions(at url: URL) -> [String] {

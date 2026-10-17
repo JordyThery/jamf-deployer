@@ -222,6 +222,7 @@ struct BlockDetailSheet: View {
     @State private var editName = ""
     @State private var editSummary = ""
     @State private var editVersion = ""
+    @State private var editCategory = ""
     @State private var actionError: String?
 
     /// Built-in blocks live inside the app bundle and stay read-only.
@@ -239,6 +240,22 @@ struct BlockDetailSheet: View {
         return catalogSources.customSources.contains {
             $0.kind == .localFolder && path.hasPrefix($0.path)
         }
+    }
+
+    /// Library sections already in use, for the category picker.
+    private var existingCategories: [String] {
+        Array(Set((catalog?.blocks ?? []).map(\.category))).sorted()
+    }
+
+    /// The sheet already shows the name and summary; drop a README's
+    /// leading heading and a repeated summary so About starts with content.
+    private func trimmedReadme(_ text: String) -> String {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        func dropBlank() { while lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() } }
+        dropBlank()
+        if lines.first?.hasPrefix("# ") == true { lines.removeFirst(); dropBlank() }
+        if lines.first?.trimmingCharacters(in: .whitespaces) == block.summary { lines.removeFirst(); dropBlank() }
+        return lines.joined(separator: "\n")
     }
 
     /// Tenants whose baseline currently selects this block.
@@ -311,6 +328,7 @@ struct BlockDetailSheet: View {
                     editName = block.name
                     editSummary = block.summary
                     editVersion = block.version
+                    editCategory = block.category
                     isEditingDetails = true
                 }
                 Button("Delete Block…", role: .destructive) { isConfirmingDelete = true }
@@ -351,7 +369,7 @@ struct BlockDetailSheet: View {
         .task {
             if let catalog {
                 let url = catalog.blockFolderURL(id: block.id).appending(path: "README.md")
-                readme = try? String(contentsOf: url, encoding: .utf8)
+                readme = (try? String(contentsOf: url, encoding: .utf8)).map(trimmedReadme)
             }
         }
     }
@@ -362,6 +380,16 @@ struct BlockDetailSheet: View {
                 .font(.headline)
             TextField("Name", text: $editName)
             TextField("Summary", text: $editSummary)
+            HStack {
+                TextField("Category", text: $editCategory)
+                Menu("Existing") {
+                    ForEach(existingCategories, id: \.self) { category in
+                        Button(category) { editCategory = category }
+                    }
+                }
+                .fixedSize()
+                .help("The section this block appears under in the library")
+            }
             TextField("Version", text: $editVersion)
                 .font(.callout.monospaced())
                 .frame(maxWidth: 140)
@@ -374,7 +402,8 @@ struct BlockDetailSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Save") { saveDetails() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(editName.isEmpty || editVersion.isEmpty)
+                    .disabled(editName.isEmpty || editVersion.isEmpty
+                              || editCategory.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .padding(20)
@@ -391,6 +420,7 @@ struct BlockDetailSheet: View {
             object["name"] = editName
             object["summary"] = editSummary
             object["version"] = editVersion
+            object["category"] = editCategory.trimmingCharacters(in: .whitespaces)
         }) else {
             actionError = "The block's details could not be saved. Check that the block folder is writable."
             return
