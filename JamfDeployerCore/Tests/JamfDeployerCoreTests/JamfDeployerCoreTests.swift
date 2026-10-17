@@ -82,14 +82,9 @@ struct PreviewTests {
 
 @Suite("Catalog loading")
 struct CatalogTests {
-    // The repo's real catalog doubles as the fixture: loading it here keeps
-    // block.json files honest.
-    static let catalogURL = URL(filePath: #filePath)
-        .deletingLastPathComponent() // JamfDeployerCoreTests
-        .deletingLastPathComponent() // Tests
-        .deletingLastPathComponent() // JamfDeployerCore
-        .deletingLastPathComponent() // repo root
-        .appending(path: "Catalog")
+    // A full catalog fixture: the built-in Foundation block plus the demo
+    // catalog's blocks and presets, frozen for the generator tests.
+    static let catalogURL = Bundle.module.url(forResource: "Fixtures/test-catalog", withExtension: nil)!
 
     @Test func loadsAllBlocksAndPresets() throws {
         let catalog = try LoadedCatalog.load(from: Self.catalogURL)
@@ -425,7 +420,7 @@ struct CatalogMergeTests {
         #expect(merged.blocks.count == official.blocks.count + 1)
         #expect(merged.block(id: "captured-rosetta") != nil)
         #expect(merged.sourceName(for: "captured-rosetta") == "My Blocks")
-        #expect(merged.sourceName(for: "foundation") == "Jamf Deployer Official")
+        #expect(merged.sourceName(for: "foundation") == "Built-in")
         #expect(merged.blockFolderURL(id: "captured-rosetta").path.contains("custom-source"))
     }
 }

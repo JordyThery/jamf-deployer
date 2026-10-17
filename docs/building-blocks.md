@@ -4,9 +4,11 @@ A baseline is composed of building blocks. Each block is a self-contained piece 
 
 ## Where blocks come from
 
-The app itself ships exactly one block — **Foundation** (categories, device groups and extension attributes every other block relies on; always part of a baseline). Everything else lives in the **[Jamf Deployer Catalog](https://github.com/JordyThery/jamf-deployer-catalog)**, a public repository versioned by release tag: the Building Blocks library offers to add it on first visit, and tenants pin the tag they use, so a published update never changes a tenant until you opt in.
+The app itself ships exactly one block — **Foundation** (categories, device groups and extension attributes every other block relies on; always part of a baseline). Every other block comes from catalogs you follow: capture your own from a tenant, or publish a catalog repository for your team. Tenants pin the release tag they use, so a published update never changes a tenant until you opt in.
 
-## The Jamf Deployer Catalog
+The **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** is a worked example of a full baseline — the library offers it on first visit, and its repository doubles as the template for publishing your own.
+
+## The demo catalog
 
 | Block | Creates | Risk |
 | --- | --- | --- |
@@ -46,7 +48,7 @@ Blocks are versioned. When a tenant's catalog source publishes a newer release, 
 
 Three ways:
 
-1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block — parameterizing names, categories and scope — and saves it to a catalog source of yours. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt** there instead (the editor warns about this).
+1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block — parameterizing names, categories and scope — and saves it to a catalog source of yours. One export can be captured as a single block or **split into several** — define the blocks, assign each object to one, and the app captures them all from the same export. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt** there instead (the editor warns about this).
 2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
 3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
 

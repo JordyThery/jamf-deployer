@@ -1,0 +1,66 @@
+{
+  "id": "security-cloud",
+  "name": "Security Cloud",
+  "summary": "Connects Jamf Security Cloud to this Jamf Pro tenant (UEM Connect) and creates a Mac activation profile — Security Cloud then syncs devices and can push the enrollment profile into Jamf Pro.",
+  "category": "Security",
+  "version": "1.1.0",
+  "requires": [],
+  "conflicts": [],
+  "products": ["security-cloud"],
+  "permissions": ["uem-connections:create", "uem-connections:read", "uem-connections:update", "uem-connections:delete", "activation-profiles:create", "activation-profiles:read", "activation-profiles:update", "activation-profiles:delete", "tenant-id:read"],
+  "risk": "medium",
+  "alwaysOn": false,
+  "scope": { "kind": "none" },
+  "settings": [
+    {
+      "key": "profile_name",
+      "title": "Activation profile name",
+      "type": "string",
+      "default": "Mac Security",
+      "required": true,
+      "description": "Shown in Jamf Security Cloud. Renaming later replaces the profile and mints a new activation code.",
+      "section": "Activation profile"
+    },
+    {
+      "key": "content_controls",
+      "title": "Content controls",
+      "type": "bool",
+      "default": "true",
+      "required": false,
+      "description": "Web content filtering capabilities for enrolling devices.",
+      "section": "Activation profile"
+    },
+    {
+      "key": "network_security",
+      "title": "Network security",
+      "type": "bool",
+      "default": "true",
+      "required": false,
+      "description": "Network threat protection capabilities for enrolling devices.",
+      "section": "Activation profile"
+    },
+    {
+      "key": "device_risk_signaling",
+      "title": "Send device risk back to Jamf Pro",
+      "type": "bool",
+      "default": "true",
+      "required": false,
+      "description": "Device risk levels flow back into Jamf Pro (extension attributes), usable in smart groups.",
+      "section": "UEM Connect"
+    },
+    {
+      "key": "sync_interval_minutes",
+      "title": "Sync interval (minutes)",
+      "type": "number",
+      "default": "60",
+      "required": false,
+      "description": "How often Security Cloud syncs devices from Jamf Pro. Security Cloud only accepts the intervals its own admin UI offers (60 is always valid).",
+      "section": "UEM Connect"
+    }
+  ],
+  "objectsCreated": [
+    "1 UEM Connect integration (Security Cloud ↔ this Jamf Pro tenant)",
+    "1 activation profile (macOS)"
+  ],
+  "entitlementNote": "Needs a Jamf Security Cloud entitlement on the environment. Without it, the deploy stops with a clear message and nothing else is affected."
+}

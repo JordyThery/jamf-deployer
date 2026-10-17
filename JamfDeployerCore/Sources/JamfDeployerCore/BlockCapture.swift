@@ -176,11 +176,9 @@ public nonisolated enum BlockCapture {
             throw CaptureError.nothingToCapture
         }
 
-        // 2. Support files → files/.
-        let supportURL = request.sourceDirectory.appending(path: "support_files")
-        if fileManager.fileExists(atPath: supportURL.path) {
-            try fileManager.copyItem(at: supportURL, to: blockURL.appending(path: "files"))
-        }
+        // 2. Support files move after variables are known — see below: only
+        // files the block actually references are copied, so a block carved
+        // out of a larger export does not drag everything along.
 
         // 3. variables.tf for the block.
         var variables = """
@@ -257,6 +255,23 @@ public nonisolated enum BlockCapture {
         }
 
         try Data(variables.utf8).write(to: blockURL.appending(path: "variables.tf"))
+
+        // Support files → files/, filtered to the ones this block references
+        // (in resources or in carried variable defaults).
+        let supportURL = request.sourceDirectory.appending(path: "support_files")
+        if fileManager.fileExists(atPath: supportURL.path) {
+            let haystack = capturedText + variables
+            let enumerator = fileManager.enumerator(at: supportURL, includingPropertiesForKeys: [.isRegularFileKey])
+            while let item = enumerator?.nextObject() as? URL {
+                guard (try? item.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+                let relative = item.path.replacingOccurrences(of: supportURL.path + "/", with: "")
+                guard haystack.contains("files/\(relative)") else { continue }
+                let destination = blockURL.appending(path: "files/\(relative)")
+                try fileManager.createDirectory(
+                    at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.copyItem(at: item, to: destination)
+            }
+        }
 
         try Data("""
         terraform {

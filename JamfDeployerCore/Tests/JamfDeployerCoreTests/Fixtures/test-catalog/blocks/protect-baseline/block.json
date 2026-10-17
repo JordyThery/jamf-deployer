@@ -1,0 +1,92 @@
+{
+  "id": "protect-baseline",
+  "name": "Jamf Protect Baseline",
+  "summary": "Endpoint security to a safe starting point: telemetry, alert forwarding to Jamf Protect cloud, an exception set, and a plan in report-only mode.",
+  "category": "Security",
+  "version": "1.0.0",
+  "requires": [],
+  "conflicts": [],
+  "products": [
+    "jamf-protect"
+  ],
+  "permissions": [],
+  "risk": "high",
+  "alwaysOn": false,
+  "scope": {
+    "kind": "none"
+  },
+  "settings": [
+    {
+      "key": "threat_mode",
+      "title": "Threat prevention",
+      "type": "enum",
+      "default": "Report only",
+      "required": true,
+      "enumValues": [
+        "Report only",
+        "Block and report"
+      ],
+      "enumLabels": [
+        "Report only (recommended start)",
+        "Block and report"
+      ],
+      "description": "Report only observes and alerts without blocking — switch to blocking once alerts look clean on the pilot.",
+      "section": "Protection"
+    },
+    {
+      "key": "reporting_interval",
+      "title": "Reporting interval (minutes)",
+      "type": "number",
+      "default": "15",
+      "required": true,
+      "description": "How often endpoints report in.",
+      "section": "Protection"
+    },
+    {
+      "key": "auto_update",
+      "title": "Auto-update the Protect agent",
+      "type": "bool",
+      "default": "true",
+      "required": false,
+      "description": "Endpoints on this plan update the Jamf Protect agent automatically.",
+      "section": "Protection"
+    },
+    {
+      "key": "collect_network_telemetry",
+      "title": "Collect network telemetry",
+      "type": "bool",
+      "default": "false",
+      "required": false,
+      "description": "Inbound and outbound connection events, including remote addresses. Higher volume; enable when your SIEM wants it.",
+      "section": "Telemetry"
+    }
+  ],
+  "objectsCreated": [
+    "1 telemetry configuration",
+    "1 action configuration (alerts to Jamf Protect cloud)",
+    "1 exception set (empty, ready for exclusions)",
+    "1 plan (report-only by default)"
+  ],
+  "driftBindings": [
+    {
+      "resourceType": "jamfprotect_plan",
+      "fieldPath": "endpoint_threat_prevention",
+      "settingKey": "threat_mode"
+    },
+    {
+      "resourceType": "jamfprotect_plan",
+      "fieldPath": "reporting_interval",
+      "settingKey": "reporting_interval"
+    },
+    {
+      "resourceType": "jamfprotect_plan",
+      "fieldPath": "auto_update",
+      "settingKey": "auto_update"
+    },
+    {
+      "resourceType": "jamfprotect_telemetry",
+      "fieldPath": "log_network",
+      "settingKey": "collect_network_telemetry"
+    }
+  ]
+}

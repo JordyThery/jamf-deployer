@@ -56,6 +56,20 @@ struct ExportView: View {
     @State private var blockID = ""
     @State private var blockName = ""
     @State private var blockSummary = ""
+
+    // Splitting one export into several blocks.
+    enum CaptureMode: String, CaseIterable {
+        case single = "One block"
+        case split = "Separate blocks"
+    }
+    struct SplitGroup: Identifiable {
+        let id = UUID()
+        var blockID: String
+        var name: String
+    }
+    @State private var captureMode: CaptureMode = .single
+    @State private var splitGroups: [SplitGroup] = []
+    @State private var groupAssignment: [String: UUID] = [:]
     @State private var selectedSourceID: UUID?
     @State private var captureOutcome: String?
 
@@ -470,6 +484,31 @@ struct ExportView: View {
     @ViewBuilder
     private func captureForm(_ result: JamformerRunner.ExportResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            Picker("Capture as", selection: $captureMode) {
+                ForEach(CaptureMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .onChange(of: captureMode) {
+                if captureMode == .split, splitGroups.isEmpty {
+                    splitGroups = [SplitGroup(blockID: "captured-1", name: "")]
+                }
+            }
+
+            if captureMode == .split {
+                splitForm(result)
+            } else {
+                singleCaptureFields(result)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func singleCaptureFields(_ result: JamformerRunner.ExportResult) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             TextField("Block ID (lowercase-with-dashes)", text: $blockID)
                 .font(.callout.monospaced())
                 .frame(maxWidth: 320)
@@ -477,21 +516,7 @@ struct ExportView: View {
                 .frame(maxWidth: 320)
             TextField("Summary", text: $blockSummary, prompt: Text("What this block sets up"))
                 .frame(maxWidth: 480)
-            HStack {
-                if catalogSources.customSources.isEmpty {
-                    Button("Choose a Folder for Your Blocks…") { addSource() }
-                        .help("Captured blocks are saved into a catalog folder you own")
-                } else {
-                    Picker("Save into", selection: $selectedSourceID) {
-                        ForEach(catalogSources.customSources) { source in
-                            Text(source.name).tag(Optional(source.id))
-                        }
-                    }
-                    .frame(maxWidth: 300)
-                    Button("Add Folder…") { addSource() }
-                        .controlSize(.small)
-                }
-            }
+            sourcePickerRow
             Button("Capture Building Block", systemImage: "shippingbox") {
                 capture(result)
             }
@@ -500,6 +525,154 @@ struct ExportView: View {
             Text("The captured block is marked “Review before use” until you mark it reviewed in the Building Blocks library.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Where captured blocks are saved — shared by both capture modes.
+    @ViewBuilder
+    private var sourcePickerRow: some View {
+        HStack {
+            if catalogSources.customSources.isEmpty {
+                Button("Choose a Folder for Your Blocks…") { addSource() }
+                    .help("Captured blocks are saved into a catalog folder you own")
+            } else {
+                Picker("Save into", selection: $selectedSourceID) {
+                    ForEach(catalogSources.customSources) { source in
+                        Text(source.name).tag(Optional(source.id))
+                    }
+                }
+                .frame(maxWidth: 300)
+                Button("Add Folder…") { addSource() }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: Split capture
+
+    @ViewBuilder
+    private func splitForm(_ result: JamformerRunner.ExportResult) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Define the blocks, then assign each selected object to one. Unassigned objects are left out.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach($splitGroups) { $group in
+                HStack(spacing: 6) {
+                    TextField("block-id", text: $group.blockID)
+                        .font(.callout.monospaced())
+                        .frame(width: 180)
+                    TextField("Block name", text: $group.name)
+                        .frame(width: 220)
+                    Text("\(assignedCount(group.id)) object\(assignedCount(group.id) == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(role: .destructive) {
+                        removeGroup(group.id)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(splitGroups.count == 1)
+                }
+            }
+            Button("Add Block", systemImage: "plus") {
+                splitGroups.append(SplitGroup(blockID: "captured-\(splitGroups.count + 1)", name: ""))
+            }
+            .controlSize(.small)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(exportedObjects.filter { selectedObjects.contains($0.address) }) { object in
+                        HStack {
+                            Text(object.displayName).font(.callout)
+                            Text(object.resourceType)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Picker("", selection: Binding(
+                                get: { groupAssignment[object.address] },
+                                set: { groupAssignment[object.address] = $0 }
+                            )) {
+                                Text("Leave out").tag(UUID?.none)
+                                ForEach(splitGroups) { group in
+                                    Text(group.name.isEmpty ? group.blockID : group.name)
+                                        .tag(Optional(group.id))
+                                }
+                            }
+                            .frame(width: 220)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 180)
+
+            sourcePickerRow
+
+            Button("Capture \(populatedGroupCount) Building Block\(populatedGroupCount == 1 ? "" : "s")", systemImage: "shippingbox") {
+                captureSplit(result)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!splitIsValid)
+            Text("Each captured block is marked “Review before use” until you mark it reviewed in the Building Blocks library.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func assignedCount(_ groupID: UUID) -> Int {
+        groupAssignment.values.filter { $0 == groupID }.count
+    }
+
+    private var populatedGroupCount: Int {
+        splitGroups.filter { assignedCount($0.id) > 0 }.count
+    }
+
+    private var splitIsValid: Bool {
+        populatedGroupCount > 0 && effectiveSourceID != nil
+            && splitGroups.allSatisfy { assignedCount($0.id) == 0 || (!$0.blockID.isEmpty && !$0.name.isEmpty) }
+    }
+
+    private func removeGroup(_ id: UUID) {
+        splitGroups.removeAll { $0.id == id }
+        for (address, group) in groupAssignment where group == id {
+            groupAssignment[address] = nil
+        }
+    }
+
+    /// Captures each populated group as its own block from the one export:
+    /// copy, prune to the group's objects, capture.
+    private func captureSplit(_ result: JamformerRunner.ExportResult) {
+        guard let sourceID = effectiveSourceID,
+              let source = catalogSources.customSources.first(where: { $0.id == sourceID }) else { return }
+        var captured: [String] = []
+        do {
+            for group in splitGroups where assignedCount(group.id) > 0 {
+                let members = Set(groupAssignment.filter { $0.value == group.id }.keys)
+                let staging = FileManager.default.temporaryDirectory
+                    .appending(path: "capture-split-\(UUID().uuidString)")
+                defer { try? FileManager.default.removeItem(at: staging) }
+                try FileManager.default.copyItem(at: result.outputURL, to: staging)
+                try ExportedObjectInventory.prune(directory: staging, keeping: members)
+                let outcome = try BlockCapture.capture(BlockCapture.Request(
+                    blockID: group.blockID.trimmingCharacters(in: .whitespaces),
+                    name: group.name,
+                    summary: "Captured from \(tenant.name).",
+                    namePrefix: tenant.namePrefix,
+                    sourceDirectory: staging,
+                    catalogRootDirectory: URL(filePath: source.path),
+                    secretFindings: result.secretFindings,
+                    originTenantScopeID: tenant.scopeID
+                ))
+                captured.append("\(group.name) (\(outcome.objectCount))")
+            }
+            captureOutcome = "Captured \(captured.count) block\(captured.count == 1 ? "" : "s") into “\(source.name)”: \(captured.joined(separator: ", ")). Find them in the Building Blocks library."
+            activityLog.append(ActivityLogEntry(
+                category: "Export", operation: "capture-split", detail: tenant.name,
+                status: 200, duration: nil, note: "\(captured.count) blocks → \(source.name)"
+            ))
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 

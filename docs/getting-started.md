@@ -22,7 +22,7 @@ Connecting a Jamf Protect tenant (for the Protect building blocks) works the sam
 
 ## 3. Compose a baseline
 
-First visit to **Building Blocks**: accept the offer to add the **Jamf Deployer Catalog** — the app ships only the Foundation block; enrollment, FileVault, software updates and the rest come from the [published catalog](https://github.com/JordyThery/jamf-deployer-catalog), versioned by release tag.
+First visit to **Building Blocks**: the app ships only the Foundation block — add the **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** to try a full baseline (enrollment, FileVault, software updates and more, versioned by release tag). For real fleets, capture your own blocks or publish your own catalog — the demo repository is the template.
 
 Then open the tenant's **Baseline** editor:
 

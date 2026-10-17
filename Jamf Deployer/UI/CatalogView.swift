@@ -12,13 +12,13 @@ struct CatalogView: View {
     @State private var selectedBlock: BlockMetadata?
     @State private var isAddingGitSource = false
     @State private var isManagingSources = false
-    @State private var isAddingOfficialCatalog = false
-    @State private var officialCatalogError: String?
+    @State private var isAddingDemoCatalog = false
+    @State private var demoCatalogError: String?
 
-    static let officialCatalogURL = "https://github.com/JordyThery/jamf-deployer-catalog.git"
+    static let demoCatalogURL = "https://github.com/JordyThery/jamf-deployer-catalog.git"
 
-    private var followsOfficialCatalog: Bool {
-        catalogSources.customSources.contains { $0.gitURL == Self.officialCatalogURL }
+    private var followsDemoCatalog: Bool {
+        catalogSources.customSources.contains { $0.gitURL == Self.demoCatalogURL }
     }
 
     var body: some View {
@@ -26,8 +26,8 @@ struct CatalogView: View {
             if let catalog {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        if !followsOfficialCatalog {
-                            officialCatalogBanner
+                        if !followsDemoCatalog, catalogSources.customSources.isEmpty {
+                            demoCatalogBanner
                         }
                         ForEach(groupedCategories(catalog), id: \.0) { category, blocks in
                             VStack(alignment: .leading, spacing: 10) {
@@ -93,52 +93,52 @@ struct CatalogView: View {
         }
     }
 
-    /// Offers the published block catalog: the app itself only ships the
-    /// Foundation block.
-    private var officialCatalogBanner: some View {
+    /// The app ships only the Foundation block; blocks come from catalogs
+    /// you follow or publish. The demo catalog is a worked example.
+    private var demoCatalogBanner: some View {
         GroupBox {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Get the Jamf Deployer Catalog")
+                    Text("Blocks come from catalogs")
                         .font(.headline)
-                    Text("Enrollment, FileVault, software updates, CIS Level 1 and more — published as a versioned catalog, so baseline updates are opt-in per tenant.")
+                    Text("The app ships only the Foundation block. Add the demo catalog to try a full baseline (enrollment, FileVault, software updates, CIS Level 1, …) — for real fleets, capture your own blocks or publish your own catalog repository.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    if let officialCatalogError {
-                        Label(officialCatalogError, systemImage: "exclamationmark.triangle.fill")
+                    if let demoCatalogError {
+                        Label(demoCatalogError, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                 }
                 Spacer()
-                Button(isAddingOfficialCatalog ? "Adding…" : "Add Catalog") {
-                    addOfficialCatalog()
+                Button(isAddingDemoCatalog ? "Adding…" : "Add Demo Catalog") {
+                    addDemoCatalog()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isAddingOfficialCatalog)
+                .disabled(isAddingDemoCatalog)
             }
             .padding(6)
         }
     }
 
-    private func addOfficialCatalog() {
-        isAddingOfficialCatalog = true
-        officialCatalogError = nil
+    private func addDemoCatalog() {
+        isAddingDemoCatalog = true
+        demoCatalogError = nil
         Task {
-            defer { isAddingOfficialCatalog = false }
+            defer { isAddingDemoCatalog = false }
             do {
-                guard let latest = try await GitCatalogManager.availableTags(remote: Self.officialCatalogURL).last else {
-                    officialCatalogError = "The catalog repository has no releases yet."
+                guard let latest = try await GitCatalogManager.availableTags(remote: Self.demoCatalogURL).last else {
+                    demoCatalogError = "The catalog repository has no releases yet."
                     return
                 }
                 _ = try await catalogSources.addGitSource(
-                    name: "Jamf Deployer Catalog",
-                    url: Self.officialCatalogURL,
+                    name: "Demo Catalog",
+                    url: Self.demoCatalogURL,
                     tag: latest
                 )
                 catalog = try? deployService.loadCatalog()
             } catch {
-                officialCatalogError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                demoCatalogError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
