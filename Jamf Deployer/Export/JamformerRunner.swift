@@ -120,13 +120,17 @@ actor JamformerRunner {
 
         try process.run()
 
-        // Drain stderr concurrently so neither pipe can fill and deadlock.
+        // Drain stderr concurrently so neither pipe can fill and deadlock —
+        // and stream it: the exporter reports errors there.
         let stderrHandle = stderr.fileHandleForReading
         let stderrTask = Task<[String], Never> {
             var collected: [String] = []
             do {
                 for try await line in stderrHandle.bytes.lines {
-                    collected.append(line)
+                    let clean = Self.stripTerminalNoise(line)
+                    guard !clean.isEmpty else { continue }
+                    collected.append(clean)
+                    onLine?(clean)
                 }
             } catch {}
             return collected
@@ -134,11 +138,12 @@ actor JamformerRunner {
 
         var lines: [String] = []
         for try await line in stdout.fileHandleForReading.bytes.lines {
-            let clean = stripANSI(line)
+            let clean = Self.stripTerminalNoise(line)
+            guard !clean.isEmpty else { continue }
             lines.append(clean)
             onLine?(clean)
         }
-        lines.append(contentsOf: await stderrTask.value.map(stripANSI))
+        lines.append(contentsOf: await stderrTask.value)
         process.waitUntilExit()
 
         // The gitleaks-based scan is always on; collect what it reported.
@@ -169,7 +174,26 @@ actor JamformerRunner {
         )
     }
 
-    private nonisolated func stripANSI(_ line: String) -> String {
-        line.replacingOccurrences(of: #"\u{1B}\[[0-9;]*m"#, with: "", options: .regularExpression)
+    /// Removes terminal control sequences and progress-bar junk. The
+    /// exporter renders animated progress with full CSI sequences (cursor
+    /// movement, 24-bit colors) and carriage-return redraws; after
+    /// stripping, pure drawing lines reduce to nothing and are dropped.
+    nonisolated static func stripTerminalNoise(_ line: String) -> String {
+        var text = line
+        // Complete CSI sequences, any final byte (colors, cursor, erase).
+        text = text.replacingOccurrences(
+            of: #"\u{1B}\[[0-9;?]*[@-~]"#, with: "", options: .regularExpression)
+        // Orphaned sequence bodies whose ESC byte was lost in line splitting.
+        text = text.replacingOccurrences(
+            of: #"\[[0-9]{1,3}(;[0-9]{1,3})*[a-zA-Z]"#, with: "", options: .regularExpression)
+        // Stray escapes and carriage returns.
+        text = text.replacingOccurrences(of: "\u{1B}", with: "")
+        text = text.replacingOccurrences(of: "\r", with: " ")
+        // Progress bars reduce to box-drawing glyphs and whitespace.
+        let drawing = text.unicodeScalars.allSatisfy {
+            $0.properties.isWhitespace || ($0.value >= 0x2500 && $0.value <= 0x259F)
+        }
+        if drawing { return "" }
+        return text.trimmingCharacters(in: .whitespaces)
     }
 }

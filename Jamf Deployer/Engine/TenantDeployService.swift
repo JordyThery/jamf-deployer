@@ -886,7 +886,7 @@ final class TenantDeployService {
             case .planExpired:
                 "This preview is no longer valid. Run Preview Changes again before deploying."
             case .blockMissingFromCatalog(let id):
-                "The building block \"\(id)\" is selected on this tenant but missing from the catalog."
+                "The building block \"\(id)\" is selected on this tenant, but it is not in any catalog this Mac follows. Add the catalog it comes from (Building Blocks library), or remove it from the baseline."
             case .noSnapshot:
                 "This history entry is from before baseline snapshots existed, so it can't be rolled back to."
             case .missingProtectConnection:

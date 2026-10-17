@@ -36,13 +36,42 @@ struct BaselineEditorView: View {
                 }
                 .help("Checks the tenant's catalog sources for newer releases, block by block")
                 Spacer()
-                Text("\(tenant.blockSelections.count) of \(catalog.blocks.count) blocks selected")
+                Text("\(availableSelectionCount) of \(catalog.blocks.count) blocks selected")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
             ForEach(catalog.blocks) { block in
                 blockRow(block)
+            }
+
+            // Selections whose block is in no followed catalog (a removed
+            // source, a block deleted on disk, or a catalog not added on
+            // this Mac) would fail generation — surface them with a way out.
+            ForEach(missingSelections, id: \.blockID) { selection in
+                HStack(alignment: .firstTextBaseline) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selection.blockID)
+                                .font(.callout.monospaced())
+                            Text("Selected on this tenant, but not in any catalog this Mac follows. Add the catalog it comes from, or remove it from the baseline.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "questionmark.square.dashed")
+                            .foregroundStyle(.orange)
+                    }
+                    Spacer()
+                    Button("Remove from Baseline", role: .destructive) {
+                        var updated = tenant
+                        updated.blockSelections.removeAll { $0.blockID == selection.blockID }
+                        tenantStore.update(updated)
+                    }
+                    .controlSize(.small)
+                }
+                .padding(10)
+                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .sheet(isPresented: $isCheckingUpdates) {
@@ -65,6 +94,20 @@ struct BaselineEditorView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Remove from Tenant deletes the block's objects from Jamf on the next deploy. Stop Managing leaves everything in Jamf untouched — the app just stops tracking it. The preview shows exactly what happens either way.")
+        }
+    }
+
+    /// Selections that resolve to a catalog block on this Mac.
+    private var availableSelectionCount: Int {
+        tenant.blockSelections.filter { selection in
+            catalog.blocks.contains { $0.id == selection.blockID }
+        }.count
+    }
+
+    /// Selections whose block is absent from every followed catalog.
+    private var missingSelections: [BlockSelection] {
+        tenant.blockSelections.filter { selection in
+            !catalog.blocks.contains { $0.id == selection.blockID }
         }
     }
 

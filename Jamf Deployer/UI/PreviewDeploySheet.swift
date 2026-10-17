@@ -364,8 +364,14 @@ struct PreviewDeploySheet: View {
             }
         } catch {
             let raw = String(describing: error)
-            let translated = ErrorTranslation.translate(raw)
-            stage = .failed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: raw)
+            // App-level errors describe themselves; the translation table is
+            // for raw engine and provider output.
+            if let described = (error as? LocalizedError)?.errorDescription {
+                stage = .failed(described, detail: raw)
+            } else {
+                let translated = ErrorTranslation.translate(raw)
+                stage = .failed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: raw)
+            }
         }
     }
 
@@ -388,8 +394,12 @@ struct PreviewDeploySheet: View {
                 stage = .finished(outcome)
             } catch {
                 let raw = String(describing: error)
-                let translated = ErrorTranslation.translate(raw)
-                stage = .failed(translated.message, detail: raw)
+                if let described = (error as? LocalizedError)?.errorDescription {
+                    stage = .failed(described, detail: raw)
+                } else {
+                    let translated = ErrorTranslation.translate(raw)
+                    stage = .failed(translated.message, detail: raw)
+                }
             }
         }
     }
