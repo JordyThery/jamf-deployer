@@ -117,6 +117,14 @@ struct PreviewDeploySheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if outcome.recovered > 0 {
+                    Label(
+                        "Jamf reported an error for \(outcome.recovered) object\(outcome.recovered == 1 ? "" : "s") but created \(outcome.recovered == 1 ? "it" : "them") anyway. Preview Changes again: the preview adopts \(outcome.recovered == 1 ? "it" : "them") instead of creating duplicates.",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(outcome.errors.enumerated()), id: \.offset) { _, raw in

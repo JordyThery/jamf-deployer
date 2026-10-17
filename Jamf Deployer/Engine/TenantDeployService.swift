@@ -496,6 +496,8 @@ final class TenantDeployService {
         var succeeded: Int
         var failed: Int
         var errors: [String]
+        /// Failed creates Jamf completed anyway; the next preview adopts them.
+        var recovered: Int = 0
         var historyEntryID: String
     }
 
@@ -514,7 +516,9 @@ final class TenantDeployService {
         var result: EngineRunner.RunResult
         do {
             result = try await runner.run(
-                arguments: ["apply", "-input=false", "-json", session.planFileName]
+                // Jamf's classic API fails more creates under load; four
+                // concurrent operations measurably reduce that at little cost.
+                arguments: ["apply", "-input=false", "-json", "-parallelism=4", session.planFileName]
             ) { event in
                 if event.type == .applyComplete || event.type == .applyErrored {
                     let message = event.message
@@ -538,6 +542,15 @@ final class TenantDeployService {
                 text += "\n\(detail)"
             }
             return text
+        }
+
+        // Objects Jamf created despite reporting an error become imports
+        // the next preview adopts, instead of duplicate-name failures.
+        var recovered = 0
+        if !result.errorDiagnostics.isEmpty,
+           let plan = try? await runner.showPlan(planFileName: session.planFileName) {
+            recovered = await recoverCreatedObjects(
+                tenant: tenant, diagnostics: result.errorDiagnostics, plan: plan, runner: runner)
         }
 
         // History: the approved plan, a summary, and the full event log.
@@ -623,8 +636,53 @@ final class TenantDeployService {
             succeeded: succeeded,
             failed: errors.count,
             errors: errors,
+            recovered: recovered,
             historyEntryID: entryID
         )
+    }
+
+    /// Looks up each failed create in Jamf by its planned name and records
+    /// the ones that exist as import blocks. Returns how many were found.
+    private func recoverCreatedObjects(
+        tenant: Tenant,
+        diagnostics: [EngineStreamEvent.Diagnostic],
+        plan: PlanFile,
+        runner: EngineRunner
+    ) async -> Int {
+        let candidates = CreateFailureRecovery.candidates(diagnostics: diagnostics, plan: plan)
+        guard !candidates.isEmpty,
+              let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load(),
+              let stateData = try? await runner.rawCommandOutput(arguments: ["show", "-json"])
+        else { return 0 }
+        // Objects the state already tracks are never adopted a second time.
+        let managed = CreateFailureRecovery.managedIDs(stateJSON: stateData)
+        let client = JamfPlatformClient(
+            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
+            activityLog: activityLog
+        )
+        let fileURL = adoptedURL(for: tenant).appending(path: "recovered_import.tf")
+        // Keep recoveries from earlier deploys that have not been applied yet.
+        var found: [String: String] = [:]
+        if let existing = try? String(contentsOf: fileURL, encoding: .utf8) {
+            for match in existing.matches(of: /to = (\S+)\n\s*id = "([^"]+)"/) {
+                found[String(match.1)] = String(match.2)
+            }
+        }
+        for candidate in candidates {
+            guard let path = CreateFailureRecovery.lookupPath(for: candidate),
+                  let (data, status) = try? await client.get(path, query: CreateFailureRecovery.lookupQuery(for: candidate)), status == 200,
+                  let id = CreateFailureRecovery.objectID(
+                      in: data, for: candidate, excluding: managed[candidate.resourceType] ?? [])
+            else { continue }
+            // Two failed creates with the same name must not share one object.
+            guard !found.values.contains(id) else { continue }
+            found[candidate.address] = id
+        }
+        guard !found.isEmpty else { return 0 }
+        try? FileManager.default.createDirectory(at: adoptedURL(for: tenant), withIntermediateDirectories: true)
+        let text = CreateFailureRecovery.importFile(found.map { (address: $0.key, id: $0.value) })
+        try? Data(text.utf8).write(to: fileURL)
+        return candidates.count { found[$0.address] != nil }
     }
 
     // MARK: Changes made in Jamf (drift)

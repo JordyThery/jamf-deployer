@@ -965,3 +965,97 @@ struct PlanRedactionTests {
         #expect(payload?["user"] as? String == "u")
     }
 }
+
+@Suite("Create-failure recovery")
+struct CreateFailureRecoveryTests {
+    static let plan = #"""
+    {"format_version":"1.2","resource_changes":[
+      {"address":"module.cap.jamfplatform_pro_policy.flush_dns","type":"jamfplatform_pro_policy","name":"flush_dns",
+       "change":{"actions":["create"],"after":{"general":{"name":"[Self Service] Flush DNS cache"}}}},
+      {"address":"module.cap.jamfplatform_pro_patch_software_title.chrome","type":"jamfplatform_pro_patch_software_title","name":"chrome",
+       "change":{"actions":["create"],"after":{"name":"Google Chrome"}}},
+      {"address":"module.cap.jamfplatform_pro_app_installer.zoom","type":"jamfplatform_pro_app_installer","name":"zoom",
+       "change":{"actions":["create"],"after":{"name":"Zoom"}}},
+      {"address":"module.cap.jamfplatform_pro_policy.renamed","type":"jamfplatform_pro_policy","name":"renamed",
+       "change":{"actions":["update"],"after":{"general":{"name":"Renamed"}}}}
+    ]}
+    """#
+
+    static func diagnostic(_ address: String, _ summary: String, _ detail: String) throws -> EngineStreamEvent.Diagnostic {
+        let json = #"{"severity":"error","summary":"\#(summary)","detail":"\#(detail)","address":"\#(address)"}"#
+        return try JSONDecoder().decode(EngineStreamEvent.Diagnostic.self, from: Data(json.utf8))
+    }
+
+    @Test func picksOnlyRecoverableServerErrorsOnCreate() throws {
+        let plan = try JSONDecoder().decode(PlanFile.self, from: Data(Self.plan.utf8))
+        let diagnostics = [
+            try Self.diagnostic("module.cap.jamfplatform_pro_policy.flush_dns", "Error creating Jamf Pro policy",
+                                "CreatePolicyByID(0): API request failed with status 500 Internal Server Error"),
+            try Self.diagnostic("module.cap.jamfplatform_pro_patch_software_title.chrome", "Error creating Jamf Pro patch software title",
+                                "API request failed with status 500 Internal Server Error"),
+            // Gateway timeouts can leave the object behind too.
+            try Self.diagnostic("module.cap.jamfplatform_pro_app_installer.zoom", "Error creating App Installer deployment",
+                                "API request failed with status 504 Gateway Timeout"),
+            // Not a server error.
+            try Self.diagnostic("module.cap.jamfplatform_pro_policy.flush_dns", "Error creating Jamf Pro policy",
+                                "status 409 Conflict: Duplicate name"),
+            // Updates are never recovered.
+            try Self.diagnostic("module.cap.jamfplatform_pro_policy.renamed", "Error creating Jamf Pro policy", "status 500"),
+        ]
+        let candidates = CreateFailureRecovery.candidates(diagnostics: diagnostics, plan: plan)
+        #expect(candidates.map(\.address) == [
+            "module.cap.jamfplatform_pro_policy.flush_dns",
+            "module.cap.jamfplatform_pro_patch_software_title.chrome",
+            "module.cap.jamfplatform_pro_app_installer.zoom",
+        ])
+        #expect(CreateFailureRecovery.lookupQuery(for: candidates[2]).first?.name == "page-size")
+        #expect(candidates.first?.name == "[Self Service] Flush DNS cache")
+        #expect(CreateFailureRecovery.lookupPath(for: candidates[0]) == "/proclassic/policies/name/[Self Service] Flush DNS cache")
+        #expect(CreateFailureRecovery.lookupPath(for: candidates[1]) == "/proclassic/patchsoftwaretitles")
+    }
+
+    @Test func readsIDsFromLookupsAndRendersImports() throws {
+        let policy = CreateFailureRecovery.Candidate(
+            address: "module.cap.jamfplatform_pro_policy.flush_dns",
+            resourceType: "jamfplatform_pro_policy", name: "[Self Service] Flush DNS cache")
+        let found = Data(#"{"policy":{"general":{"id":625,"name":"[Self Service] Flush DNS cache"}}}"#.utf8)
+        #expect(CreateFailureRecovery.objectID(in: found, for: policy) == "625")
+        let other = Data(#"{"policy":{"general":{"id":1,"name":"Something else"}}}"#.utf8)
+        #expect(CreateFailureRecovery.objectID(in: other, for: policy) == nil)
+
+        let title = CreateFailureRecovery.Candidate(
+            address: "module.cap.jamfplatform_pro_patch_software_title.chrome",
+            resourceType: "jamfplatform_pro_patch_software_title", name: "Google Chrome")
+        let list = Data(#"{"patch_software_titles":[{"id":"102","name":"Apple macOS Sonoma"},{"id":"103","name":"Google Chrome"}]}"#.utf8)
+        #expect(CreateFailureRecovery.objectID(in: list, for: title) == "103")
+
+        // Duplicate names: the one the state already tracks is never taken,
+        // and two untracked matches are too ambiguous to adopt.
+        let installer = CreateFailureRecovery.Candidate(
+            address: "module.cap.jamfplatform_pro_app_installer.figma_2",
+            resourceType: "jamfplatform_pro_app_installer", name: "Figma")
+        let deployments = Data(#"{"results":[{"id":"10","name":"Figma"},{"id":"11","name":"Figma"},{"id":"12","name":"Zoom"}]}"#.utf8)
+        #expect(CreateFailureRecovery.objectID(in: deployments, for: installer, excluding: ["10"]) == "11")
+        #expect(CreateFailureRecovery.objectID(in: deployments, for: installer) == nil)
+        #expect(CreateFailureRecovery.objectID(in: found, for: policy, excluding: ["625"]) == nil)
+
+        let state = Data(#"{"values":{"root_module":{"child_modules":[{"resources":[{"type":"jamfplatform_pro_app_installer","values":{"id":"10"}}]}]}}}"#.utf8)
+        #expect(CreateFailureRecovery.managedIDs(stateJSON: state)["jamfplatform_pro_app_installer"] == ["10"])
+
+        let file = CreateFailureRecovery.importFile([(policy.address, "625")])
+        #expect(file.contains("to = module.cap.jamfplatform_pro_policy.flush_dns"))
+        #expect(file.contains(#"id = "625""#))
+    }
+}
+
+@Suite("Server error translation")
+struct ServerErrorTranslationTests {
+    @Test func translatesTransientServerErrors() {
+        for raw in [
+            "Error creating Jamf Pro policy\nCreatePolicyByID(0): API request failed with status 500 Internal Server Error",
+            "Error creating Jamf Pro patch software title\nAPI request failed with status 504 Gateway Timeout",
+        ] {
+            #expect(ErrorTranslation.translateIfKnown(raw)?.message == "Jamf had a temporary server problem with this object.")
+        }
+    }
+}
