@@ -99,6 +99,10 @@ final class TenantStore {
     /// entry once.
     private func migrateDeployedVersionsIfNeeded(_ tenant: inout Tenant, workspace: URL) {
         guard tenant.deployedBlockVersions.isEmpty, tenant.lastDeploy != nil else { return }
+        // A tenant managed only through Adopt legitimately has no blocks.
+        let adopted = workspace.appending(path: "adopted")
+        if ((try? FileManager.default.contentsOfDirectory(at: adopted, includingPropertiesForKeys: nil)) ?? [])
+            .contains(where: { $0.pathExtension == "tf" }) { return }
         let historyURL = workspace.appending(path: "history")
         let entries = ((try? FileManager.default.contentsOfDirectory(at: historyURL, includingPropertiesForKeys: nil)) ?? [])
             .compactMap { try? JSONFile.load(DeployHistoryEntry.self, from: $0.appending(path: "summary.json")) }

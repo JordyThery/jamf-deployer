@@ -231,7 +231,7 @@ struct TenantDetailView: View {
                         }
                     }
 
-                    if !tenant.deployedBlockVersions.isEmpty && !tenant.isHandedOver {
+                    if deployService.isManaged(tenant) && !tenant.isHandedOver {
                         GroupBox("Hand over") {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Stops managing everything: every object stays exactly as it is in Jamf, and this app archives its record. For when another team or tool takes over.")
@@ -297,7 +297,7 @@ struct TenantDetailView: View {
                     isPreviewing = true
                 }
             } message: {
-                Text("Every object stays in Jamf exactly as it is. The app stops managing all \(tenant.deployedBlockVersions.count) blocks and archives the record. You review the change before anything happens.")
+                Text("Every object stays in Jamf exactly as it is. The app stops managing everything in this tenant — \(tenant.deployedBlockVersions.count) blocks\(deployService.hasAdoptedConfig(for: tenant) ? " and all adopted objects" : "") — and archives the record. You review the change before anything happens.")
             }
             .task {
                 catalog = try? deployService.loadCatalog()

@@ -896,7 +896,36 @@ final class TenantDeployService {
             BlockRemoval(blockID: $0, keepInJamf: true)
         }
         updated.blockSelections = []
+        releaseAdoptedConfig(for: tenant)
         tenantStore.update(updated)
+    }
+
+    /// Adopted objects are released the same way as blocks: their
+    /// configuration is archived (kept, not deleted) and replaced by
+    /// removed blocks, so the next deploy forgets them instead of deleting
+    /// them from Jamf.
+    private func releaseAdoptedConfig(for tenant: Tenant) {
+        let fileManager = FileManager.default
+        let adopted = adoptedURL(for: tenant)
+        guard let addresses = try? ExportedObjectInventory.scan(directory: adopted).map(\.address),
+              !addresses.isEmpty
+        else { return }
+        let archive = tenantStore.workspaceURL(for: tenant)
+            .appending(path: "adopted-handed-over-\(DeployHistoryEntry.makeID())")
+        do {
+            try fileManager.moveItem(at: adopted, to: archive)
+            try fileManager.createDirectory(at: adopted, withIntermediateDirectories: true)
+            let blocks = addresses.sorted().map { address in
+                "removed {\n  from = \(address)\n\n  lifecycle {\n    destroy = false\n  }\n}\n"
+            }
+            try Data(blocks.joined(separator: "\n").utf8)
+                .write(to: adopted.appending(path: "handover_removed.tf"))
+        } catch {
+            activityLog.append(ActivityLogEntry(
+                category: "Engine", operation: "hand over", detail: tenant.name,
+                status: 500, duration: nil, note: "Adopted objects could not be prepared: \(error.localizedDescription)"
+            ))
+        }
     }
 
     // MARK: History reading
