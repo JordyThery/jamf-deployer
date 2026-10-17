@@ -1,0 +1,22 @@
+Resource Filtering
+──────────────────
+By default, jamformer discovers all supported resource types. Use
+filtering to import specific types or exclude types you don't need.
+
+  Include Specific Types:
+    jamformer -include-resources "policies scripts categories"
+
+  Exclude Specific Types:
+    jamformer -exclude-resources "packages icons"
+
+  List Available Types:
+    jamformer -list-resources
+    jamformer -list-resources -provider jamfprotect
+
+  Notes:
+    - Names are case-insensitive
+    - Space or comma separated
+    - Cannot use -include-resources and -exclude-resources together
+    - When a dependency type isn't included, references to those types
+      stay as literal IDs (e.g. category_id = "5" instead of
+      jamfpro_category.productivity.id)

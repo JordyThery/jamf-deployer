@@ -1,0 +1,22 @@
+Provider Version Management
+───────────────────────────
+By default, jamformer downloads the latest provider version and adds a
+minimum version constraint (>= X.Y.Z) to the generated provider.tf.
+
+  Default Behavior:
+    1. Phase 1: No version constraint (terraform init gets latest)
+    2. Phase 2: Reads .terraform.lock.hcl for resolved version
+    3. Final provider.tf includes: version = ">= X.Y.Z"
+
+  Pin a Specific Version:
+    jamformer -provider-version 0.35.1
+
+    This produces an exact pin: version = "0.35.1"
+
+  Environment Variable:
+    JAMFORMER_PROVIDER_VERSION=0.35.1
+
+  The minimum constraint (>=) is recommended for most users - it
+  allows upgrading the provider without regenerating. Pin a specific
+  version if you need reproducible builds or are testing against a
+  known-good provider release.

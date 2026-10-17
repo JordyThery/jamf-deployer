@@ -1,0 +1,74 @@
+{
+  "ade_token_expiration": {
+    "sensitive": false,
+    "type": "string",
+    "value": "2027-06-04"
+  },
+  "apple_silicon_jamf_pro_id": {
+    "sensitive": false,
+    "type": "string",
+    "value": "69"
+  },
+  "apple_silicon_platform_uuid": {
+    "sensitive": false,
+    "type": "string",
+    "value": "8a074764-c548-464a-bf4d-79b5f0357440"
+  },
+  "baseline_titles": {
+    "sensitive": false,
+    "type": [
+      "tuple",
+      [
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string"
+      ]
+    ],
+    "value": [
+      "CIS Benchmark - Level 1",
+      "CIS Benchmark - Level 2",
+      "CIS v8",
+      "NIST 800-53 Rev 5 - Low",
+      "NIST 800-53 Rev 5 - Moderate",
+      "NIST 800-53 Rev 5 - High",
+      "NIST 800-171",
+      "US CMMC 2.0 Level 1",
+      "US CMMC 2.0 Level 2",
+      "CNSSI 1253 - Low",
+      "CNSSI 1253 - Moderate",
+      "CNSSI 1253 - High",
+      "DISA STIG",
+      "NLMAPGOV Base",
+      "NLMAPGOV Plus",
+      "HICP - Large Practice"
+    ]
+  },
+  "package_transfer_status": {
+    "sensitive": false,
+    "type": "string",
+    "value": "READY"
+  },
+  "pilot_jamf_pro_id": {
+    "sensitive": false,
+    "type": "string",
+    "value": "68"
+  },
+  "pilot_platform_uuid": {
+    "sensitive": false,
+    "type": "string",
+    "value": "384fe2ec-3a2f-4e53-a832-95d13302dd3a"
+  }
+}

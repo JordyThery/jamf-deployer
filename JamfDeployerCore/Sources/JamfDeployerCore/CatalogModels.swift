@@ -1,0 +1,267 @@
+import Foundation
+
+/// catalog.json at the root of a catalog source.
+public nonisolated struct CatalogManifest: Codable, Sendable {
+    public var id: String
+    public var name: String
+    public var schemaVersion: Int
+}
+
+/// One setting a block exposes (block.json `settings`). This is the source
+/// of truth for the settings form; variables.tf mirrors it for the engine
+/// (a catalog linter keeps them in sync in CI).
+public nonisolated struct BlockSetting: Codable, Sendable, Identifiable, Equatable {
+    public enum Kind: String, Codable, Sendable {
+        case string
+        case bool
+        case number
+        case enumeration = "enum"
+        case stringList = "list"
+        case secret
+        /// Rendered by the App Catalog picker; stored as a JSON string.
+        case appPicker
+    }
+
+    public var key: String
+    public var title: String
+    public var type: Kind
+    /// Default encoded as a string ("" means none).
+    public var `default`: String
+    public var required: Bool
+    public var description: String
+    public var section: String
+    public var enumValues: [String]?
+    public var enumLabels: [String]?
+
+    public var id: String { key }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? key
+        type = try container.decodeIfPresent(Kind.self, forKey: .type) ?? .string
+        `default` = try container.decodeIfPresent(String.self, forKey: .default) ?? ""
+        required = try container.decodeIfPresent(Bool.self, forKey: .required) ?? false
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        section = try container.decodeIfPresent(String.self, forKey: .section) ?? "General"
+        enumValues = try container.decodeIfPresent([String].self, forKey: .enumValues)
+        enumLabels = try container.decodeIfPresent([String].self, forKey: .enumLabels)
+    }
+}
+
+/// Maps a drifted resource field to the block setting that controls it, so
+/// "Keep this change" can adopt the console value into the baseline
+/// (block.json `driftBindings`).
+public nonisolated struct DriftBinding: Codable, Sendable, Equatable {
+    public var resourceType: String
+    public var fieldPath: String
+    public var settingKey: String
+}
+
+/// How a block is scoped (block.json `scope`).
+public nonisolated struct BlockScope: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable {
+        /// The block has no device scope (e.g. foundation, enrollment).
+        case none
+        /// Scoped via a numeric Jamf Pro group ID (policies, profiles).
+        case jamfProGroup
+        /// Scoped via a Platform group UUID (Blueprints, benchmarks).
+        case platformGroup
+    }
+
+    public var kind: Kind
+    /// The module variable receiving the group reference.
+    public var variable: String?
+    /// Default scope choice: a foundation group key (pilot, all_macs, …).
+    public var `default`: String?
+    /// Some Jamf objects (App Installers) only accept smart groups — the
+    /// static Pilot group is not offered for these blocks.
+    public var smartOnly: Bool
+
+    public init(kind: Kind, variable: String?, default defaultScope: String?, smartOnly: Bool = false) {
+        self.kind = kind
+        self.variable = variable
+        self.default = defaultScope
+        self.smartOnly = smartOnly
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .none
+        variable = try container.decodeIfPresent(String.self, forKey: .variable)
+        `default` = try container.decodeIfPresent(String.self, forKey: .default)
+        smartOnly = try container.decodeIfPresent(Bool.self, forKey: .smartOnly) ?? false
+    }
+}
+
+/// block.json — everything the app needs to present and wire a block.
+public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equatable {
+    public var id: String
+    public var name: String
+    public var summary: String
+    public var category: String
+    public var version: String
+    public var requires: [String]
+    public var conflicts: [String]
+    public var products: [String]
+    public var minJamfProVersion: String?
+    public var permissions: [String]
+    public var risk: String
+    public var alwaysOn: Bool
+    public var scope: BlockScope
+    public var settings: [BlockSetting]
+    public var objectsCreated: [String]
+    public var docsURL: String?
+    /// Whether the block takes a category_id wired from the foundation
+    /// category matching its catalog category.
+    public var acceptsCategory: Bool
+    /// Captured blocks start as "needsReview" until a curator marks them
+    /// reviewed; nil for authored blocks.
+    public var reviewStatus: String?
+    /// Field-to-setting mappings for "Keep this change".
+    public var driftBindings: [DriftBinding]
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? id
+        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        category = try container.decodeIfPresent(String.self, forKey: .category) ?? "Other"
+        version = try container.decodeIfPresent(String.self, forKey: .version) ?? "0.0.0"
+        requires = try container.decodeIfPresent([String].self, forKey: .requires) ?? []
+        conflicts = try container.decodeIfPresent([String].self, forKey: .conflicts) ?? []
+        products = try container.decodeIfPresent([String].self, forKey: .products) ?? []
+        minJamfProVersion = try container.decodeIfPresent(String.self, forKey: .minJamfProVersion)
+        permissions = try container.decodeIfPresent([String].self, forKey: .permissions) ?? []
+        risk = try container.decodeIfPresent(String.self, forKey: .risk) ?? "medium"
+        alwaysOn = try container.decodeIfPresent(Bool.self, forKey: .alwaysOn) ?? false
+        scope = try container.decodeIfPresent(BlockScope.self, forKey: .scope)
+            ?? BlockScope(kind: .none, variable: nil, default: nil)
+        settings = try container.decodeIfPresent([BlockSetting].self, forKey: .settings) ?? []
+        objectsCreated = try container.decodeIfPresent([String].self, forKey: .objectsCreated) ?? []
+        docsURL = try container.decodeIfPresent(String.self, forKey: .docsURL)
+        acceptsCategory = try container.decodeIfPresent(Bool.self, forKey: .acceptsCategory) ?? false
+        reviewStatus = try container.decodeIfPresent(String.self, forKey: .reviewStatus)
+        driftBindings = try container.decodeIfPresent([DriftBinding].self, forKey: .driftBindings) ?? []
+    }
+
+    /// The setting controlling a drifted field, when one is bound.
+    public func settingKey(forResourceType resourceType: String, fieldPath: String) -> String? {
+        driftBindings.first {
+            $0.resourceType == resourceType && $0.fieldPath == fieldPath
+        }?.settingKey
+    }
+
+    public var needsReview: Bool {
+        reviewStatus == "needsReview"
+    }
+
+    /// The provenance tag written into every object description.
+    public var managedByTag: String {
+        "Managed by Jamf Deployer · \(id)@\(version)"
+    }
+}
+
+/// presets/<id>.json — a named list of blocks plus default settings.
+public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
+    public var id: String
+    public var name: String
+    public var summary: String
+    public var blocks: [String]
+    public var defaults: [String: [String: String]]
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? id
+        summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        blocks = try container.decodeIfPresent([String].self, forKey: .blocks) ?? []
+        defaults = try container.decodeIfPresent([String: [String: String]].self, forKey: .defaults) ?? [:]
+    }
+}
+
+/// A fully loaded catalog source: manifest, blocks and presets, plus the
+/// on-disk location the block folders are copied from at generation time.
+public nonisolated struct LoadedCatalog: Sendable {
+    public var manifest: CatalogManifest
+    public var blocks: [BlockMetadata]
+    public var presets: [Preset]
+    public var rootURL: URL
+    /// Per-block folder locations and source names; populated on load and
+    /// preserved when catalogs from several sources merge.
+    public var blockRoots: [String: URL] = [:]
+    public var sourceNameByBlockID: [String: String] = [:]
+
+    public func block(id: String) -> BlockMetadata? {
+        blocks.first { $0.id == id }
+    }
+
+    public func blockFolderURL(id: String) -> URL {
+        blockRoots[id] ?? rootURL.appending(path: "blocks/\(id)")
+    }
+
+    public func sourceName(for blockID: String) -> String {
+        sourceNameByBlockID[blockID] ?? manifest.name
+    }
+
+    /// Merges several loaded sources; the first source wins on conflicting
+    /// block IDs (the official catalog is listed first).
+    public static func merge(_ catalogs: [LoadedCatalog]) -> LoadedCatalog {
+        guard var merged = catalogs.first else {
+            return LoadedCatalog(
+                manifest: CatalogManifest(id: "empty", name: "Empty", schemaVersion: 1),
+                blocks: [], presets: [], rootURL: URL(filePath: "/")
+            )
+        }
+        for catalog in catalogs.dropFirst() {
+            for block in catalog.blocks where merged.block(id: block.id) == nil {
+                merged.blocks.append(block)
+                merged.blockRoots[block.id] = catalog.blockFolderURL(id: block.id)
+                merged.sourceNameByBlockID[block.id] = catalog.manifest.name
+            }
+            merged.presets.append(contentsOf: catalog.presets.filter { preset in
+                !merged.presets.contains { $0.id == preset.id }
+            })
+        }
+        merged.blocks.sort { $0.name < $1.name }
+        return merged
+    }
+
+    /// Reads a catalog source from a folder (a checkout of a Git source or a
+    /// local folder source).
+    public static func load(from rootURL: URL) throws -> LoadedCatalog {
+        let decoder = JSONDecoder()
+        let manifest = try decoder.decode(
+            CatalogManifest.self,
+            from: Data(contentsOf: rootURL.appending(path: "catalog.json"))
+        )
+
+        let fileManager = FileManager.default
+        var blocks: [BlockMetadata] = []
+        let blocksURL = rootURL.appending(path: "blocks")
+        for folder in (try? fileManager.contentsOfDirectory(at: blocksURL, includingPropertiesForKeys: nil)) ?? [] {
+            let metadataURL = folder.appending(path: "block.json")
+            guard fileManager.fileExists(atPath: metadataURL.path) else { continue }
+            blocks.append(try decoder.decode(BlockMetadata.self, from: Data(contentsOf: metadataURL)))
+        }
+
+        var presets: [Preset] = []
+        let presetsURL = rootURL.appending(path: "presets")
+        for file in (try? fileManager.contentsOfDirectory(at: presetsURL, includingPropertiesForKeys: nil)) ?? []
+        where file.pathExtension == "json" {
+            presets.append(try decoder.decode(Preset.self, from: Data(contentsOf: file)))
+        }
+
+        var catalog = LoadedCatalog(
+            manifest: manifest,
+            blocks: blocks.sorted { $0.name < $1.name },
+            presets: presets.sorted { $0.name < $1.name },
+            rootURL: rootURL
+        )
+        for block in catalog.blocks {
+            catalog.blockRoots[block.id] = rootURL.appending(path: "blocks/\(block.id)")
+            catalog.sourceNameByBlockID[block.id] = manifest.name
+        }
+        return catalog
+    }
+}

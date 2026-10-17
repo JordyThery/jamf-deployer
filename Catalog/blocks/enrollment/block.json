@@ -1,0 +1,108 @@
+{
+  "id": "enrollment",
+  "name": "Enrollment",
+  "summary": "A computer PreStage for Automated Device Enrollment: supervised, MDM non-removable, consumer setup panes skipped.",
+  "category": "Enrollment",
+  "version": "1.0.0",
+  "requires": [
+    "foundation"
+  ],
+  "conflicts": [],
+  "products": [
+    "jamf-pro"
+  ],
+  "minJamfProVersion": "11.31.0",
+  "permissions": [
+    "prestage-enrollments:create",
+    "prestage-enrollments:read",
+    "prestage-enrollments:update",
+    "prestage-enrollments:delete",
+    "device-enrollment-program-instances:read"
+  ],
+  "risk": "medium",
+  "alwaysOn": false,
+  "scope": {
+    "kind": "none"
+  },
+  "settings": [
+    {
+      "key": "ade_instance_name",
+      "title": "Automated Device Enrollment instance",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "description": "The exact name of the ADE instance in Jamf Pro (Settings → Device Enrollment). Usually “Apple Business Manager”.",
+      "section": "Apple Business Manager"
+    },
+    {
+      "key": "prestage_display_name",
+      "title": "PreStage name",
+      "type": "string",
+      "default": "Standard Enrollment",
+      "required": true,
+      "description": "Display name of the PreStage in Jamf Pro (the name prefix is added automatically).",
+      "section": "General"
+    },
+    {
+      "key": "default_prestage",
+      "title": "Use as the default PreStage",
+      "type": "bool",
+      "default": "false",
+      "required": false,
+      "description": "New devices land in this PreStage automatically. Jamf Pro allows one default; turning this on displaces an existing default.",
+      "section": "General"
+    },
+    {
+      "key": "auto_advance_setup",
+      "title": "Auto-advance through Setup Assistant",
+      "type": "bool",
+      "default": "false",
+      "required": false,
+      "description": "For shared or lab devices connected to power and Ethernet: Setup Assistant runs through without user input.",
+      "section": "Setup Assistant"
+    },
+    {
+      "key": "support_email",
+      "title": "Support email",
+      "type": "string",
+      "default": "",
+      "required": false,
+      "description": "Shown to users during enrollment.",
+      "section": "Support"
+    },
+    {
+      "key": "support_phone",
+      "title": "Support phone",
+      "type": "string",
+      "default": "",
+      "required": false,
+      "description": "Shown to users during enrollment.",
+      "section": "Support"
+    }
+  ],
+  "objectsCreated": [
+    "1 computer PreStage enrollment"
+  ],
+  "driftBindings": [
+    {
+      "resourceType": "jamfplatform_pro_computer_prestage_enrollment",
+      "fieldPath": "support_email_address",
+      "settingKey": "support_email"
+    },
+    {
+      "resourceType": "jamfplatform_pro_computer_prestage_enrollment",
+      "fieldPath": "support_phone_number",
+      "settingKey": "support_phone"
+    },
+    {
+      "resourceType": "jamfplatform_pro_computer_prestage_enrollment",
+      "fieldPath": "auto_advance_setup",
+      "settingKey": "auto_advance_setup"
+    },
+    {
+      "resourceType": "jamfplatform_pro_computer_prestage_enrollment",
+      "fieldPath": "default_prestage",
+      "settingKey": "default_prestage"
+    }
+  ]
+}

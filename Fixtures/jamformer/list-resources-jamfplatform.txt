@@ -1,0 +1,105 @@
+Jamf Platform (jamfplatform) [default]:
+  FILTER KEY                                     TERRAFORM TYPE                                             SCOPE                  READ PERMISSIONS
+  access_management_settings                     jamfplatform_pro_access_management_settings                environment, tenant    access-management:read
+  account                                        jamfplatform_pro_account                                   environment, tenant    accounts:read
+  account_group                                  jamfplatform_pro_account_group                             environment, tenant    account-groups:read
+  account_sso_connections                        jamfplatform_account_sso_connection                        organization           sso-connections:read
+  account_sso_domains                            jamfplatform_account_sso_domain                            organization           sso-domains:read
+  activation_code                                jamfplatform_pro_activation_code                           environment, tenant    activation-code:read
+  advanced_computer_search                       jamfplatform_pro_advanced_computer_search                  environment, tenant    advanced-device-searches:read
+  advanced_mobile_device_search                  jamfplatform_pro_advanced_mobile_device_search             environment, tenant    advanced-device-searches:read
+  advanced_user_search                           jamfplatform_pro_advanced_user_search                      environment, tenant    advanced-user-searches:read
+  advanced_volume_purchasing_content_search      jamfplatform_pro_advanced_volume_purchasing_content_search environment, tenant    advanced-user-searches:read
+  ai_governance_policies                         jamfplatform_ai_governance_policy                          environment            ai-policies:read
+  allowed_file_extension                         jamfplatform_pro_allowed_file_extension                    environment, tenant    allowed-file-extension:read
+  app_installer                                  jamfplatform_pro_app_installer                             environment, tenant    applications:read
+  app_installer_settings                         jamfplatform_pro_app_installer_settings                    environment, tenant    applications:read
+  app_request_form_field                         jamfplatform_pro_app_request_form_field                    environment, tenant    app-request:read
+  app_request_settings                           jamfplatform_pro_app_request_settings                      environment, tenant    app-request:read
+  automated_device_enrollment                    jamfplatform_pro_automated_device_enrollment               environment, tenant    device-enrollment-program-instances:read
+  blueprints                                     jamfplatform_blueprints_blueprint                          environment            blueprints:read
+  building                                       jamfplatform_pro_building                                  environment, tenant    buildings:read
+  category                                       jamfplatform_pro_category                                  environment, tenant    categories:read self-service:read
+  class                                          jamfplatform_pro_class                                     environment, tenant    classes:read
+  cloud_distribution_point                       jamfplatform_pro_cloud_distribution_point                  environment, tenant    cloud-distribution-point:read
+  cloud_identity_provider                        jamfplatform_pro_cloud_identity_provider                   environment, tenant    ldap-servers:read
+  compliance_benchmarks                          jamfplatform_cbengine_benchmark                            environment            compliance-benchmarks:read
+  computer_check_in_settings                     jamfplatform_pro_computer_check_in_settings                environment, tenant    computer-check-in:read
+  computer_extension_attribute                   jamfplatform_pro_computer_extension_attribute              environment, tenant    extension-attributes:read
+  computer_inventory_collection_settings         jamfplatform_pro_computer_inventory_collection_settings    environment, tenant    computer-inventory-collection-settings:read
+  computer_invitation                            jamfplatform_pro_computer_invitation                       environment, tenant    enrollment-invitations:read
+  computer_prestage_enrollment                   jamfplatform_pro_computer_prestage_enrollment              environment, tenant    prestage-enrollments:read
+  department                                     jamfplatform_pro_department                                environment, tenant    departments:read
+  device_groups                                  jamfplatform_device_group                                  environment, tenant    device-groups:read
+  directory_binding                              jamfplatform_pro_directory_binding                         environment, tenant    directory-bindings:read
+  disk_encryption_configuration                  jamfplatform_pro_disk_encryption_configuration             environment, tenant    disk-encryption-configurations:read
+  dock_item                                      jamfplatform_pro_dock_item                                 environment, tenant    dock-items:read
+  ebook                                          jamfplatform_pro_ebook                                     environment, tenant    ebooks:read
+  enrollment_customization                       jamfplatform_pro_enrollment_customization                  environment, tenant    enrollment-customization:read
+  file_share_distribution_point                  jamfplatform_pro_file_share_distribution_point             environment, tenant    distribution-points:read
+  gsx_connection_settings                        jamfplatform_pro_gsx_connection_settings                   environment, tenant    gsx-connection:read push-certificates:read
+  ibeacon                                        jamfplatform_pro_ibeacon                                   environment, tenant    ibeacon:read
+  impact_alert_notification_settings             jamfplatform_pro_impact_alert_notification_settings        environment, tenant    impact-alert-notification-settings:read
+  inventory_preload_record                       jamfplatform_pro_inventory_preload_record                  environment, tenant    inventory-preload-records:read
+  jamf_parent_settings                           jamfplatform_pro_jamf_parent_settings                      environment, tenant    parent-app:read
+  jamf_protect                                   jamfplatform_pro_jamf_protect                              environment, tenant    jamf-protect-deployments:read
+  jamf_teacher_settings                          jamfplatform_pro_jamf_teacher_settings                     environment, tenant    teacher-app:read
+  ldap_server                                    jamfplatform_pro_ldap_server                               environment, tenant    ldap-servers:read
+  licensed_software                              jamfplatform_pro_licensed_software                         environment, tenant    licensed-software:read
+  local_admin_password_settings                  jamfplatform_pro_local_admin_password_settings             environment, tenant    local-admin-passwords:update
+  login_page_settings                            jamfplatform_pro_login_page_settings                       environment, tenant    (not recorded)
+  mac_app_store_app                              jamfplatform_pro_mac_app_store_app                         environment, tenant    applications:read
+  macos_configuration_profile                    jamfplatform_pro_macos_configuration_profile               environment, tenant    configuration-profiles:read
+  macos_onboarding                               jamfplatform_pro_macos_onboarding                          environment, tenant    onboarding:read
+  managed_software_update                        jamfplatform_pro_managed_software_update                   environment, tenant    managed-software-updates:read
+  mdm_profile_settings                           jamfplatform_pro_mdm_profile_settings                      environment, tenant    mdm-profile-renewal-settings:read
+  mobile_device_app                              jamfplatform_pro_mobile_device_app                         environment, tenant    applications:read
+  mobile_device_configuration_profile            jamfplatform_pro_mobile_device_configuration_profile       environment, tenant    configuration-profiles:read
+  mobile_device_enrollment_profile               jamfplatform_pro_mobile_device_enrollment_profile          environment, tenant    enrollment-profiles:read
+  mobile_device_extension_attribute              jamfplatform_pro_mobile_device_extension_attribute         environment, tenant    extension-attributes:read
+  mobile_device_invitation                       jamfplatform_pro_mobile_device_invitation                  environment, tenant    enrollment-invitations:read
+  mobile_device_prestage_enrollment              jamfplatform_pro_mobile_device_prestage_enrollment         environment, tenant    prestage-enrollments:read
+  mobile_device_provisioning_profile             jamfplatform_pro_mobile_device_provisioning_profile        environment, tenant    provisioning-profiles:read
+  network_segment                                jamfplatform_pro_network_segment                           environment, tenant    network-segments:read
+  package                                        jamfplatform_pro_package                                   environment, tenant    packages:read
+  patch_external_source                          jamfplatform_pro_patch_external_source                     environment, tenant    patch-external-source:read
+  patch_policy                                   jamfplatform_pro_patch_policy                              environment, tenant    patch-policies:read
+  patch_software_title                           jamfplatform_pro_patch_software_title                      environment, tenant    patch-external-source:read patch-internal-source:read patch-management-software-titles:read
+  pki_json_web_token_configuration               jamfplatform_pro_pki_json_web_token_configuration          environment, tenant    json-web-token-configuration:read
+  policy                                         jamfplatform_pro_policy                                    environment, tenant    policies:read
+  printer                                        jamfplatform_pro_printer                                   environment, tenant    printers:read
+  re_enrollment_settings                         jamfplatform_pro_re_enrollment_settings                    environment, tenant    re-enrollment:read
+  removable_mac_address                          jamfplatform_pro_removable_mac_address                     environment, tenant    removable-mac-address:read
+  restricted_software                            jamfplatform_pro_restricted_software                       environment, tenant    restricted-software:read
+  return_to_service                              jamfplatform_pro_return_to_service                         environment, tenant    return-to-service:read
+  script                                         jamfplatform_pro_script                                    environment, tenant    scripts:read
+  security_cloud_device_groups                   jamfplatform_security_cloud_device_group                   environment, tenant    device-groups:read
+  security_cloud_dns_hostname_mappings           jamfplatform_security_cloud_dns_hostname_mappings          environment, tenant    custom-hostname-mappings:read
+  security_cloud_dns_search_domain               jamfplatform_security_cloud_dns_search_domain              environment, tenant    search-domains:read
+  security_cloud_dns_zones                       jamfplatform_security_cloud_dns_zone                       environment, tenant    ztna:read
+  security_cloud_uem_connect                     jamfplatform_security_cloud_uem_connect                    environment, tenant    uem-connect:read
+  security_cloud_ztna_apps                       jamfplatform_security_cloud_ztna_app                       environment, tenant    ztna:read
+  security_cloud_ztna_gateways                   jamfplatform_security_cloud_ztna_gateway                   environment, tenant    ztna:read
+  security_cloud_ztna_grouped_gateways           jamfplatform_security_cloud_ztna_grouped_gateway           environment, tenant    ztna:read
+  self_service_branding_ios                      jamfplatform_pro_self_service_branding_ios                 environment, tenant    self-service:read
+  self_service_branding_macos                    jamfplatform_pro_self_service_branding_macos               environment, tenant    self-service:read
+  self_service_macos_settings                    jamfplatform_pro_self_service_macos_settings               environment, tenant    self-service:read
+  self_service_plus_settings                     jamfplatform_pro_self_service_plus_settings                environment, tenant    self-service:read
+  service_discovery_enrollment                   jamfplatform_pro_service_discovery_enrollment              environment, tenant    user-initiated-enrollment:read
+  site                                           jamfplatform_pro_site                                      environment, tenant    sites:read
+  smtp_server                                    jamfplatform_pro_smtp_server                               environment, tenant    smtp-server:read
+  sso_failover_url                               jamfplatform_pro_sso_failover_url                          environment, tenant    sso-settings:read
+  sso_settings                                   jamfplatform_pro_sso_settings                              environment, tenant    sso-settings:read
+  supervision_identity                           jamfplatform_pro_supervision_identity                      environment, tenant    apple-configurator-enrollment:read
+  user_extension_attribute                       jamfplatform_pro_user_extension_attribute                  environment, tenant    user-extension-attributes:read
+  user_group                                     jamfplatform_pro_user_group                                environment, tenant    user-groups:read
+  user_initiated_enrollment_settings             jamfplatform_pro_user_initiated_enrollment_settings        environment, tenant    user-initiated-enrollment:read
+  volume_purchasing_location                     jamfplatform_pro_volume_purchasing_location                environment, tenant    volume-purchasing-locations:read
+  volume_purchasing_notification                 jamfplatform_pro_volume_purchasing_notification            environment, tenant    (not recorded)
+  vpp_assignment                                 jamfplatform_pro_vpp_assignment                            environment, tenant    volume-purchasing-locations:read
+  vpp_invitation                                 jamfplatform_pro_vpp_invitation                            environment, tenant    volume-purchasing-locations:read
+  webhook                                        jamfplatform_pro_webhook                                   environment, tenant    webhooks:read
+
+  Scope is chosen when an API integration is created in Jamf Account and cannot be
+  changed afterwards. Read permissions are the capability names the permission
+  picker uses; every export also writes a PERMISSIONS.md listing what it required.

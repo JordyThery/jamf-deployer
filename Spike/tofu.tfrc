@@ -1,0 +1,9 @@
+provider_installation {
+  filesystem_mirror {
+    path    = "/Users/jordy.thery/Developer/Jamf Deployer/Vendor/providers"
+    include = ["registry.opentofu.org/*/*"]
+  }
+  direct {
+    exclude = ["registry.opentofu.org/*/*"]
+  }
+}

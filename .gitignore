@@ -1,0 +1,25 @@
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+plan*.bin
+.DS_Store
+Vendor/opentofu/bin/
+Vendor/jamformer/jamformer
+*credentials*.png
+Spike/jamformer-out/
+
+# Build products and per-user state
+.build/
+build/
+.swiftpm/
+xcuserdata/
+DerivedData/
+
+# Vendored downloads (fetched by Vendor/fetch.sh)
+Vendor/opentofu/
+Vendor/jamformer/
+Vendor/providers/
+
+# Spike artifacts
+Spike/live-sandbox/files/*.pkg
+.terraform.lock.hcl

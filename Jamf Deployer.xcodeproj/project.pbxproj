@@ -6,6 +6,11 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		08680C7A30831D600027157B /* DeployerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 08680C7930831D600027157B /* DeployerKit */; };
+		08680C89308324650027157B /* JamfDeployerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 08680C88308324650027157B /* JamfDeployerCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Jamf Deployer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Jamf Deployer.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -22,6 +27,8 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				08680C7A30831D600027157B /* DeployerKit in Frameworks */,
+				08680C89308324650027157B /* JamfDeployerCore in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -60,6 +67,10 @@
 				000000000000000000000010 /* Jamf Deployer */,
 			);
 			name = "Jamf Deployer";
+			packageProductDependencies = (
+				08680C7930831D600027157B /* DeployerKit */,
+				08680C88308324650027157B /* JamfDeployerCore */,
+			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Jamf Deployer.app */;
 			productType = "com.apple.product-type.application";
@@ -79,7 +90,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "Untitled Project" */;
+			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "Jamf Deployer" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -88,6 +99,10 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				08680C7830831D600027157B /* XCLocalSwiftPackageReference "DeployerKit" */,
+				08680C87308324650027157B /* XCLocalSwiftPackageReference "JamfDeployerCore" */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
@@ -115,7 +130,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		000000000000000011000000 /* Debug configuration for PBXProject "Untitled Project" */ = {
+		000000000000000011000000 /* Debug configuration for PBXProject "Jamf Deployer" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -185,7 +200,7 @@
 			};
 			name = Debug;
 		};
-		000000000000000012000000 /* Release configuration for PBXProject "Untitled Project" */ = {
+		000000000000000012000000 /* Release configuration for PBXProject "Jamf Deployer" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -250,10 +265,13 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "Jamf Deployer" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K3LQ9NPBMG;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -271,8 +289,9 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = "be.jordythery.jamf-deployer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -282,7 +301,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 			};
 			name = Debug;
@@ -290,10 +309,13 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "Jamf Deployer" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K3LQ9NPBMG;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -311,8 +333,9 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = "be.jordythery.jamf-deployer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -322,7 +345,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 			};
 			name = Release;
@@ -330,11 +353,11 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		000000000000000010000000 /* Build configuration list for PBXProject "Untitled Project" */ = {
+		000000000000000010000000 /* Build configuration list for PBXProject "Jamf Deployer" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000011000000 /* Debug configuration for PBXProject "Untitled Project" */,
-				000000000000000012000000 /* Release configuration for PBXProject "Untitled Project" */,
+				000000000000000011000000 /* Debug configuration for PBXProject "Jamf Deployer" */,
+				000000000000000012000000 /* Release configuration for PBXProject "Jamf Deployer" */,
 			);
 			defaultConfigurationName = Release;
 		};
@@ -347,6 +370,28 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		08680C7830831D600027157B /* XCLocalSwiftPackageReference "DeployerKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = DeployerKit;
+		};
+		08680C87308324650027157B /* XCLocalSwiftPackageReference "JamfDeployerCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = JamfDeployerCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		08680C7930831D600027157B /* DeployerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DeployerKit;
+		};
+		08680C88308324650027157B /* JamfDeployerCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = JamfDeployerCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }
