@@ -32,7 +32,8 @@ Remove the lock file: it records checksums of the app's bundled provider
 copies, which the public registries' packages do not match, so `init` would
 refuse them. `generated/providers.tf` points the local backend at
 `../state/terraform.tfstate`, which the layout above keeps intact. The providers are declared as `jamf/jamfplatform` and
-`Jamf-Concepts/jamfprotect`, which resolve on **both** the Terraform and
+`Jamf-Concepts/jamfprotect` (`deploymenttheory/jamfpro` for tenants connected
+through the Jamf Pro API), which resolve on **both** the Terraform and
 OpenTofu public registries — the configuration itself needs no edits.
 
 ## Step 2 — provide the same environment the app provided
@@ -45,6 +46,19 @@ export JAMFPLATFORM_ENVIRONMENT_ID="…"                        # or JAMFPLATFOR
 # Jamf Protect blocks additionally need:
 # export JAMFPROTECT_URL=… JAMFPROTECT_CLIENT_ID=… JAMFPROTECT_CLIENT_SECRET=…
 ```
+
+Tenants connected through the **Jamf Pro API** use the community jamfpro
+plugin instead, with these variables:
+
+```sh
+export JAMFPRO_INSTANCE_FQDN="https://yourorg.jamfcloud.com"
+export JAMFPRO_AUTH_PROVIDER="direct"
+export JAMFPRO_AUTH_METHOD="oauth2"            # or "basic" for a user account
+export JAMFPRO_CLIENT_ID="…"                   # basic: JAMFPRO_BASIC_USERNAME
+export JAMFPRO_CLIENT_SECRET="…"               # basic: JAMFPRO_BASIC_PASSWORD
+```
+
+Run their applies with `-parallelism=1`, as the app does.
 
 Secret-typed block settings (if any) arrive the same way, as `TF_VAR_…`
 variables — `generated/main.tf` declares them at the top as sensitive
@@ -104,6 +118,14 @@ Tenants with Jamf Protect blocks also run:
 ```sh
 terraform state replace-provider \
   registry.opentofu.org/jamf-concepts/jamfprotect registry.terraform.io/jamf-concepts/jamfprotect
+```
+
+Tenants connected through the Jamf Pro API run this one instead of the
+jamfplatform line:
+
+```sh
+terraform state replace-provider \
+  registry.opentofu.org/deploymenttheory/jamfpro registry.terraform.io/deploymenttheory/jamfpro
 ```
 
 From here it is an ordinary Terraform project: edit the HCL, move the state

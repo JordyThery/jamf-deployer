@@ -81,7 +81,7 @@ Blocks are versioned. When a tenant's catalog source publishes a newer release, 
 
 Three ways:
 
-1. **Capture from a tenant.** Export an object (or a set of objects) from any connected tenant; the app turns it into a block and saves it to a catalog source of yours. One export can be captured as a single block or **split into several** — define the blocks, assign each object to one, and the app captures them all from the same export. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt Existing Configuration…** there instead (the editor warns about this).
+1. **Capture from a tenant.** Export an object (or a set of objects) from any tenant connected through the Jamf Platform API; the app turns it into a block and saves it to a catalog source of yours. One export can be captured as a single block or **split into several** — define the blocks, assign each object to one, and the app captures them all from the same export. Captured blocks are marked for review until you approve them. A captured block is meant for *other* tenants: in its origin tenant the objects already exist, so use **Adopt Existing Configuration…** there instead (the editor warns about this).
 
    Captured blocks **keep their wiring**:
 

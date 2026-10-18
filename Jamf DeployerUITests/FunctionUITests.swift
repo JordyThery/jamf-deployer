@@ -10,6 +10,9 @@ final class FunctionUITests: DeployerUITestCase {
     static let demo = "UI Demo"
     static let catalogName = "UI Test Catalog"
     static let prefix = "UIT - "
+    /// The test catalog's Categories block; other sources may hold captured
+    /// blocks with the same name.
+    static let categoriesBlock = "Categories, Applications"
 
     func test01ConnectAndSetPrefix() throws {
         try connect(name: Self.sandbox, prefix: "SBX")
@@ -66,7 +69,7 @@ final class FunctionUITests: DeployerUITestCase {
 
     func test03SelectBlockAndDeploy() throws {
         openTenant(Self.sandbox)
-        let block = app.checkBoxes.matching(NSPredicate(format: "label CONTAINS 'Categories' OR title CONTAINS 'Categories'")).firstMatch
+        let block = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", Self.categoriesBlock)).firstMatch
         XCTAssertTrue(block.waitForExistence(timeout: 30), "Categories block not in the baseline editor")
         if (block.value as? Int) != 1 { block.click() }
         previewAndDeploy()
@@ -98,7 +101,7 @@ final class FunctionUITests: DeployerUITestCase {
 
     func test06DeployDemoBaseline() throws {
         openTenant(Self.demo)
-        let block = app.checkBoxes.matching(NSPredicate(format: "label CONTAINS 'Categories'")).firstMatch
+        let block = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", Self.categoriesBlock)).firstMatch
         XCTAssertTrue(block.waitForExistence(timeout: 30))
         if (block.value as? Int) != 1 { block.click() }
         previewAndDeploy()
@@ -145,7 +148,7 @@ final class FunctionUITests: DeployerUITestCase {
     /// Unticking a deployed block and choosing Remove from Tenant deletes its objects.
     func test09RemoveBlockFromTenant() throws {
         openTenant(Self.demo)
-        let block = blockCheckbox("Categories")
+        let block = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", Self.categoriesBlock)).firstMatch
         XCTAssertTrue(block.waitForExistence(timeout: 30))
         block.click()
         tap(dialogButton("Remove from Tenant"), timeout: 10)
@@ -156,7 +159,7 @@ final class FunctionUITests: DeployerUITestCase {
     /// Stop Managing leaves the objects in Jamf.
     func test10StopManagingBlock() throws {
         openTenant(Self.sandbox)
-        let block = blockCheckbox("Categories")
+        let block = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", Self.categoriesBlock)).firstMatch
         XCTAssertTrue(block.waitForExistence(timeout: 30))
         block.click()
         tap(dialogButton("Stop Managing"), timeout: 10)
@@ -252,9 +255,7 @@ final class FunctionUITests: DeployerUITestCase {
     func test14ExportAsBuiltDocumentation() throws {
         exportCategories(from: Self.sandbox, kind: "As-built documentation")
         tap(app.buttons["Save As-Built Documentation…"], timeout: 600)
-        tap(app.buttons["OKButton"], timeout: 15)
-        let replace = app.buttons["Replace"]
-        if replace.waitForExistence(timeout: 2) { replace.click() }
+        saveInDocuments()
     }
 
     func test15CloneToTenant() throws {
@@ -288,9 +289,7 @@ final class FunctionUITests: DeployerUITestCase {
     func test17SaveSnapshot() throws {
         exportCategories(from: Self.demo, kind: "Full snapshot")
         tap(app.buttons["Save Snapshot…"], timeout: 600)
-        tap(app.buttons["OKButton"], timeout: 15)
-        let replace = app.buttons["Replace"]
-        if replace.waitForExistence(timeout: 2) { replace.click() }
+        saveInDocuments()
         sleep(3)
     }
 

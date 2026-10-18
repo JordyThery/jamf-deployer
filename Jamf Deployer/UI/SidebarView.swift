@@ -36,7 +36,7 @@ struct SidebarView: View {
                     Label {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(tenant.name)
-                            Text(tenant.scopeID)
+                            Text(tenant.connectionLabel)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)

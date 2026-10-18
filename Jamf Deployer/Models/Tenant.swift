@@ -33,10 +33,24 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         case handedOver
     }
 
+    /// How a Jamf Pro API connection signs in. The client ID or username
+    /// is stored in `clientID`; the secret or password is in the Keychain.
+    enum JamfProAuth: String, Codable, Sendable, CaseIterable {
+        case apiClient
+        case userAccount
+    }
+
     var id: UUID
     var name: String
+    /// Platform API gateway or a Jamf Pro instance's own API; fixed at connect.
+    var connection: ConnectionKind
+    /// Jamf Pro instance URL (Jamf Pro API connections), e.g.
+    /// "https://example.jamfcloud.com".
+    var jamfProURL: String?
+    var jamfProAuth: JamfProAuth?
     var region: Region
-    /// OAuth client ID of the Platform API integration (not a secret).
+    /// OAuth client ID of the API integration, or the username of a Jamf
+    /// Pro user account (not a secret).
     var clientID: String
     /// Platform environment UUID (preferred scope).
     var environmentID: String?
@@ -82,6 +96,15 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
 
     var createdAt: Date
 
+    var isJamfPro: Bool { connection == .jamfPro }
+
+    /// What identifies the connection in lists: the environment ID for
+    /// Platform tenants, the instance host for Jamf Pro tenants.
+    var connectionLabel: String {
+        guard isJamfPro else { return scopeID }
+        return jamfProURL.flatMap { URL(string: $0)?.host() } ?? jamfProURL ?? ""
+    }
+
     var apiScope: APIScope {
         environmentID != nil ? .environment : .tenant
     }
@@ -97,10 +120,16 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         clientID: String,
         environmentID: String?,
         tenantID: String? = nil,
-        isProduction: Bool
+        isProduction: Bool,
+        connection: ConnectionKind = .platform,
+        jamfProURL: String? = nil,
+        jamfProAuth: JamfProAuth? = nil
     ) {
         self.id = id
         self.name = name
+        self.connection = connection
+        self.jamfProURL = jamfProURL
+        self.jamfProAuth = jamfProAuth
         self.region = region
         self.clientID = clientID
         self.environmentID = environmentID
@@ -124,6 +153,9 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Unnamed tenant"
+        connection = try container.decodeIfPresent(ConnectionKind.self, forKey: .connection) ?? .platform
+        jamfProURL = try container.decodeIfPresent(String.self, forKey: .jamfProURL)
+        jamfProAuth = try container.decodeIfPresent(JamfProAuth.self, forKey: .jamfProAuth)
         region = try container.decodeIfPresent(Region.self, forKey: .region) ?? .us
         clientID = try container.decodeIfPresent(String.self, forKey: .clientID) ?? ""
         environmentID = try container.decodeIfPresent(String.self, forKey: .environmentID)

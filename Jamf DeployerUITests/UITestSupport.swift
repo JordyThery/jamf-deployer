@@ -129,7 +129,7 @@ class DeployerUITestCase: XCTestCase {
         tap(app.toolbars.buttons["Connect a Tenant"])
 
         type(name, into: field("Contoso Production"))
-        tap(app.sheets.popUpButtons.firstMatch)
+        tap(app.sheets.popUpButtons.matching(NSPredicate(format: "value == 'EU'")).firstMatch)
         tap(app.menuItems["US"])
         tap(app.buttons["Continue"])
         tap(app.buttons["Continue"])
@@ -141,6 +141,52 @@ class DeployerUITestCase: XCTestCase {
         tap(app.buttons["Run Preflight"])
         tap(app.buttons["Add Tenant"], timeout: 180)
         XCTAssertTrue(app.outlines.staticTexts[name].waitForExistence(timeout: 10))
+    }
+
+    /// Connects a tenant through the Jamf Pro API with a user account;
+    /// credentials come from `<prefix>_URL`, `_USERNAME` and `_PASSWORD`.
+    /// With `apiClient`, signs in with `<prefix>_CLIENT_ID` / `_CLIENT_SECRET` instead.
+    func connectJamfPro(name: String, prefix: String, apiClient: Bool = false) throws {
+        let url = try env("\(prefix)_URL")
+        let username = try env(apiClient ? "\(prefix)_CLIENT_ID" : "\(prefix)_USERNAME")
+        let password = try env(apiClient ? "\(prefix)_CLIENT_SECRET" : "\(prefix)_PASSWORD")
+
+        if app.outlines.staticTexts[name].exists { return }
+        tap(app.toolbars.buttons["Connect a Tenant"])
+        type(name, into: field("Contoso Production"))
+        tap(app.sheets.popUpButtons.matching(NSPredicate(format: "value == 'Jamf Platform API'")).firstMatch)
+        tap(app.menuItems["Jamf Pro API"])
+        tap(app.buttons["Continue"])
+        tap(app.buttons["Continue"])
+
+        paste(url, into: field("https://yourorg.jamfcloud.com"))
+        if apiClient {
+            paste(username, into: field("d5e385c3"))
+        } else {
+            tap(app.sheets.popUpButtons.matching(NSPredicate(format: "value == 'API client'")).firstMatch)
+            tap(app.menuItems["User account"])
+            paste(username, into: field("Jamf Pro username"))
+        }
+        paste(password, into: app.sheets.secureTextFields.firstMatch)
+        tap(app.buttons["Continue"])
+        tap(app.buttons["Add Tenant"], timeout: 180)
+        XCTAssertTrue(app.outlines.staticTexts[name].waitForExistence(timeout: 10))
+    }
+
+    /// Stages a category through Add a Custom Object.
+    func stageCustomCategory(on tenantName: String, objectName: String, name: String, priority: String = "9") {
+        openTenant(tenantName)
+        tap(app.buttons["Add a Custom Object…"], timeout: 30)
+        let filter = field("Filter object types")
+        XCTAssertTrue(filter.waitForExistence(timeout: 180), "Object types did not load")
+        filter.click()
+        filter.typeText("_category")
+        let row = app.sheets.staticTexts.matching(NSPredicate(format: "value ENDSWITH '_category'")).firstMatch
+        tap(row, timeout: 30)
+        type(objectName, into: field("my_custom_object"))
+        type(name, into: app.sheets.textFields.matching(NSPredicate(format: "placeholderValue == %@", "name")).firstMatch)
+        type(priority, into: app.sheets.textFields.matching(NSPredicate(format: "placeholderValue == %@", "0")).firstMatch)
+        tap(app.buttons["Stage Object"])
     }
 
     func removeTenant(_ name: String) {
@@ -164,15 +210,21 @@ class DeployerUITestCase: XCTestCase {
         return false
     }
 
+    /// Confirms an open save panel. The test scripts point the app's
+    /// remembered save folder at ~/Documents before running.
+    func saveInDocuments() {
+        tap(app.buttons["OKButton"].firstMatch, timeout: 15)
+        let replace = app.buttons["Replace"].firstMatch
+        if replace.waitForExistence(timeout: 2) { replace.click() }
+    }
+
     /// Saves the recovery sheet when asked (first deploy), then deploys.
     func deployCurrentPreview() {
         XCTAssertTrue(waitForReview(), "Preview did not finish")
         let save = app.buttons["Save Recovery Sheet…"]
         if save.exists {
             save.click()
-            tap(app.buttons["OKButton"], timeout: 10)
-            let replace = app.buttons["Replace"]
-            if replace.waitForExistence(timeout: 2) { replace.click() }
+            saveInDocuments()
         }
         tap(app.buttons["Deploy"], timeout: 15)
     }

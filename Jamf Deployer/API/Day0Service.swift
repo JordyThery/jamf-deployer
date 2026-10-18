@@ -49,7 +49,9 @@ final class Day0Service {
         guard let client = try? client(for: tenant) else {
             steps = [Day0Step(
                 id: "credentials", title: "Stored credentials",
-                state: .pending(detail: "The tenant's client secret is missing from the Keychain.")
+                state: .pending(detail: tenant.jamfProAuth == .userAccount
+                    ? "The tenant's password is missing from the Keychain."
+                    : "The tenant's client secret is missing from the Keychain.")
             )]
             return
         }
@@ -163,8 +165,9 @@ final class Day0Service {
             add("protect", "Jamf Protect link", .unknown(detail: "Could not check."))
         }
 
-        // Cloud Services Connection (status only).
-        if let (_, status) = try? await client.get(
+        // Cloud Services Connection (status only); it serves the App
+        // Catalog block, which Jamf Pro API tenants cannot use.
+        if !tenant.isJamfPro, let (_, status) = try? await client.get(
             "/pro/v1/app-installers/titles",
             query: [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")]
         ) {
@@ -172,7 +175,7 @@ final class Day0Service {
                 status == 200
                     ? .done(detail: "Established — the App Catalog works.")
                     : .pending(detail: "Connect it in Jamf Pro under Settings → Jamf apps; the App Catalog block needs it."))
-        } else {
+        } else if !tenant.isJamfPro {
             add("csc", "Cloud Services Connection", .unknown(detail: "Could not check."))
         }
 

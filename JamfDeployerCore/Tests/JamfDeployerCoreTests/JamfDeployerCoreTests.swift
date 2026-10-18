@@ -1723,3 +1723,70 @@ struct MobileDeviceTests {
         #expect(ExportedObjectInventory.unmanageable(directory: directory)["jamfplatform_pro_mobile_device_invitation.i1"] != nil)
     }
 }
+
+@Suite("Jamf Pro connection")
+struct JamfProConnectionTests {
+    @Test func jamfProWorkspaceUsesTheJamfProPluginOnly() throws {
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ", selections: [], providerVersion: "1.5.0",
+            connection: .jamfPro, jamfProProviderVersion: "0.42.0"
+        ))
+        #expect(output.providersTF.contains(#"source  = "deploymenttheory/jamfpro""#))
+        #expect(output.providersTF.contains(#"version = "0.42.0""#))
+        #expect(output.providersTF.contains(#"provider "jamfpro""#))
+        #expect(!output.providersTF.contains("jamfplatform"))
+        // Credentials come from the environment only.
+        #expect(!output.providersTF.contains("password"))
+        #expect(output.secretVariableNames.isEmpty)
+    }
+
+    @Test func jamfProTenantsRefuseCatalogBlocks() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        let block = try #require(catalog.blocks.first)
+        #expect(throws: WorkspaceGeneratorError.self) {
+            try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "JD - ",
+                selections: [GeneratedSelection(block: block, settings: [:], scope: "")],
+                providerVersion: "1.5.0",
+                connection: .jamfPro
+            ))
+        }
+    }
+
+    @Test func adoptStagingHandlesJamfProObjects() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "jamfpro-adopt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try """
+        resource "jamfpro_category" "apps" {
+          name     = "Apps"
+          priority = 9
+        }
+
+        resource "jamfpro_policy" "install" {
+          name        = "Install"
+          category_id = jamfpro_category.apps.id
+        }
+        """.write(to: directory.appending(path: "main.tf"), atomically: true, encoding: .utf8)
+        try """
+        import {
+          to = jamfpro_category.apps
+          id = "13"
+        }
+
+        import {
+          to = jamfpro_policy.install
+          id = "7"
+        }
+        """.write(to: directory.appending(path: "main_import.tf"), atomically: true, encoding: .utf8)
+
+        let objects = try ExportedObjectInventory.scan(directory: directory)
+        #expect(Set(objects.map(\.address)) == ["jamfpro_category.apps", "jamfpro_policy.install"])
+
+        // Adopting only the policy pins its category reference to the existing ID.
+        try ExportedObjectInventory.pinReferences(directory: directory, keeping: ["jamfpro_policy.install"])
+        let main = try String(contentsOf: directory.appending(path: "main.tf"), encoding: .utf8)
+        #expect(main.contains(#"category_id = "13""#))
+    }
+}
+

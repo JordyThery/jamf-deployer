@@ -23,6 +23,8 @@ export TEST_RUNNER_DEMO_CLIENT_SECRET="$(kc $B client-secret)"
 export TEST_RUNNER_DEMO_ENVIRONMENT_ID="$(kc $B environment-id)"
 
 # The UI test target doesn't build the app, so build the Debug app first.
+# Save panels open in ~/Documents, where the cleanup below looks.
+defaults write be.jordythery.jamf-deployer NSNavLastRootDirectory -string "$HOME/Documents"
 # Touching the test sources forces a fresh test bundle.
 touch "Jamf DeployerUITests/"*.swift
 xcodebuild build -project "Jamf Deployer.xcodeproj" -scheme "Jamf Deployer" -configuration Debug -destination "platform=macOS,arch=arm64" -quiet

@@ -17,10 +17,12 @@ B="${ROLLOUT_SERVICE_B:-JamfDeployer-Demo}"
 kc() { security find-generic-password -s "$1" -a "$2" -w }
 WORK="$(mktemp -d /tmp/jamf-deployer-uitest.XXXXXX)"
 
-# A local catalog with two release tags: v1.0.1 changes the categories
+# A local catalog with exactly two release tags: v1.0.1 changes the categories
 # block, so a catalog-release rollout has something to deploy.
 git clone -q https://github.com/JordyThery/jamf-deployer-catalog "$WORK/work"
 git -C "$WORK/work" checkout -q v1.0.0
+# Only the two test releases: later public tags would be "the latest release".
+git -C "$WORK/work" tag -l | grep -vx v1.0.0 | xargs git -C "$WORK/work" tag -d > /dev/null
 git -C "$WORK/work" checkout -q -b uitest
 sed -i '' 's/"version": "1.0.0"/"version": "1.0.1"/' "$WORK/work/blocks/categories/block.json"
 sed -i '' 's/priority = 9/priority = 8/' "$WORK/work/blocks/categories/main.tf"
@@ -55,6 +57,8 @@ test = [c for c in categories if c['name'].startswith('UIT - ')]
 $2"
 }
 
+# Save panels open in ~/Documents, where the cleanup below looks.
+defaults write be.jordythery.jamf-deployer NSNavLastRootDirectory -string "$HOME/Documents"
 # Touching the test sources forces a fresh test bundle.
 touch "Jamf DeployerUITests/"*.swift
 xcodebuild build -project "Jamf Deployer.xcodeproj" -scheme "Jamf Deployer" -configuration Debug -destination "platform=macOS,arch=arm64" -quiet

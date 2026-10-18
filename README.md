@@ -16,7 +16,7 @@
 
 Jamf Deployer is a macOS app for engineers who set up and look after Jamf tenants. It takes a new tenant to a best-practice baseline in an afternoon, captures what already exists in a tenant as reusable configuration, and keeps every tenant honest over time — showing what changed in Jamf outside the app and what a newer baseline would change, before anything is deployed.
 
-Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) providers — all bundled, nothing to install, and no Terraform knowledge needed. Everything is expressed in plain language: baselines are built from **building blocks**, every deploy starts with a **preview of changes**, and nothing is ever applied without your confirmation.
+Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) providers, plus the community [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) provider for tenants connected through the Jamf Pro API — all bundled, nothing to install, and no Terraform knowledge needed. Everything is expressed in plain language: baselines are built from **building blocks**, every deploy starts with a **preview of changes**, and nothing is ever applied without your confirmation.
 
 - **Set up** — connect a tenant with Jamf Platform API credentials, pick a preset or compose a baseline from building blocks, preview and deploy. The app ships the configuration-free blocks (App Catalog apps, App Store apps for Mac and iPad and iPhone, Jamf Protect Baseline, Security Cloud), which use groups and categories already in your tenant or created by another selected block; opinionated ones come from catalogs you publish, with the versioned [demo catalog](https://github.com/JordyThery/jamf-deployer-catalog) (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings and more) as a worked example and template. Macs, iPads and iPhones are covered. A Day 0 checklist covers what an API cannot: APNs, Apple Business Manager tokens, branding.
 - **Export** — turn an existing tenant's objects into reusable building blocks that keep their wiring — one export can become several blocks, or a full tenant clone — plus documentation or a point-in-time snapshot; adopt hand-configured objects into management without recreating them.
@@ -40,7 +40,7 @@ The fleet dashboard keeps every tenant's sync state, baseline size and Apple tok
 ## Requirements
 
 - macOS 15 or later, Apple silicon
-- A Jamf tenant on the Jamf Platform API gateway, with an API client (and optionally a Jamf Protect API client)
+- A Jamf tenant on the Jamf Platform API gateway, with an API client (and optionally a Jamf Protect API client) — or, for adopting and maintaining an existing tenant without Platform API access, a Jamf Pro API client or user account
 - Team Mode additionally needs a GitHub repository the team can push to, with `git` credentials configured on each Mac
 
 ## Security

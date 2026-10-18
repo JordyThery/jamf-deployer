@@ -1,6 +1,6 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-10-18 (1.0.3). Consolidates the open items from every phase report and the 1.0.x work.
+As of 2026-10-18 (1.0.4). Consolidates the open items from every phase report and the 1.0.x work.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - **protect-baseline block** — no non-production Jamf Protect tenant exists to apply it to. The provider wiring itself *is* live-verified read-only (auth + all four data sources against production).
@@ -20,6 +20,15 @@ As of 2026-10-18 (1.0.3). Consolidates the open items from every phase report an
 - **Fleet rollouts** run one tenant at a time in up to three rings (production tenants start in ring 2) and need at least two tenants with something to deploy. Catalog-release mode lists Git catalog sources only. A deploy with failures ends the rollout; a tenant closed without deploying gets its previous selections and release pin back. Live-verified with a local two-tag catalog (Sandbox deployed v1.0.1, Demo skipped and stayed on v1.0.0).
 - Blocks picked from a Git catalog before 1.0.3 were recorded as built-in, so release pins and updates skipped them; they are repaired automatically on the next preview, check or update check.
 
+## Jamf Pro API connections
+- A tenant connects through the Jamf Platform API or the Jamf Pro API (community jamfpro plugin 0.42.0 by Deployment Theory), chosen in the Connect wizard and fixed per tenant. Jamf Pro API tenants sign in with an API client or a user account.
+- Jamf Pro API tenants adopt and maintain: Adopt, Check for Changes, keep or restore, Add a Custom Object, Roll Out, snapshots, as-built documentation, Day 0 and Hand Over. Building blocks and clones need the Platform API. Moving to the Platform API is Hand Over → connect again → Adopt.
+- Deploys run one operation at a time (`-parallelism=1`), as the plugin requires; large adopts are slower than over the Platform API.
+- Live-verified on both test instances with a user account: connect and preflight, custom object deploy, drift restore and keep, adoption, snapshot, a rollout, Day 0 and hand-over. API-client (OAuth) sign-in is live-verified too: connect, deploy, check for changes and discovery.
+- Ejecting a Jamf Pro API tenant (`JAMFPRO_*` variables, `deploymenttheory/jamfpro`) is documented but not live-verified.
+- Team Mode: teammates on 1.0.3 or earlier read Jamf Pro API tenants as Platform tenants; the Team Mode guide asks everyone to update first.
+- Failed creates are not looked up and adopted after a deploy for Jamf Pro API tenants (the recovery lookups cover Platform types).
+
 ## Team mode caveats
 - Git auth assumes the Mac has gh/SSH credentials configured; an in-app PAT flow is designed, not built.
 - Lock expiry is manual (age shown + Break Lock); no auto-TTL.
@@ -33,7 +42,7 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 
 ## Packaging and release
 - 1.0 shipped signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
-- No app-target unit tests; JamfDeployerCore carries 82 tests, DeployerKit 4. The Jamf DeployerUITests target runs live against two test tenants: a fleet rollout (Scripts/run-rollout-ui-tests.sh) and a walk through every main function — connect, catalog sources, deploys, drift, removals, adoption, App Store picker, hand-over, Day 0, export, clone, snapshot, history and settings (Scripts/run-function-ui-tests.sh). Both scripts clean up after themselves.
+- No app-target unit tests; JamfDeployerCore carries 85 tests, DeployerKit 4. The Jamf DeployerUITests target runs live against two test tenants: a fleet rollout (Scripts/run-rollout-ui-tests.sh), a walk through every main function — connect, catalog sources, deploys, drift, removals, adoption, App Store picker, hand-over, Day 0, export, clone, snapshot, history and settings (Scripts/run-function-ui-tests.sh) — and the Jamf Pro API connection (Scripts/run-jamfpro-ui-tests.sh). All scripts clean up after themselves.
 - App Sandbox is off by design (child-process engine); Developer ID + notarisation is the distribution model.
 
 ## Adopting an existing tenant

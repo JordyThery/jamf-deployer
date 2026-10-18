@@ -16,9 +16,11 @@ You need an API integration for the Jamf Platform API gateway:
 2. In Jamf Deployer, click **Connect a Tenant…** and enter a display name, the region (US, EU or APAC), whether it is a test tenant, and the credentials. **Fetch Environments from Jamf Account** looks up the environment ID for organization-scope integrations; otherwise paste it. Older integrations scoped to a single tenant use **Integration uses legacy tenant scope**.
 3. The wizard runs a preflight — credentials, Jamf Pro version, read permissions, Automated Device Enrollment and Apps and Books token expiry, and the Cloud Services Connection — and names anything missing before you save. You can still add the tenant and fix permissions later.
 
-The client secret goes straight into your Keychain. It is never written to a file. To enter a rotated secret later, use **Update Client Secret…** in the tenant's Connection section.
+The client secret goes straight into your Keychain. It is never written to a file. To enter a rotated secret later, use **Update Client Secret…** (**Update Password…** for a Jamf Pro user account) in the tenant's Connection section.
 
-Connecting Jamf Protect (for the Protect building blocks) is an optional wizard step, or later from the tenant's **Day 0 Setup** tab: enter the Protect console URL, API client ID and secret, then **Link Jamf Protect**. This also registers Jamf Pro with Protect.
+**No Platform API access yet?** Choose **Connect through: Jamf Pro API** on the wizard's first step and sign in to the Jamf Pro instance directly, with an API client (recommended) or a user account. Such tenants adopt and maintain existing configuration — Adopt, Check for Changes, keep or restore, Add a Custom Object, Roll Out, snapshots, as-built documentation, Day 0 and Hand Over — but cannot use building blocks (including capturing them) or clones, which are written for the Platform API. Changes run one at a time over the Jamf Pro API, so large deploys take longer. The connection type is fixed per tenant; to move a tenant to the Platform API later, hand it over, connect it again with Jamf Platform API credentials and adopt its objects. This connection uses the community [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) engine plugin by Deployment Theory, bundled with the app.
+
+Connecting Jamf Protect (for the Protect building blocks) is an optional wizard step for Jamf Platform API tenants, or later from the tenant's **Day 0 Setup** tab: enter the Protect console URL, API client ID and secret, then **Link Jamf Protect**. This also registers Jamf Pro with Protect.
 
 ## 3. Compose a baseline
 

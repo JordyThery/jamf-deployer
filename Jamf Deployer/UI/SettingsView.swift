@@ -9,6 +9,7 @@ nonisolated enum EngineInfo {
     static let openTofuVersion = "1.13.1"
     static let jamfPlatformProviderVersion = "1.5.0"
     static let jamfProtectProviderVersion = "0.12.0"
+    static let jamfProProviderVersion = "0.42.0"
     static let jamformerVersion = "0.6.0"
 }
 
@@ -113,6 +114,7 @@ struct SupportBundleButton: View {
             OpenTofu \(EngineInfo.openTofuVersion)
             jamfplatform provider \(EngineInfo.jamfPlatformProviderVersion)
             jamfprotect provider \(EngineInfo.jamfProtectProviderVersion)
+            jamfpro provider \(EngineInfo.jamfProProviderVersion)
             jamformer \(EngineInfo.jamformerVersion)
             Team mode: \(deployService.isTeamMode ? "on" : "off")
             Last sync: \(deployService.lastSync?.formatted(.iso8601) ?? "-")

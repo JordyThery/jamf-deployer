@@ -8,6 +8,7 @@ HERE="${0:A:h}"
 OPENTOFU_VERSION="1.13.1"
 JAMFPLATFORM_VERSION="1.5.0"
 JAMFPROTECT_VERSION="0.12.0"
+JAMFPRO_VERSION="0.42.0"
 JAMFORMER_VERSION="0.6.0"
 
 echo "== OpenTofu $OPENTOFU_VERSION =="
@@ -40,6 +41,16 @@ for arch in arm64 amd64; do
 done
 curl -sL -O "https://github.com/Jamf-Concepts/terraform-provider-jamfprotect/releases/download/v${JAMFPROTECT_VERSION}/terraform-provider-jamfprotect_${JAMFPROTECT_VERSION}_SHA256SUMS"
 shasum -a 256 -c <(grep darwin "terraform-provider-jamfprotect_${JAMFPROTECT_VERSION}_SHA256SUMS")
+
+echo "== jamfpro provider $JAMFPRO_VERSION (Deployment Theory, MPL-2.0) =="
+DIR="$HERE/providers/registry.opentofu.org/deploymenttheory/jamfpro"
+mkdir -p "$DIR"; cd "$DIR"
+for arch in arm64 amd64; do
+  [[ -f "terraform-provider-jamfpro_${JAMFPRO_VERSION}_darwin_${arch}.zip" ]] || \
+    curl -sL -O "https://github.com/deploymenttheory/terraform-provider-jamfpro/releases/download/v${JAMFPRO_VERSION}/terraform-provider-jamfpro_${JAMFPRO_VERSION}_darwin_${arch}.zip"
+done
+curl -sL -O "https://github.com/deploymenttheory/terraform-provider-jamfpro/releases/download/v${JAMFPRO_VERSION}/terraform-provider-jamfpro_${JAMFPRO_VERSION}_SHA256SUMS"
+shasum -a 256 -c <(grep darwin "terraform-provider-jamfpro_${JAMFPRO_VERSION}_SHA256SUMS")
 
 echo "== jamformer $JAMFORMER_VERSION =="
 cd "$HERE/jamformer"

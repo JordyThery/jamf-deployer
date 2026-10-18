@@ -74,6 +74,18 @@ and Books location.
 | **Day 0: Self Service branding** | Create for Self Service branding |
 | **Day 0: Protect registration** | The Jamf Pro ↔ Protect registration privilege |
 
+## Jamf Pro API connections
+
+Tenants connected through the Jamf Pro API sign in to the instance with an
+API client (an API role assigned to it) or a user account. Connecting needs
+**Read Categories**, **Read Scripts**, **Read Device Enrollment Program
+Instances** and **Read Volume Purchasing Locations** (for a user account, the Read privilege
+on those object types); the preflight names any
+that are missing. Adopting, checking for changes and deploying need read —
+and for deploys create, update and delete — on the object types you manage.
+Day 0 actions need the same privileges as listed above, in their Jamf Pro
+API role form.
+
 ## Jamf Protect API client
 
 For tenants with a Jamf Protect connection, a second API client is created
