@@ -40,7 +40,7 @@ The fleet dashboard keeps every tenant's sync state, baseline size and Apple tok
 ## Requirements
 
 - macOS 15 or later, Apple silicon
-- A Jamf tenant on the Jamf Platform API gateway, with an API client (and optionally a Jamf Protect API client) — or, for adopting and maintaining an existing tenant without Platform API access, a Jamf Pro API client or user account
+- A Jamf tenant on the Jamf Platform API gateway, with an API client (and optionally a Jamf Protect API client) — or, without Platform API access, a Jamf Pro API client or user account
 - Team Mode additionally needs a GitHub repository the team can push to, with `git` credentials configured on each Mac
 
 ## Security

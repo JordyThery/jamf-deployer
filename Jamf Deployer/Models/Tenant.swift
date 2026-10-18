@@ -146,40 +146,6 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         self.acknowledgedDrift = []
         self.createdAt = .now
     }
-
-    /// Tolerant decoding so older tenant.json files keep loading as the
-    /// model grows.
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Unnamed tenant"
-        connection = try container.decodeIfPresent(ConnectionKind.self, forKey: .connection) ?? .platform
-        jamfProURL = try container.decodeIfPresent(String.self, forKey: .jamfProURL)
-        jamfProAuth = try container.decodeIfPresent(JamfProAuth.self, forKey: .jamfProAuth)
-        region = try container.decodeIfPresent(Region.self, forKey: .region) ?? .us
-        clientID = try container.decodeIfPresent(String.self, forKey: .clientID) ?? ""
-        environmentID = try container.decodeIfPresent(String.self, forKey: .environmentID)
-        tenantID = try container.decodeIfPresent(String.self, forKey: .tenantID)
-        isProduction = try container.decodeIfPresent(Bool.self, forKey: .isProduction) ?? true
-        mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .managed
-        namePrefix = try container.decodeIfPresent(String.self, forKey: .namePrefix) ?? "JD - "
-        protectURL = try container.decodeIfPresent(String.self, forKey: .protectURL)
-        protectClientID = try container.decodeIfPresent(String.self, forKey: .protectClientID)
-        catalogPins = try container.decodeIfPresent([String: String].self, forKey: .catalogPins) ?? [:]
-        blockSelections = try container.decodeIfPresent([BlockSelection].self, forKey: .blockSelections) ?? []
-        day0 = try container.decodeIfPresent(Day0Status.self, forKey: .day0) ?? Day0Status()
-        deployedBlockVersions = try container.decodeIfPresent([String: String].self, forKey: .deployedBlockVersions) ?? [:]
-        pendingRemovals = try container.decodeIfPresent([BlockRemoval].self, forKey: .pendingRemovals) ?? []
-        handOverPending = try container.decodeIfPresent(Bool.self, forKey: .handOverPending) ?? false
-        selectionsBeforeHandOver = try container.decodeIfPresent([BlockSelection].self, forKey: .selectionsBeforeHandOver)
-        removalsBeforeHandOver = try container.decodeIfPresent([BlockRemoval].self, forKey: .removalsBeforeHandOver)
-        driftReport = try container.decodeIfPresent(DriftReport.self, forKey: .driftReport)
-        acknowledgedDrift = try container.decodeIfPresent([String].self, forKey: .acknowledgedDrift) ?? []
-        preflight = try container.decodeIfPresent(PreflightSnapshot.self, forKey: .preflight)
-        lastDeploy = try container.decodeIfPresent(DeployRecord.self, forKey: .lastDeploy)
-        lastDriftCheck = try container.decodeIfPresent(Date.self, forKey: .lastDriftCheck)
-        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
-    }
 }
 
 /// One selected building block and its non-secret settings.
@@ -188,40 +154,23 @@ nonisolated struct BlockSelection: Codable, Sendable, Equatable {
     var blockID: String
     var sourceID: String
     var settings: [String: String]
-    var scope: String
     /// When set, this block stays on a specific catalog tag instead of the
     /// tenant's source pin — the per-block update opt-in.
     var sourceTag: String?
-    /// An existing group in the tenant the block is scoped to, instead of a
-    /// Foundation group.
+    /// An existing group in the tenant the block is scoped to.
     var existingScope: ExistingObjectRef?
-    /// An existing category in the tenant (ID "-1" for none), instead of
-    /// the Foundation category.
+    /// An existing category in the tenant (ID "-1" for none).
     var existingCategory: ExistingObjectRef?
     /// A group another selected block creates.
     var providedScope: ProvidedObject?
     /// A category another selected block creates.
     var providedCategory: ProvidedObject?
 
-    init(blockID: String, sourceID: String = "official", settings: [String: String] = [:], scope: String = "pilot", sourceTag: String? = nil) {
+    init(blockID: String, sourceID: String = "official", settings: [String: String] = [:], sourceTag: String? = nil) {
         self.blockID = blockID
         self.sourceID = sourceID
         self.settings = settings
-        self.scope = scope
         self.sourceTag = sourceTag
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        blockID = try container.decodeIfPresent(String.self, forKey: .blockID) ?? ""
-        sourceID = try container.decodeIfPresent(String.self, forKey: .sourceID) ?? ""
-        settings = try container.decodeIfPresent([String: String].self, forKey: .settings) ?? [:]
-        scope = try container.decodeIfPresent(String.self, forKey: .scope) ?? "pilot"
-        sourceTag = try container.decodeIfPresent(String.self, forKey: .sourceTag)
-        existingScope = try container.decodeIfPresent(ExistingObjectRef.self, forKey: .existingScope)
-        existingCategory = try container.decodeIfPresent(ExistingObjectRef.self, forKey: .existingCategory)
-        providedScope = try container.decodeIfPresent(ProvidedObject.self, forKey: .providedScope)
-        providedCategory = try container.decodeIfPresent(ProvidedObject.self, forKey: .providedCategory)
     }
 }
 
@@ -252,7 +201,6 @@ nonisolated struct PreflightSnapshot: Codable, Sendable, Equatable {
     var vppTokenExpiration: String?
 }
 
-
 /// Manually confirmed Day 0 progress. Everything detectable is detected
 /// live instead of stored.
 nonisolated struct Day0Status: Codable, Sendable, Equatable {
@@ -265,14 +213,7 @@ nonisolated struct Day0Status: Codable, Sendable, Equatable {
         self.apnsConfirmedDate = apnsConfirmedDate
         self.skippedSteps = skippedSteps
     }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        apnsConfirmedDate = try container.decodeIfPresent(Date.self, forKey: .apnsConfirmedDate)
-        skippedSteps = try container.decodeIfPresent([String].self, forKey: .skippedSteps) ?? []
-    }
 }
-
 
 nonisolated extension Tenant {
     /// Drift that still needs a decision: actionable and not kept.

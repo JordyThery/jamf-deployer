@@ -4,14 +4,14 @@ resource "jamfprotect_telemetry" "baseline" {
 
   log_file_path = []
 
-  log_access_and_authentication = true
-  log_apple_security            = true
+  log_access_and_authentication  = true
+  log_apple_security             = true
   log_applications_and_processes = true
-  log_hardware_and_software    = true
-  log_persistence              = true
-  log_system                   = true
-  log_users_and_groups         = true
-  log_network                  = var.collect_network_telemetry
+  log_hardware_and_software      = true
+  log_persistence                = true
+  log_system                     = true
+  log_users_and_groups           = true
+  log_network                    = var.collect_network_telemetry
 
   collect_diagnostic_and_crash_reports = true
   collect_performance_metrics          = false
@@ -23,7 +23,7 @@ resource "jamfprotect_action_configuration" "baseline" {
   description = var.managed_by_tag
 
   alert_data_collection = {
-    binary_included_data_attributes                 = ["Sha1", "Sha256", "Signing Information"]
+    binary_included_data_attributes                = ["Sha1", "Sha256", "Signing Information"]
     download_event_included_data_attributes        = ["File"]
     file_included_data_attributes                  = ["Sha1", "Sha256"]
     file_system_event_included_data_attributes     = ["File", "Process", "User"]
@@ -64,8 +64,8 @@ resource "jamfprotect_plan" "baseline" {
   auto_update        = var.auto_update
   log_level          = "Error"
 
-  report_architecture   = true
-  report_hostname       = true
-  report_serial_number  = true
-  report_model_name     = true
+  report_architecture  = true
+  report_hostname      = true
+  report_serial_number = true
+  report_model_name    = true
 }

@@ -135,7 +135,6 @@ struct TenantDetailView: View {
                                         .textSelection(.enabled)
                                 }
                             }
-                            if !tenant.isJamfPro {
                             LabeledContent("Name prefix") {
                                 TextField("Name prefix", text: Binding(
                                     get: { tenant.namePrefix },
@@ -150,7 +149,6 @@ struct TenantDetailView: View {
                                 .multilineTextAlignment(.trailing)
                                 .labelsHidden()
                                 .help("Prefix for managed object names; changing it renames objects on the next deploy")
-                            }
                             }
                             if let version = tenant.preflight?.jamfProVersion {
                                 LabeledContent("Jamf Pro", value: PreflightService.displayVersion(version))
@@ -220,17 +218,10 @@ struct TenantDetailView: View {
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
-                            if !tenant.isJamfPro {
-                                Text("Building blocks add new objects and settings to this tenant. Objects that already exist don't need a block — adopt them instead.")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if tenant.isJamfPro {
-                                Label("Building blocks need a Jamf Platform API connection. This tenant is connected through the Jamf Pro API, so it manages adopted and custom objects: adopt what exists, check for changes and keep or restore them. To use building blocks later, hand the tenant over, connect it again with Jamf Platform API credentials and adopt its objects.", systemImage: "info.circle")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            } else if let catalog {
+                            Text("Building blocks add new objects and settings to this tenant. Objects that already exist don't need a block — adopt them instead.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            if let catalog {
                                 BaselineEditorView(tenant: tenant, catalog: catalog) {
                                     self.catalog = try? deployService.loadCatalog()
                                 }
@@ -397,7 +388,7 @@ struct TenantDetailView: View {
                     Button("Add a Custom Object…", systemImage: "plus.rectangle.on.rectangle") {
                         isAddingCustomObject = true
                     }
-                    .help("Create an object the catalog doesn't cover, using a form built from the provider schema")
+                    .help("Create an object the catalog doesn't cover, using a form built from the engine plugin's schema")
                 }
                 .disabled(tenant.handOverPending)
             }

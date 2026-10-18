@@ -80,8 +80,7 @@ public nonisolated struct BlockScope: Codable, Sendable, Equatable {
     public var kind: Kind
     /// The module variable receiving the group reference.
     public var variable: String?
-    /// Default scope: a group another block provides ("<blockID>/<name>"),
-    /// or a legacy Foundation group key (pilot, all_macs, …).
+    /// Default scope: a group another block provides ("<blockID>/<name>").
     public var `default`: String?
     /// Some Jamf objects (App Installers) only accept smart groups; static
     /// groups are not offered for these blocks.
@@ -115,6 +114,9 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     public var products: [String]
     public var minJamfProVersion: String?
     public var permissions: [String]
+    /// The Jamf Pro API privileges the block's Jamf Pro API module needs,
+    /// when it has one.
+    public var jamfProPermissions: [String]
     public var risk: String
     public var alwaysOn: Bool
     public var scope: BlockScope
@@ -156,6 +158,7 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
         products = try container.decodeIfPresent([String].self, forKey: .products) ?? []
         minJamfProVersion = try container.decodeIfPresent(String.self, forKey: .minJamfProVersion)
         permissions = try container.decodeIfPresent([String].self, forKey: .permissions) ?? []
+        jamfProPermissions = try container.decodeIfPresent([String].self, forKey: .jamfProPermissions) ?? []
         risk = try container.decodeIfPresent(String.self, forKey: .risk) ?? "medium"
         alwaysOn = try container.decodeIfPresent(Bool.self, forKey: .alwaysOn) ?? false
         scope = try container.decodeIfPresent(BlockScope.self, forKey: .scope)
@@ -204,28 +207,13 @@ public nonisolated struct ProvidedObject: Codable, Sendable, Hashable {
     /// "<blockID>/<name>", as written in block defaults and presets.
     public var reference: String { "\(blockID)/\(name)" }
 
-    /// Parses "<blockID>/<name>"; nil for anything else (legacy Foundation
-    /// keys have no slash).
+    /// Parses "<blockID>/<name>"; nil for anything else.
     public init?(reference: String) {
         guard let slash = reference.firstIndex(of: "/") else { return nil }
         let blockID = String(reference[..<slash])
         let name = String(reference[reference.index(after: slash)...])
         guard !blockID.isEmpty, !name.isEmpty else { return nil }
         self.init(blockID: blockID, name: name)
-    }
-}
-
-public nonisolated extension BlockMetadata {
-    /// Whether a selection of this block takes anything from Foundation.
-    /// Scope and category come from Foundation unless the selection points
-    /// at existing objects; a "foundation" requirement on a block with
-    /// neither is a dependency in its own right.
-    func wiresThroughFoundation(usesExistingScope: Bool, usesExistingCategory: Bool) -> Bool {
-        let scopeViaFoundation = scope.kind != .none && !usesExistingScope
-        let categoryViaFoundation = acceptsCategory && !usesExistingCategory
-        let explicitRequirement = requires.contains("foundation")
-            && scope.kind == .none && !acceptsCategory
-        return scopeViaFoundation || categoryViaFoundation || explicitRequirement
     }
 }
 
@@ -237,8 +225,7 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
     public var blocks: [String]
     public var defaults: [String: [String: String]]
     /// Scope per block, where it differs from the block's own default: a
-    /// group another preset block creates ("<blockID>/<name>"), or a
-    /// legacy Foundation group key.
+    /// group another preset block creates ("<blockID>/<name>").
     public var scopes: [String: String]
     /// Category per block, as "<blockID>/<category name>".
     public var categories: [String: String]
@@ -293,15 +280,10 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
             }
             if !changed.isEmpty { defaults[block.id] = changed }
             // Only references that travel: groups and categories created by
-            // blocks in the preset, or Foundation keys. Existing objects are
-            // tenant-specific.
-            if block.scope.kind != .none {
-                if let provided = selection.providedScope, presetBlocks.contains(provided.blockID) {
-                    if provided.reference != block.scope.default { scopes[block.id] = provided.reference }
-                } else if WorkspaceGenerator.foundationGroups.contains(selection.scope),
-                          selection.scope != (block.scope.default ?? "pilot") {
-                    scopes[block.id] = selection.scope
-                }
+            // blocks in the preset. Existing objects are tenant-specific.
+            if block.scope.kind != .none, let provided = selection.providedScope,
+               presetBlocks.contains(provided.blockID), provided.reference != block.scope.default {
+                scopes[block.id] = provided.reference
             }
             if block.acceptsCategory, let provided = selection.providedCategory,
                presetBlocks.contains(provided.blockID), provided.reference != block.defaultCategory {
@@ -316,17 +298,15 @@ public nonisolated struct Preset: Codable, Sendable, Identifiable, Equatable {
     public struct PresetSelection: Sendable {
         public var blockID: String
         public var settings: [String: String]
-        public var scope: String
         public var providedScope: ProvidedObject?
         public var providedCategory: ProvidedObject?
 
         public init(
-            blockID: String, settings: [String: String], scope: String,
+            blockID: String, settings: [String: String],
             providedScope: ProvidedObject? = nil, providedCategory: ProvidedObject? = nil
         ) {
             self.blockID = blockID
             self.settings = settings
-            self.scope = scope
             self.providedScope = providedScope
             self.providedCategory = providedCategory
         }
@@ -361,9 +341,15 @@ public nonisolated struct LoadedCatalog: Sendable {
     /// written for a newer version), by folder name. They are left out
     /// rather than failing the whole catalog.
     public var unreadableBlocks: [String] = []
+    /// The connections each block can deploy through (see `BlockModule`).
+    public var connectionsByBlockID: [String: Set<ConnectionKind>] = [:]
 
     public func block(id: String) -> BlockMetadata? {
         blocks.first { $0.id == id }
+    }
+
+    public func supports(blockID: String, connection: ConnectionKind) -> Bool {
+        connectionsByBlockID[blockID]?.contains(connection) ?? (connection == .platform)
     }
 
     public func blockFolderURL(id: String) -> URL {
@@ -388,6 +374,7 @@ public nonisolated struct LoadedCatalog: Sendable {
                 merged.blocks.append(block)
                 merged.blockRoots[block.id] = catalog.blockFolderURL(id: block.id)
                 merged.sourceNameByBlockID[block.id] = catalog.manifest.name
+                merged.connectionsByBlockID[block.id] = catalog.connectionsByBlockID[block.id]
                 if let sourceID = catalog.sourceID {
                     merged.sourceIDByBlockID[block.id] = sourceID
                 }
@@ -453,8 +440,10 @@ public nonisolated struct LoadedCatalog: Sendable {
         )
         catalog.unreadableBlocks = unreadable.sorted()
         for block in catalog.blocks {
-            catalog.blockRoots[block.id] = rootURL.appending(path: "blocks/\(block.id)")
+            let folder = rootURL.appending(path: "blocks/\(block.id)")
+            catalog.blockRoots[block.id] = folder
             catalog.sourceNameByBlockID[block.id] = manifest.name
+            catalog.connectionsByBlockID[block.id] = BlockModule.connections(ofBlockAt: folder)
         }
         return catalog
     }

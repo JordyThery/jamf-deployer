@@ -134,25 +134,6 @@ final class TenantDeployService {
         try catalogSources.loadMerged(pins: tenant.catalogPins)
     }
 
-    /// Points selections at the custom source their block comes from.
-    /// Versions before 1.0.3 recorded every selection as built-in, which
-    /// left Git-catalog blocks outside release pins and updates. Persists
-    /// and returns the repaired tenant.
-    @discardableResult
-    func repairSourceIDs(for tenant: Tenant) -> Tenant {
-        guard let catalog = try? loadCatalog() else { return tenant }
-        var updated = tenant
-        for index in updated.blockSelections.indices {
-            let selection = updated.blockSelections[index]
-            guard selection.sourceID == "official" || selection.sourceID.isEmpty,
-                  let sourceID = catalog.sourceIDByBlockID[selection.blockID] else { continue }
-            updated.blockSelections[index].sourceID = sourceID
-        }
-        guard updated.blockSelections != tenant.blockSelections else { return tenant }
-        tenantStore.update(updated)
-        return updated
-    }
-
     /// Downloads any tag checkouts the tenant's selections need before the
     /// (synchronous, disk-only) catalog loads run.
     private func ensureCatalogCheckouts(for tenant: Tenant) async throws {
@@ -174,7 +155,6 @@ final class TenantDeployService {
     /// Per-block updates available from newer tags of the tenant's git
     /// sources (fetches the remotes' tag lists).
     func availableBaselineUpdates(for tenant: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
-        let tenant = repairSourceIDs(for: tenant)
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []
         let usedSourceIDs = Set(tenant.blockSelections.map(\.sourceID))
         for source in catalogSources.customSources
@@ -206,7 +186,7 @@ final class TenantDeployService {
         tag: String,
         blockIDs: Set<String>
     ) {
-        var updated = repairSourceIDs(for: tenantStore.tenant(id: tenant.id) ?? tenant)
+        var updated = tenantStore.tenant(id: tenant.id) ?? tenant
         for index in updated.blockSelections.indices
         where updated.blockSelections[index].sourceID == source.id.uuidString {
             if blockIDs.contains(updated.blockSelections[index].blockID) {
@@ -224,14 +204,29 @@ final class TenantDeployService {
         tenantStore.update(updated)
     }
 
+    /// The jamfpro plugin expects one request at a time; the Platform
+    /// gateway takes a few writes in parallel.
+    static func parallelism(for tenant: Tenant) -> String {
+        "-parallelism=\(tenant.isJamfPro ? 1 : 4)"
+    }
+
+    /// Previews and checks only read: the engine default suits the Platform
+    /// gateway, the jamfpro plugin still goes one at a time.
+    static func readParallelism(for tenant: Tenant) -> [String] {
+        tenant.isJamfPro ? ["-parallelism=1"] : []
+    }
+
     @discardableResult
     private func generateWorkspace(for tenant: Tenant, catalog: LoadedCatalog) throws -> WorkspaceGenerator.Output {
-        let selections = try generatedSelections(for: tenant, catalog: catalog)
+        let selections = try WorkspaceGenerator.resolveModules(
+            generatedSelections(for: tenant, catalog: catalog),
+            catalog: catalog,
+            connection: tenant.connection)
         let output = try WorkspaceGenerator.generate(WorkspaceInput(
             namePrefix: tenant.namePrefix,
             selections: selections,
             providerVersion: EngineInfo.jamfPlatformProviderVersion,
-            removals: tenant.isJamfPro ? [] : tenant.pendingRemovals,
+            removals: tenant.pendingRemovals,
             connection: tenant.connection,
             jamfProProviderVersion: EngineInfo.jamfProProviderVersion
         ))
@@ -262,12 +257,6 @@ final class TenantDeployService {
         if tenant.handOverPending {
             // Hand-over releases adopted objects like blocks: the engine
             // forgets them and Jamf keeps them.
-            // A hand-over prepared by an earlier version already replaced the
-            // adopted files with these removed blocks.
-            let legacy = adopted.appending(path: "handover_removed.tf")
-            if fileManager.fileExists(atPath: legacy.path) {
-                try? fileManager.copyItem(at: legacy, to: generated.appending(path: "adopted-legacy-handover_removed.tf"))
-            }
             let addresses = ((try? ExportedObjectInventory.scan(directory: adopted)) ?? []).map(\.address)
             if !addresses.isEmpty {
                 let blocks = addresses.sorted().map { address in
@@ -344,7 +333,6 @@ final class TenantDeployService {
                     return GeneratedSelection(
                         block: block,
                         settings: selection.settings,
-                        scope: selection.scope,
                         folderURL: sourceCatalog.blockFolderURL(id: selection.blockID),
                         existingScopeID: selection.existingScope?.id,
                         existingCategoryID: selection.existingCategory?.id,
@@ -357,7 +345,7 @@ final class TenantDeployService {
                 throw DeployError.blockMissingFromCatalog(selection.blockID)
             }
             return GeneratedSelection(
-                block: block, settings: selection.settings, scope: selection.scope,
+                block: block, settings: selection.settings,
                 existingScopeID: selection.existingScope?.id,
                 existingCategoryID: selection.existingCategory?.id,
                 providedScope: selection.providedScope,
@@ -505,8 +493,30 @@ final class TenantDeployService {
             environment["JAMFPRO_BASIC_USERNAME"] = tenant.clientID
             environment["JAMFPRO_BASIC_PASSWORD"] = secret
         }
+        try environment.merge(protectEnvironment(for: tenant)) { $1 }
         environment["TF_ENCRYPTION"] = try encryptionConfiguration(for: tenant)
         return environment
+    }
+
+    /// JAMFPROTECT_* for baselines with Jamf Protect blocks; empty otherwise.
+    private func protectEnvironment(for tenant: Tenant) throws -> [String: String] {
+        let needsProtect = (try? loadCatalog()).map { catalog in
+            tenant.blockSelections.contains { selection in
+                catalog.block(id: selection.blockID)?.products.contains("jamf-protect") == true
+            }
+        } ?? false
+        guard needsProtect else { return [:] }
+        guard let protectURL = tenant.protectURL,
+              let protectClientID = tenant.protectClientID,
+              let protectSecret = TenantSecrets(tenantID: tenant.id).protectClientSecret.load()
+        else {
+            throw DeployError.missingProtectConnection
+        }
+        return [
+            "JAMFPROTECT_URL": protectURL,
+            "JAMFPROTECT_CLIENT_ID": protectClientID,
+            "JAMFPROTECT_CLIENT_SECRET": protectSecret,
+        ]
     }
 
     private func environment(for tenant: Tenant) throws -> [String: String] {
@@ -516,11 +526,6 @@ final class TenantDeployService {
         if tenant.isJamfPro {
             return try jamfProEnvironment(for: tenant, secret: secret)
         }
-        let needsProtect = (try? loadCatalog()).map { catalog in
-            tenant.blockSelections.contains { selection in
-                catalog.block(id: selection.blockID)?.products.contains("jamf-protect") == true
-            }
-        } ?? false
         var environment: [String: String] = [
             "JAMFPLATFORM_BASE_URL": tenant.region.gatewayURL.absoluteString,
             "JAMFPLATFORM_CLIENT_ID": tenant.clientID,
@@ -532,17 +537,7 @@ final class TenantDeployService {
         case .tenant:
             environment["JAMFPLATFORM_TENANT_ID"] = tenant.scopeID
         }
-        if needsProtect {
-            guard let protectURL = tenant.protectURL,
-                  let protectClientID = tenant.protectClientID,
-                  let protectSecret = TenantSecrets(tenantID: tenant.id).protectClientSecret.load()
-            else {
-                throw DeployError.missingProtectConnection
-            }
-            environment["JAMFPROTECT_URL"] = protectURL
-            environment["JAMFPROTECT_CLIENT_ID"] = protectClientID
-            environment["JAMFPROTECT_CLIENT_SECRET"] = protectSecret
-        }
+        try environment.merge(protectEnvironment(for: tenant)) { $1 }
         environment["TF_ENCRYPTION"] = try encryptionConfiguration(for: tenant)
         return environment
     }
@@ -592,7 +587,7 @@ final class TenantDeployService {
             }
         }
         // Read after the pull: a teammate may have changed the baseline.
-        let tenant = repairSourceIDs(for: tenantStore.tenant(id: original.id) ?? original)
+        let tenant = tenantStore.tenant(id: original.id) ?? original
 
         try await ensureCatalogCheckouts(for: tenant)
         let catalog = try loadCatalog(for: tenant)
@@ -611,7 +606,7 @@ final class TenantDeployService {
         phase = .planning
         logEngine("plan", tenant: tenant)
         let planRun = try await runner.run(
-            arguments: ["plan", "-input=false", "-out=plan.bin", "-json"]
+            arguments: ["plan", "-input=false", "-out=plan.bin", "-json"] + Self.readParallelism(for: tenant)
         )
         let plan = try await runner.showPlan(planFileName: "plan.bin")
 
@@ -668,7 +663,7 @@ final class TenantDeployService {
                 // Jamf's classic API fails more creates under load; four
                 // concurrent operations measurably reduce that at little cost.
                 // The Jamf Pro plugin requires one operation at a time.
-                arguments: ["apply", "-input=false", "-json", "-parallelism=\(tenant.isJamfPro ? 1 : 4)", session.planFileName]
+                arguments: ["apply", "-input=false", "-json", Self.parallelism(for: tenant), session.planFileName]
             ) { event in
                 if event.type == .applyComplete || event.type == .applyErrored {
                     let message = event.message
@@ -878,7 +873,7 @@ final class TenantDeployService {
             }
         }
         // Read after the pull: a teammate may have changed the baseline.
-        let tenant = repairSourceIDs(for: tenantStore.tenant(id: original.id) ?? original)
+        let tenant = tenantStore.tenant(id: original.id) ?? original
         defer {
             let name = tenant.name
             let id = tenant.id
@@ -909,7 +904,7 @@ final class TenantDeployService {
 
         logEngine("check", tenant: tenant)
         try await runner.run(arguments: ["init", "-input=false"])
-        try await runner.run(arguments: ["plan", "-refresh-only", "-input=false", "-out=drift.bin", "-json"])
+        try await runner.run(arguments: ["plan", "-refresh-only", "-input=false", "-out=drift.bin", "-json"] + Self.readParallelism(for: tenant))
         let plan = try await runner.showPlan(planFileName: "drift.bin")
 
         var blockNames: [String: String] = ["tenant": "Adopted objects"]

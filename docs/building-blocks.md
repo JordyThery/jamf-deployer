@@ -14,6 +14,8 @@ The app ships the blocks that carry **no configuration opinions of their own** �
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
 | **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
 
+Every block deploys through the Jamf Platform API. App Catalog and Jamf Protect Baseline also deploy to tenants connected through the Jamf Pro API; the App Store blocks and Security Cloud need the Platform API.
+
 Opinionated configuration — what your FileVault, enrollment or update policy should look like — comes from catalogs you follow: capture blocks from a tenant, or publish a catalog repository for your team. Tenants pin the release tag they use, so a published update never changes a tenant until you opt in. The **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** is a worked example and the template for publishing your own.
 
 ## The demo catalog
@@ -28,6 +30,8 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Software Updates** | Declarative software-update settings via a Jamf Blueprint: automatic download and install, with deferral windows you control. | Medium |
 | **Compliance — CIS Level 1** | A compliance benchmark built from the CIS Level 1 baseline. Starts in monitor mode: it reports, it does not change devices. | High |
 | **Rosetta 2** | A script plus check-in policy that installs Rosetta 2 on Apple silicon Macs so Intel-only apps keep working. | Low |
+
+Every demo block has a Jamf Pro API version except Software Updates and Compliance — CIS Level 1, which build on Platform features (Blueprints and compliance benchmarks). On a tenant connected through the Jamf Pro API those two show as needing the Platform API, and presets leave them out.
 | **Check-in & Inventory** | Check-in frequency, whether startup and login run policies, and what inventory Macs report. Tenant-wide setting. | Low |
 | **Re-enrollment** | What Jamf Pro clears when a Mac enrolls again, so reused Macs start with a clean record. Tenant-wide setting. | Low |
 | **Local Admin Password Rotation** | Rotates managed local admin passwords on a schedule and after each viewing. Tenant-wide setting. | Medium |
@@ -97,6 +101,8 @@ Three ways:
 
 2. **Duplicate a block.** Built-in blocks are read-only — they ship inside the app and update with it — and blocks from a Git catalog follow their published tag. **Duplicate to My Blocks…** in a block's detail view copies either kind into one of your folder sources under a new ID, where everything is editable.
 3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
+
+   A block can also deploy to tenants connected through the Jamf Pro API: put a version of the module written for the jamfpro plugin in a `jamfpro/` folder inside the block, with the same variables and outputs. Files shared by both versions (scripts, templates) stay in the block folder and are read from `jamfpro/` as `${path.module}/../`. List the Jamf Pro API privileges it needs under `jamfProPermissions`, and add `driftBindings` for its resource types. A module that uses no Jamf Platform or Jamf Pro resources (the Jamf Protect blocks) serves both connections without a `jamfpro/` folder.
 
 Custom blocks are managed from their detail view: **Edit Details…** changes the name, summary, version and category; **Reveal in Finder** opens the folder for deeper changes; **Delete Block…** removes it (the app warns when tenants still select it); **Mark as Reviewed** clears a captured block's review flag. Capturing never replaces an existing block: choose a new block ID, or delete the old block first. Sources themselves are managed under **Manage Sources…** in the library's toolbar: **Add Folder…** uses a new or existing folder for your own blocks and presets, **Add Git Catalog…** follows a published catalog, and **Remove…** detaches a source without deleting anything.
 

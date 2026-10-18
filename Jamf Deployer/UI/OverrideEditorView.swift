@@ -28,12 +28,10 @@ actor SchemaProvider {
             .appending(path: "Jamf Deployer/engine/schema-workspace")
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         // Release builds re-sign the plugin archives, so a lock file or
-        // plugin cache from an earlier version no longer matches.
+        // plugin cache from another build no longer matches.
         for leftover in [".terraform.lock.hcl", ".terraform"] {
             try? FileManager.default.removeItem(at: workspace.appending(path: leftover))
         }
-        try? FileManager.default.removeItem(at: URL.applicationSupportDirectory
-            .appending(path: "Jamf Deployer/engine/providers-schema.json"))
         try Data("""
         terraform {
           required_providers {

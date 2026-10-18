@@ -1,0 +1,43 @@
+{
+  "alwaysOn": false,
+  "category": "Core",
+  "conflicts": [],
+  "id": "categories",
+  "jamfProPermissions": [
+    "Create Categories",
+    "Read Categories",
+    "Update Categories",
+    "Delete Categories"
+  ],
+  "minJamfProVersion": "11.31.0",
+  "name": "Categories",
+  "objectsCreated": [
+    "4 categories (Applications, Enrollment, Maintenance, Security)"
+  ],
+  "permissions": [
+    "categories:create",
+    "categories:read",
+    "categories:update",
+    "categories:delete"
+  ],
+  "products": [
+    "jamf-pro",
+    "jamf-platform"
+  ],
+  "provides": {
+    "category": [
+      "Applications",
+      "Enrollment",
+      "Maintenance",
+      "Security"
+    ]
+  },
+  "requires": [],
+  "risk": "low",
+  "scope": {
+    "kind": "none"
+  },
+  "settings": [],
+  "summary": "Applications, Enrollment, Maintenance and Security categories that other blocks file their objects under.",
+  "version": "1.1.0"
+}

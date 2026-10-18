@@ -83,6 +83,8 @@ Instances** and **Read Volume Purchasing Locations** (for a user account, the Re
 on those object types); the preflight names any
 that are missing. Adopting, checking for changes and deploying need read —
 and for deploys create, update and delete — on the object types you manage.
+Each block's detail view lists the Jamf Pro API privileges its Jamf Pro API
+version needs.
 Day 0 actions need the same privileges as listed above, in their Jamf Pro
 API role form.
 

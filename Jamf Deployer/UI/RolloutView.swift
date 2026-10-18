@@ -309,7 +309,7 @@ struct RolloutView: View {
                 advance(from: index)
                 return
             }
-            // Re-read: checking for updates can repair the tenant's selections.
+            // Re-read: a teammate may have changed the baseline.
             let current = tenantStore.tenant(id: tenant.id) ?? tenant
             stagedBaseline = (current.id, current.blockSelections, current.catalogPins)
             deployService.applyBaselineUpdate(

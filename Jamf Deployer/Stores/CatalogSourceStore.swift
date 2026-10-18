@@ -38,7 +38,7 @@ final class CatalogSourceStore {
             id = try container.decode(UUID.self, forKey: .id)
             name = try container.decode(String.self, forKey: .name)
             path = try container.decode(String.self, forKey: .path)
-            kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .localFolder
+            kind = try container.decode(Kind.self, forKey: .kind)
             gitURL = try container.decodeIfPresent(String.self, forKey: .gitURL)
             defaultTag = try container.decodeIfPresent(String.self, forKey: .defaultTag)
             // The source list syncs in Team Mode: a Git source's cache lives

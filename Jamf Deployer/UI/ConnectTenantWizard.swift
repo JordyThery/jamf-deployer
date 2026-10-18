@@ -144,7 +144,7 @@ struct ConnectTenantWizard: View {
                     .help("Production tenants ask for extra confirmation before risky changes")
             } footer: {
                 Text(isJamfPro
-                    ? "The name is only used inside this app. Jamf Pro API tenants adopt and maintain existing configuration; building blocks need the Jamf Platform API."
+                    ? "The name is only used inside this app. Most building blocks deploy through the Jamf Pro API too; Blueprints, compliance benchmarks, Security Cloud and App Store apps need the Jamf Platform API."
                     : "The name is only used inside this app.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

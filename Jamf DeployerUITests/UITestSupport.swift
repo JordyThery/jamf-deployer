@@ -275,6 +275,25 @@ class DeployerUITestCase: XCTestCase {
         return app.dialogs.buttons[label].firstMatch
     }
 
+    /// Removes every catalog source with this name (Manage Sources rows are
+    /// matched by the row that shows the name, never by position).
+    func removeCatalogSources(named name: String) {
+        openSidebar("Building Blocks")
+        tap(app.toolbars.buttons["Manage Sources…"], timeout: 10)
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10))
+        for _ in 0..<5 {
+            let label = app.sheets.staticTexts.matching(NSPredicate(format: "value == %@ OR label == %@", name, name)).firstMatch
+            guard label.waitForExistence(timeout: 2) else { break }
+            let row = app.sheets.buttons.matching(NSPredicate(format: "label == 'Remove…'")).allElementsBoundByIndex
+                .min { abs($0.frame.midY - label.frame.midY) < abs($1.frame.midY - label.frame.midY) }
+            guard let remove = row, abs(remove.frame.midY - label.frame.midY) < 30 else { break }
+            remove.click()
+            tap(dialogButton("Remove Source"), timeout: 10)
+            sleep(1)
+        }
+        tap(app.sheets.buttons["Done"].exists ? app.sheets.buttons["Done"] : app.sheets.buttons["Close"], timeout: 5)
+    }
+
     /// The baseline editor's checkbox for a catalog block.
     func blockCheckbox(_ name: String) -> XCUIElement {
         app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", name + ",")).firstMatch

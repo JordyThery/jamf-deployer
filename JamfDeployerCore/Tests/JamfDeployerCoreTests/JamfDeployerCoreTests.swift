@@ -82,23 +82,40 @@ struct PreviewTests {
 
 @Suite("Catalog loading")
 struct CatalogTests {
-    // A full catalog fixture: the built-in Foundation block plus the demo
-    // catalog's blocks and presets, frozen for the generator tests.
+    // A catalog fixture: built-in blocks plus demo catalog blocks (with
+    // their Jamf Pro API modules) and presets, frozen for the generator tests.
     static let catalogURL = Bundle.module.url(forResource: "Fixtures/test-catalog", withExtension: nil)!
 
     @Test func loadsAllBlocksAndPresets() throws {
         let catalog = try LoadedCatalog.load(from: Self.catalogURL)
-        #expect(catalog.blocks.count == 9)
+        #expect(catalog.blocks.count == 11)
         let protect = try #require(catalog.block(id: "protect-baseline"))
         #expect(protect.products == ["jamf-protect"])
         #expect(protect.settings.contains { $0.key == "threat_mode" && $0.default == "Report only" })
         #expect(catalog.presets.count == 2)
-        let foundation = try #require(catalog.block(id: "foundation"))
-        #expect(foundation.alwaysOn)
-        #expect(foundation.scope.kind == .none)
+        let groups = try #require(catalog.block(id: "device-groups"))
+        #expect(groups.scope.kind == .none)
+        #expect(groups.provides["device_group"]?.contains("Pilot") == true)
         let compliance = try #require(catalog.block(id: "compliance-cis-l1"))
         #expect(compliance.scope.kind == .platformGroup)
         #expect(compliance.settings.contains { $0.type == .enumeration && $0.enumValues?.count == 2 })
+    }
+
+    @Test func recordsWhichConnectionsEachBlockSupports() throws {
+        let catalog = try LoadedCatalog.load(from: Self.catalogURL)
+        // A Jamf Pro API module in jamfpro/ adds the connection.
+        #expect(catalog.supports(blockID: "filevault", connection: .platform))
+        #expect(catalog.supports(blockID: "filevault", connection: .jamfPro))
+        #expect(catalog.supports(blockID: "app-catalog", connection: .jamfPro))
+        // Platform-only features have no Jamf Pro API module.
+        #expect(!catalog.supports(blockID: "compliance-cis-l1", connection: .jamfPro))
+        #expect(!catalog.supports(blockID: "software-updates", connection: .jamfPro))
+        #expect(!catalog.supports(blockID: "security-cloud", connection: .jamfPro))
+        // Jamf Protect blocks use no Jamf Pro or Platform resources.
+        #expect(catalog.supports(blockID: "protect-baseline", connection: .jamfPro))
+        #expect(catalog.supports(blockID: "protect-baseline", connection: .platform))
+        let filevault = try #require(catalog.block(id: "filevault"))
+        #expect(filevault.jamfProPermissions.contains("Create Policies"))
     }
 
     @Test func presetBlocksAllExist() throws {
@@ -117,8 +134,14 @@ struct GeneratorTests {
         try LoadedCatalog.load(from: CatalogTests.catalogURL)
     }
 
-    static func selection(_ catalog: LoadedCatalog, _ id: String, settings: [String: String] = [:], scope: String = "pilot") -> GeneratedSelection {
-        GeneratedSelection(block: catalog.block(id: id)!, settings: settings, scope: scope)
+    static func selection(
+        _ catalog: LoadedCatalog, _ id: String, settings: [String: String] = [:], scope: String? = nil
+    ) -> GeneratedSelection {
+        let block = catalog.block(id: id)!
+        return GeneratedSelection(
+            block: block, settings: settings,
+            providedScope: (scope ?? block.scope.default).flatMap(ProvidedObject.init(reference:)),
+            providedCategory: block.defaultCategory.flatMap(ProvidedObject.init(reference:)))
     }
 
     static func metadata(_ json: String) throws -> BlockMetadata {
@@ -133,8 +156,8 @@ struct GeneratorTests {
         let input = WorkspaceInput(
             namePrefix: "JD - ",
             selections: [
-                GeneratedSelection(block: provider, settings: [:], scope: "pilot"),
-                GeneratedSelection(block: consumer, settings: [:], scope: "pilot"),
+                GeneratedSelection(block: provider, settings: [:]),
+                GeneratedSelection(block: consumer, settings: [:]),
             ],
             providerVersion: "1.5.0"
         )
@@ -149,7 +172,7 @@ struct GeneratorTests {
             #"{"id": "cap-policies", "name": "Policies", "needs": {"script": ["Missing Script"]}}"#)
         let input = WorkspaceInput(
             namePrefix: "JD - ",
-            selections: [GeneratedSelection(block: consumer, settings: [:], scope: "pilot")],
+            selections: [GeneratedSelection(block: consumer, settings: [:])],
             providerVersion: "1.5.0"
         )
         #expect(throws: WorkspaceGeneratorError.self) {
@@ -168,7 +191,7 @@ struct GeneratorTests {
                 .write(to: folder.appending(path: "settings.tf"))
             selections.append(GeneratedSelection(
                 block: try Self.metadata(#"{"id": "\#(id)", "name": "\#(id)"}"#),
-                settings: [:], scope: "pilot", folderURL: folder))
+                settings: [:], folderURL: folder))
         }
         let output = try WorkspaceGenerator.generate(WorkspaceInput(
             namePrefix: "JD - ", selections: selections, providerVersion: "1.5.0"))
@@ -188,12 +211,13 @@ struct GeneratorTests {
         let input = WorkspaceInput(
             namePrefix: "JD - ",
             selections: [
-                Self.selection(catalog, "foundation"),
+                Self.selection(catalog, "device-groups"),
+                Self.selection(catalog, "categories"),
                 Self.selection(catalog, "enrollment", settings: ["ade_instance_name": "Apple Business Manager"]),
                 Self.selection(catalog, "filevault"),
-                Self.selection(catalog, "software-updates"),
-                Self.selection(catalog, "compliance-cis-l1"),
-                Self.selection(catalog, "rosetta", scope: "apple_silicon"),
+                Self.selection(catalog, "software-updates", scope: "device-groups/Pilot"),
+                Self.selection(catalog, "compliance-cis-l1", scope: "device-groups/Pilot"),
+                Self.selection(catalog, "rosetta"),
             ],
             providerVersion: "1.5.0"
         )
@@ -201,24 +225,51 @@ struct GeneratorTests {
 
         #expect(output.providersTF.contains("impact_alerts = true"))
         #expect(!output.providersTF.contains("jamfprotect"), "no Protect provider without Protect blocks")
-        #expect(output.mainTF.contains(#"module "foundation""#))
-        #expect(output.mainTF.contains("scope_jamf_pro_group_id = module.foundation.pilot_jamf_pro_id"))
-        #expect(output.mainTF.contains("scope_platform_group_uuid = module.foundation.pilot_platform_uuid"))
-        #expect(output.mainTF.contains("module.foundation.apple_silicon_jamf_pro_id"))
+        #expect(output.mainTF.contains(#"scope_jamf_pro_group_id = module.device_groups.device_group_jamf_pro_ids["Pilot"]"#))
+        #expect(output.mainTF.contains(#"module.device_groups.device_group_ids["Pilot"]"#), "Platform-scoped blocks take Platform group IDs")
+        #expect(output.mainTF.contains(#"module.device_groups.device_group_jamf_pro_ids["Apple Silicon Macs"]"#))
+        #expect(output.mainTF.contains(#"category_id             = module.categories.category_ids["Security"]"#))
         let normalized = output.mainTF.replacingOccurrences(of: " +", with: " ", options: .regularExpression)
         #expect(normalized.contains(#"ade_instance_name = "Apple Business Manager""#))
-        #expect(output.mainTF.contains("category_id"))
         #expect(output.secretVariableNames.isEmpty)
+    }
+
+    @Test func jamfProTenantsUseEachBlocksJamfProModule() throws {
+        let catalog = try Self.catalog()
+        let selections = try WorkspaceGenerator.resolveModules(
+            [Self.selection(catalog, "device-groups"), Self.selection(catalog, "categories"),
+             Self.selection(catalog, "filevault"), Self.selection(catalog, "protect-baseline")],
+            catalog: catalog, connection: .jamfPro)
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ", selections: selections, providerVersion: "1.5.0", connection: .jamfPro))
+        #expect(output.providersTF.contains(#"source  = "deploymenttheory/jamfpro""#))
+        #expect(!output.providersTF.contains("jamfplatform"))
+        #expect(output.providersTF.contains(#"provider "jamfprotect""#))
+        #expect(output.mainTF.contains(#"source"#) && output.mainTF.contains(#""./modules/filevault/jamfpro""#))
+        // A block without Jamf resources keeps its own folder.
+        #expect(output.mainTF.contains(#""./modules/protect-baseline""#))
+        #expect(output.mainTF.contains(#"module.device_groups.device_group_jamf_pro_ids["Pilot"]"#))
+
+        // Blocks with no Jamf Pro API module are refused by name.
+        #expect {
+            try WorkspaceGenerator.resolveModules(
+                [Self.selection(catalog, "software-updates", scope: "device-groups/Pilot")],
+                catalog: catalog, connection: .jamfPro)
+        } throws: { error in
+            if case WorkspaceGeneratorError.unsupportedConnection(block: "Software Updates", connection: .jamfPro) = error { return true }
+            return false
+        }
+        // Platform tenants keep the main module.
+        let platform = try WorkspaceGenerator.resolveModules(
+            [Self.selection(catalog, "filevault")], catalog: catalog, connection: .platform)
+        #expect(platform.first?.modulePath == "")
     }
 
     @Test func emitsProtectProviderForProtectBlocks() throws {
         let catalog = try Self.catalog()
         let input = WorkspaceInput(
             namePrefix: "JD - ",
-            selections: [
-                Self.selection(catalog, "foundation"),
-                Self.selection(catalog, "protect-baseline"),
-            ],
+            selections: [Self.selection(catalog, "protect-baseline")],
             providerVersion: "1.5.0"
         )
         let output = try WorkspaceGenerator.generate(input)
@@ -226,7 +277,7 @@ struct GeneratorTests {
         #expect(output.providersTF.contains(#"provider "jamfprotect""#))
     }
 
-    @Test func refusesBaselineWithoutFoundation() throws {
+    @Test func refusesScopeFromAnUnselectedBlock() throws {
         let catalog = try Self.catalog()
         let input = WorkspaceInput(
             namePrefix: "JD - ",
@@ -243,7 +294,6 @@ struct GeneratorTests {
         let input = WorkspaceInput(
             namePrefix: "JD - ",
             selections: [
-                Self.selection(catalog, "foundation"),
                 Self.selection(catalog, "enrollment"), // ade_instance_name missing
             ],
             providerVersion: "1.5.0"
@@ -291,39 +341,37 @@ struct AppCatalogTests {
         let input = WorkspaceInput(
             namePrefix: "JD - ",
             selections: [
-                GeneratedSelection(block: catalog.block(id: "foundation")!, settings: [:], scope: "pilot"),
-                GeneratedSelection(block: catalog.block(id: "app-catalog")!, settings: ["apps_json": apps], scope: "all_macs"),
+                GeneratedSelection(block: catalog.block(id: "device-groups")!, settings: [:]),
+                GeneratedSelection(block: catalog.block(id: "app-catalog")!, settings: ["apps_json": apps],
+                                   providedScope: ProvidedObject(blockID: "device-groups", name: "All Managed Macs")),
             ],
             providerVersion: "1.5.0"
         )
         let output = try WorkspaceGenerator.generate(input)
-        #expect(output.mainTF.contains("module.foundation.all_macs_jamf_pro_id"))
+        #expect(output.mainTF.contains(#"module.device_groups.device_group_jamf_pro_ids["All Managed Macs"]"#))
         #expect(output.mainTF.contains("titleName") && output.mainTF.contains("Google Chrome"))
     }
 
-    @Test func existingGroupAndCategoryNeedNoFoundation() throws {
+    @Test func existingGroupAndCategory() throws {
         let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
         let block = try #require(catalog.block(id: "app-catalog"))
         let selection = GeneratedSelection(
-            block: block, settings: [:], scope: "",
+            block: block, settings: [:],
             existingScopeID: "1", existingCategoryID: "467")
-        #expect(!selection.wiresThroughFoundation)
         let output = try WorkspaceGenerator.generate(WorkspaceInput(
             namePrefix: "JD - ", selections: [selection], providerVersion: "1.5.0"))
         #expect(output.mainTF.contains(/scope_jamf_pro_group_id\s*=\s*"1"/))
         #expect(output.mainTF.contains(/category_id\s*=\s*"467"/))
-        #expect(!output.mainTF.contains("module.foundation"))
     }
 
-    @Test func existingGroupWithFoundationCategoryStillNeedsFoundation() throws {
+    @Test func unchosenCategoryMeansNoCategory() throws {
         let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
         let block = try #require(catalog.block(id: "app-catalog"))
-        let selection = GeneratedSelection(block: block, settings: [:], scope: "", existingScopeID: "1")
-        #expect(selection.wiresThroughFoundation)
-        #expect(throws: WorkspaceGeneratorError.self) {
-            try WorkspaceGenerator.generate(WorkspaceInput(
-                namePrefix: "JD - ", selections: [selection], providerVersion: "1.5.0"))
-        }
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ",
+            selections: [GeneratedSelection(block: block, settings: [:], existingScopeID: "1")],
+            providerVersion: "1.5.0"))
+        #expect(output.mainTF.contains(/category_id\s*=\s*"-1"/))
     }
 
     @Test func unchosenScopeIsReported() throws {
@@ -331,10 +379,7 @@ struct AppCatalogTests {
         let block = try #require(catalog.block(id: "app-catalog"))
         let input = WorkspaceInput(
             namePrefix: "JD - ",
-            selections: [
-                GeneratedSelection(block: catalog.block(id: "foundation")!, settings: [:], scope: "pilot"),
-                GeneratedSelection(block: block, settings: [:], scope: ""),
-            ],
+            selections: [GeneratedSelection(block: block, settings: [:])],
             providerVersion: "1.5.0")
         #expect {
             try WorkspaceGenerator.generate(input)
@@ -344,11 +389,11 @@ struct AppCatalogTests {
         }
     }
 
-    @Test func presetsCarryOnlyFoundationScopes() throws {
+    @Test func presetsLeaveTenantSpecificScopesOut() throws {
         let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
         let preset = Preset.capturing(
             name: "Mixed", summary: "",
-            selections: [.init(blockID: "app-catalog", settings: [:], scope: "")],
+            selections: [.init(blockID: "app-catalog", settings: [:])],
             blocks: catalog.blocks)
         #expect(preset.scopes.isEmpty)
     }
@@ -360,13 +405,12 @@ struct AppCatalogTests {
         groups.provides = ["device_group": ["All Macs"], "category": ["Apps"]]
         let appCatalog = try #require(catalog.block(id: "app-catalog"))
         let selection = GeneratedSelection(
-            block: appCatalog, settings: [:], scope: "",
+            block: appCatalog, settings: [:],
             providedScope: ProvidedObject(blockID: "device-groups", name: "All Macs"),
             providedCategory: ProvidedObject(blockID: "device-groups", name: "Apps"))
-        #expect(!selection.wiresThroughFoundation)
         let output = try WorkspaceGenerator.generate(WorkspaceInput(
             namePrefix: "JD - ",
-            selections: [GeneratedSelection(block: groups, settings: [:], scope: ""), selection],
+            selections: [GeneratedSelection(block: groups, settings: [:]), selection],
             providerVersion: "1.5.0"))
         #expect(output.mainTF.contains(#"module.device_groups.device_group_jamf_pro_ids["All Macs"]"#))
         #expect(output.mainTF.contains(#"module.device_groups.category_ids["Apps"]"#))
@@ -387,8 +431,8 @@ struct AppCatalogTests {
         let preset = Preset.capturing(
             name: "Wired", summary: "",
             selections: [
-                .init(blockID: "device-groups", settings: [:], scope: ""),
-                .init(blockID: "app-catalog", settings: [:], scope: "",
+                .init(blockID: "device-groups", settings: [:]),
+                .init(blockID: "app-catalog", settings: [:],
                       providedScope: ProvidedObject(blockID: "device-groups", name: "All Macs"),
                       providedCategory: ProvidedObject(blockID: "elsewhere", name: "Apps")),
             ],
@@ -430,13 +474,24 @@ struct DriftReportTests {
     }
 }
 
+@Suite("Drift field comparison")
+struct DriftFieldTests {
+    @Test func unsetAndEmptyListsAreTheSame() {
+        let before = JSONValue.object(["scope": .object(["computer_group_ids": .array([.number(5)]), "building_ids": .null])])
+        let after = JSONValue.object(["scope": .object(["computer_group_ids": .array([.number(5)]), "building_ids": .array([])])])
+        #expect(DriftReportBuilder.deepFieldDiffs(before: before, after: after).isEmpty)
+        let changed = JSONValue.object(["scope": .object(["computer_group_ids": .array([.number(6)]), "building_ids": .array([])])])
+        #expect(DriftReportBuilder.deepFieldDiffs(before: before, after: changed).map(\.path) == ["scope.computer_group_ids"])
+    }
+}
+
 @Suite("Block removals")
 struct RemovalTests {
     @Test func emitsRemovedBlockForStopManaging() throws {
         let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
         let input = WorkspaceInput(
             namePrefix: "JD - ",
-            selections: [GeneratedSelection(block: catalog.block(id: "foundation")!, settings: [:], scope: "pilot")],
+            selections: [GeneratedSelection(block: catalog.block(id: "device-groups")!, settings: [:])],
             providerVersion: "1.5.0",
             removals: [
                 BlockRemoval(blockID: "rosetta", keepInJamf: true),
@@ -450,18 +505,18 @@ struct RemovalTests {
         #expect(!output.mainTF.contains("module.filevault"))
     }
 
-    @Test func handOverGeneratesWithoutFoundation() throws {
+    @Test func handOverReleasesEveryBlock() throws {
         let input = WorkspaceInput(
             namePrefix: "JD - ",
             selections: [],
             providerVersion: "1.5.0",
             removals: [
-                BlockRemoval(blockID: "foundation", keepInJamf: true),
+                BlockRemoval(blockID: "device-groups", keepInJamf: true),
                 BlockRemoval(blockID: "rosetta", keepInJamf: true),
             ]
         )
         let output = try WorkspaceGenerator.generate(input)
-        #expect(output.mainTF.contains("from = module.foundation"))
+        #expect(output.mainTF.contains("from = module.device_groups"))
         #expect(output.mainTF.contains("from = module.rosetta"))
     }
 }
@@ -609,7 +664,7 @@ struct BlockCaptureTests {
         #expect(local.contains("criteria = jamfplatform_pro_computer_extension_attribute.rosetta_installed.name"))
     }
 
-    @Test func foundationRebindKeepsCrossBlockWiring() throws {
+    @Test func perTenantCaptureKeepsCrossBlockWiring() throws {
         let destination = FileManager.default.temporaryDirectory
             .appending(path: "rebind-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: destination) }
@@ -618,7 +673,7 @@ struct BlockCaptureTests {
         try FileManager.default.copyItem(at: exportFixtureURL(), to: full)
         defer { try? FileManager.default.removeItem(at: full) }
 
-        // Split capture with foundation rebind: scope and category collapse
+        // Split capture with per-tenant scope: scope and category collapse
         // to the block settings, but the script and package the policy uses
         // live in other blocks and must stay wired.
         let staging = FileManager.default.temporaryDirectory
@@ -632,7 +687,7 @@ struct BlockCaptureTests {
         let result = try BlockCapture.capture(BlockCapture.Request(
             blockID: "rebind-policy",
             name: "Policy",
-            summary: "Policy slice, rebound to Foundation.",
+            summary: "Policy slice with a per-tenant scope.",
             namePrefix: "JD - ",
             sourceDirectory: staging,
             catalogRootDirectory: destination,
@@ -900,7 +955,7 @@ struct CatalogMergeTests {
         #expect(official.blocks.allSatisfy { merged.sourceIDByBlockID[$0.id] == nil })
         #expect(merged.block(id: "captured-rosetta") != nil)
         #expect(merged.sourceName(for: "captured-rosetta") == "My Blocks")
-        #expect(merged.sourceName(for: "foundation") == "Built-in")
+        #expect(merged.sourceName(for: "device-groups") == "Built-in")
         #expect(merged.blockFolderURL(id: "captured-rosetta").path.contains("custom-source"))
     }
 }
@@ -1223,6 +1278,21 @@ struct CreateFailureRecoveryTests {
         return try JSONDecoder().decode(EngineStreamEvent.Diagnostic.self, from: Data(json.utf8))
     }
 
+    @Test func recognizesJamfProPluginFailures() throws {
+        let plan = try JSONDecoder().decode(PlanFile.self, from: Data(#"""
+        {"format_version":"1.2","resource_changes":[
+          {"address":"module.cap.jamfpro_policy.flush_dns","type":"jamfpro_policy","name":"flush_dns",
+           "change":{"actions":["create"],"after":{"name":"Flush DNS cache"}}}
+        ]}
+        """#.utf8))
+        let failed = try Self.diagnostic("module.cap.jamfpro_policy.flush_dns",
+            "failed to create Jamf Pro Policy 'Flush DNS cache' after retries: {\\\"status_code\\\":502,\\\"method\\\":\\\"POST\\\"}", "")
+        let conflict = try Self.diagnostic("module.cap.jamfpro_policy.flush_dns",
+            "failed to create Jamf Pro Policy 'Flush DNS cache' after retries: {\\\"status_code\\\":409}", "")
+        #expect(CreateFailureRecovery.candidates(diagnostics: [failed], plan: plan).map(\.name) == ["Flush DNS cache"])
+        #expect(CreateFailureRecovery.candidates(diagnostics: [conflict], plan: plan).isEmpty)
+    }
+
     @Test func picksOnlyRecoverableServerErrorsOnCreate() throws {
         let plan = try JSONDecoder().decode(PlanFile.self, from: Data(Self.plan.utf8))
         let diagnostics = [
@@ -1306,7 +1376,7 @@ struct PresetCaptureTests {
                      {"key":"api_key","type":"secret"}]}
         """#.utf8)),
         try! JSONDecoder().decode(BlockMetadata.self, from: Data(#"""
-        {"id":"rosetta","name":"Rosetta","scope":{"kind":"jamfProGroup","variable":"scope_jamf_pro_group_id","default":"apple_silicon"},"settings":[]}
+        {"id":"rosetta","name":"Rosetta","scope":{"kind":"jamfProGroup","variable":"scope_jamf_pro_group_id","default":"device-groups/Apple Silicon Macs"},"settings":[]}
         """#.utf8)),
     ]
 
@@ -1315,21 +1385,22 @@ struct PresetCaptureTests {
             name: "Office Macs — 2026",
             summary: "Our standard.",
             selections: [
-                .init(blockID: "checkin", settings: ["check_in_frequency": "30", "api_key": "s3cret"], scope: "pilot"),
-                .init(blockID: "rosetta", settings: [:], scope: "laptops"),
+                .init(blockID: "device-groups", settings: [:]),
+                .init(blockID: "checkin", settings: ["check_in_frequency": "30", "api_key": "s3cret"]),
+                .init(blockID: "rosetta", settings: [:], providedScope: ProvidedObject(blockID: "device-groups", name: "Laptops")),
             ],
             blocks: Self.blocks)
         #expect(preset.id == "office-macs-2026")
-        #expect(preset.blocks == ["checkin", "rosetta"])
+        #expect(preset.blocks == ["device-groups", "checkin", "rosetta"])
         #expect(preset.defaults == ["checkin": ["check_in_frequency": "30"]])
-        #expect(preset.scopes == ["rosetta": "laptops"])
+        #expect(preset.scopes == ["rosetta": "device-groups/Laptops"])
 
-        // Round-trips through JSON; files without scopes still decode.
+        // Round-trips through JSON; presets without scopes decode.
         let data = try JSONEncoder().encode(preset)
         #expect(!String(decoding: data, as: UTF8.self).contains("s3cret"))
         #expect(try JSONDecoder().decode(Preset.self, from: data) == preset)
-        let legacy = try JSONDecoder().decode(Preset.self, from: Data(#"{"id":"minimal","blocks":["foundation"]}"#.utf8))
-        #expect(legacy.scopes.isEmpty)
+        let minimal = try JSONDecoder().decode(Preset.self, from: Data(#"{"id":"minimal","blocks":["device-groups"]}"#.utf8))
+        #expect(minimal.scopes.isEmpty)
     }
 
     @Test func savedPresetLoadsFromAFolderSource() throws {
@@ -1340,7 +1411,10 @@ struct PresetCaptureTests {
 
         let preset = Preset.capturing(
             name: "Office Macs", summary: "",
-            selections: [.init(blockID: "rosetta", settings: [:], scope: "laptops")],
+            selections: [
+                .init(blockID: "device-groups", settings: [:]),
+                .init(blockID: "rosetta", settings: [:], providedScope: ProvidedObject(blockID: "device-groups", name: "Laptops")),
+            ],
             blocks: Self.blocks)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -1348,14 +1422,17 @@ struct PresetCaptureTests {
 
         let catalog = try LoadedCatalog.load(from: root)
         #expect(catalog.presets == [preset])
-        #expect(catalog.presets.first?.scopes["rosetta"] == "laptops")
+        #expect(catalog.presets.first?.scopes["rosetta"] == "device-groups/Laptops")
     }
 
     @Test func unchangedDefaultsStayOut() {
         let preset = Preset.capturing(
             name: "", summary: "",
-            selections: [.init(blockID: "checkin", settings: ["check_in_frequency": "15"], scope: "pilot"),
-                         .init(blockID: "rosetta", settings: [:], scope: "apple_silicon")],
+            selections: [
+                .init(blockID: "device-groups", settings: [:]),
+                .init(blockID: "checkin", settings: ["check_in_frequency": "15"]),
+                .init(blockID: "rosetta", settings: [:], providedScope: ProvidedObject(blockID: "device-groups", name: "Apple Silicon Macs")),
+            ],
             blocks: Self.blocks)
         #expect(preset.id == "preset")
         #expect(preset.defaults.isEmpty)
@@ -1567,25 +1644,18 @@ struct MobileDeviceTests {
 
         let existing = try WorkspaceGenerator.generate(WorkspaceInput(
             namePrefix: "",
-            selections: [GeneratedSelection(block: block, settings: [:], scope: "", existingScopeID: "2")], providerVersion: "1.5.0"))
+            selections: [GeneratedSelection(block: block, settings: [:], existingScopeID: "2")], providerVersion: "1.5.0"))
         #expect(existing.mainTF.contains(/scope_jamf_pro_mobile_group_id\s*=\s*"2"/))
 
         let provided = try WorkspaceGenerator.generate(WorkspaceInput(
             namePrefix: "",
             selections: [
-                GeneratedSelection(block: groups, settings: [:], scope: ""),
-                GeneratedSelection(block: block, settings: [:], scope: "",
+                GeneratedSelection(block: groups, settings: [:]),
+                GeneratedSelection(block: block, settings: [:],
                                    providedScope: ProvidedObject(blockID: "mobile-groups", name: "Supervised iPads")),
             ], providerVersion: "1.5.0"))
         #expect(provided.mainTF.contains(#"module.mobile_groups.device_group_jamf_pro_ids["Supervised iPads"]"#))
 
-        // Foundation never provided mobile groups.
-        #expect(throws: WorkspaceGeneratorError.self) {
-            try WorkspaceGenerator.generate(WorkspaceInput(
-                namePrefix: "",
-            selections: [GeneratedSelection(block: catalog.block(id: "foundation")!, settings: [:], scope: ""),
-                             GeneratedSelection(block: block, settings: [:], scope: "all_macs")], providerVersion: "1.5.0"))
-        }
     }
 
     @Test func adoptionProtectsPreStageSectionsTheExportLeavesOut() throws {
@@ -1740,17 +1810,11 @@ struct JamfProConnectionTests {
         #expect(output.secretVariableNames.isEmpty)
     }
 
-    @Test func jamfProTenantsRefuseCatalogBlocks() throws {
-        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
-        let block = try #require(catalog.blocks.first)
-        #expect(throws: WorkspaceGeneratorError.self) {
-            try WorkspaceGenerator.generate(WorkspaceInput(
-                namePrefix: "JD - ",
-                selections: [GeneratedSelection(block: block, settings: [:], scope: "")],
-                providerVersion: "1.5.0",
-                connection: .jamfPro
-            ))
-        }
+    @Test func jamfProWorkspaceHasNoPlatformPlugin() throws {
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ", selections: [], providerVersion: "1.5.0", connection: .jamfPro))
+        #expect(!output.providersTF.contains("jamfplatform"))
+        #expect(!output.providersTF.contains("jamfprotect"))
     }
 
     @Test func adoptStagingHandlesJamfProObjects() throws {

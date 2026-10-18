@@ -1,0 +1,41 @@
+{
+  "alwaysOn": false,
+  "category": "Core",
+  "conflicts": [],
+  "id": "extension-attributes",
+  "jamfProPermissions": [
+    "Create Computer Extension Attributes",
+    "Read Computer Extension Attributes",
+    "Update Computer Extension Attributes",
+    "Delete Computer Extension Attributes"
+  ],
+  "minJamfProVersion": "11.31.0",
+  "name": "Extension Attributes",
+  "objectsCreated": [
+    "2 computer extension attributes (Baseline Marker, Deployment Ring)"
+  ],
+  "permissions": [
+    "extension-attributes:create",
+    "extension-attributes:read",
+    "extension-attributes:update",
+    "extension-attributes:delete"
+  ],
+  "products": [
+    "jamf-pro",
+    "jamf-platform"
+  ],
+  "provides": {
+    "extension_attribute": [
+      "Baseline Marker",
+      "Deployment Ring"
+    ]
+  },
+  "requires": [],
+  "risk": "low",
+  "scope": {
+    "kind": "none"
+  },
+  "settings": [],
+  "summary": "A Baseline Marker text attribute and a Deployment Ring pop-up (Pilot or Production) for reporting and targeting.",
+  "version": "1.1.0"
+}

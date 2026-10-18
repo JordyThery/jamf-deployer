@@ -1,0 +1,49 @@
+{
+  "alwaysOn": false,
+  "category": "Core",
+  "conflicts": [],
+  "id": "device-groups",
+  "jamfProPermissions": [
+    "Create Static Computer Groups",
+    "Read Static Computer Groups",
+    "Update Static Computer Groups",
+    "Delete Static Computer Groups",
+    "Create Smart Computer Groups",
+    "Read Smart Computer Groups",
+    "Update Smart Computer Groups",
+    "Delete Smart Computer Groups"
+  ],
+  "minJamfProVersion": "11.31.0",
+  "name": "Device Groups",
+  "objectsCreated": [
+    "1 static device group (Pilot)",
+    "4 smart device groups (All Managed Macs, Laptops, Desktops, Apple Silicon Macs)"
+  ],
+  "permissions": [
+    "device-groups:create",
+    "device-groups:read",
+    "device-groups:update",
+    "device-groups:delete"
+  ],
+  "products": [
+    "jamf-pro",
+    "jamf-platform"
+  ],
+  "provides": {
+    "device_group": [
+      "All Managed Macs",
+      "Apple Silicon Macs",
+      "Desktops",
+      "Laptops",
+      "Pilot"
+    ]
+  },
+  "requires": [],
+  "risk": "low",
+  "scope": {
+    "kind": "none"
+  },
+  "settings": [],
+  "summary": "A static Pilot group and smart groups for all Macs, laptops, desktops and Apple silicon — the groups other blocks scope to.",
+  "version": "1.1.0"
+}
