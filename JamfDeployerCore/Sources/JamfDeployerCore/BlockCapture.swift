@@ -311,6 +311,29 @@ public nonisolated enum BlockCapture {
                 return "vpp_admin_account_id\(match[1])= data.jamfplatform_pro_volume_purchasing_location.apps_and_books.id"
             }
 
+            // Enrollment customizations: icons are localized after export
+            // (EnrollmentIcons); one still on the origin's URL is flagged.
+            // LDAP panes name the origin's directory server; SSO panes need
+            // single sign-on on the destination.
+            if text.contains("resource \"jamfplatform_pro_enrollment_customization\"") {
+                let blocks = ExportedObjectInventory.topLevelBlocks(in: text).map { block -> String in
+                    guard block.hasPrefix("resource \"jamfplatform_pro_enrollment_customization\"") else { return block }
+                    var block = block
+                    if block.range(of: #"\n\s*icon_url\s*=\s*"https://"#, options: .regularExpression) != nil {
+                        warnings.append("An enrollment customization's icon stays hosted on the origin tenant: the export could not download it. Upload the icon on each tenant to make it independent.")
+                    }
+                    if block.contains("\n  ldap_panes = ") {
+                        block = Self.removingAttribute("ldap_panes", from: block)
+                        warnings.append("Left out the LDAP pane of an enrollment customization: it names the origin tenant's directory server. Add it again on each tenant after deploying.")
+                    }
+                    if block.contains("\n  sso_panes = ") {
+                        warnings.append("An enrollment customization includes a single sign-on pane: each tenant it deploys to needs single sign-on configured for enrollment.")
+                    }
+                    return block
+                }
+                text = blocks.joined(separator: "\n\n") + "\n"
+            }
+
             // Jamf never exports Recovery Lock passwords; a PreStage that
             // enables Recovery Lock without a non-empty one cannot be created.
             if text.contains("prestage_enrollment") {
@@ -1269,6 +1292,23 @@ public nonisolated enum BlockCapture {
     }
 
     /// Regex replacement with a closure; returning nil keeps the original.
+    /// Removes a top-level attribute (`  name = …`, including a bracketed
+    /// or braced multi-line value) from a resource block.
+    static func removingAttribute(_ name: String, from block: String) -> String {
+        var lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let start = lines.firstIndex(where: { $0.hasPrefix("  \(name) ") || $0.hasPrefix("  \(name)=") }) else { return block }
+        var end = start
+        var depth = 0
+        for index in start..<lines.count {
+            depth += lines[index].filter { $0 == "[" || $0 == "{" }.count
+            depth -= lines[index].filter { $0 == "]" || $0 == "}" }.count
+            end = index
+            if depth <= 0 { break }
+        }
+        lines.removeSubrange(start...end)
+        return lines.joined(separator: "\n")
+    }
+
     static func replacing(in text: String, pattern: String, transform: ([String]) -> String?) -> String {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
         var result = text

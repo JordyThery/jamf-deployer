@@ -308,6 +308,8 @@ struct ExportView: View {
                     }
                     return
                 }
+                // Captured blocks carry their own copy of enrollment icons.
+                await EnrollmentIcons.localize(directory: result.outputURL)
                 exportResult = result
                 session.exportedTypes = types
                 adoptResult(result, types: types)

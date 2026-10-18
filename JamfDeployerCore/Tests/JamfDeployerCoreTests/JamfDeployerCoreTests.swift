@@ -1577,6 +1577,42 @@ struct MobileDeviceTests {
         #expect(ErrorTranslation.translate("409 Conflict: App is not available for device assignment").message.contains("Apps and Books"))
     }
 
+    @Test func enrollmentCustomizationsLeaveOriginSpecificPartsBehind() throws {
+        let source = FileManager.default.temporaryDirectory.appending(path: "ec-src-\(UUID().uuidString)")
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "ec-dst-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source); try? FileManager.default.removeItem(at: catalog) }
+        try Data("""
+        resource "jamfplatform_pro_enrollment_customization" "welcome" {
+          branding_settings = {
+            background_color  = "FFFFFF"
+            icon_url          = "https://origin.jamfcloud.com/api/v2/enrollment-customizations/images/1"
+          }
+          display_name = "Welcome"
+          ldap_panes = [
+            {
+              display_name = "Sign in"
+              directory_service_groups = [
+                {
+                  directory_service_server_id = "3"
+                  group_name                  = "Staff"
+                },
+              ]
+            },
+          ]
+        }
+        """.utf8).write(to: source.appending(path: "pro_enrollment_customization.tf"))
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "ec", name: "EC", summary: "", namePrefix: "",
+            sourceDirectory: source, catalogRootDirectory: catalog))
+        let text = try String(contentsOf: result.blockFolderURL.appending(path: "pro_enrollment_customization.tf"), encoding: .utf8)
+        #expect(!text.contains("ldap_panes"))
+        #expect(!text.contains("directory_service_server_id"))
+        #expect(text.contains("display_name = \"Welcome\""))
+        #expect(result.warnings.contains { $0.contains("LDAP pane") })
+        #expect(result.warnings.contains { $0.contains("hosted on the origin tenant") })
+    }
+
     @Test func catalogsSkipBlocksFromNewerVersions() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "future-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
