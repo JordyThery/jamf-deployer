@@ -58,7 +58,12 @@ struct AdoptView: View {
         }
         .frame(width: 680, height: 560)
         .task {
-            resourceTypes = (try? await runner.listResourceTypes(provider: "jamfplatform")) ?? []
+            resourceTypes = (try? await runner.listResourceTypes(provider: tenant.connection.exporterProvider)) ?? []
+            // The defaults are Jamf Platform API type names; keep only the
+            // ones this connection offers.
+            if !resourceTypes.isEmpty {
+                selectedTypes.formIntersection(resourceTypes.map(\.filterKey))
+            }
         }
     }
 
@@ -248,6 +253,7 @@ struct AdoptView: View {
                 let result = try await runner.export(
                     tenant: tenant,
                     clientSecret: secret,
+                    provider: tenant.connection.exporterProvider,
                     includeResources: types,
                     includePackageFiles: false,
                     terraformPath: terraformURL.path,

@@ -37,7 +37,7 @@ actor JamformerRunner {
         for line in output.logLines {
             let columns = line.split(separator: " ", omittingEmptySubsequences: true)
             guard columns.count >= 2,
-                  columns[1].hasPrefix("jamfplatform_") || columns[1].hasPrefix("jamfprotect_"),
+                  ["jamfplatform_", "jamfprotect_", "jamfpro_"].contains(where: { columns[1].hasPrefix($0) }),
                   !line.contains("FILTER KEY")
             else { continue }
             types.append(ResourceType(filterKey: String(columns[0]), terraformType: String(columns[1])))
@@ -99,6 +99,17 @@ actor JamformerRunner {
                 "JAMF_CLIENT_ID": tenant.protectClientID ?? "",
                 "JAMF_CLIENT_SECRET": clientSecret,
             ]
+        } else if provider == "jamfpro" {
+            // Jamf Pro API exports talk to the instance itself.
+            environment = ["JAMF_URL": JamfAPIConfiguration.instanceURL(tenant.jamfProURL ?? "")?.absoluteString ?? ""]
+            switch tenant.jamfProAuth ?? .apiClient {
+            case .apiClient:
+                environment["JAMF_CLIENT_ID"] = tenant.clientID
+                environment["JAMF_CLIENT_SECRET"] = clientSecret
+            case .userAccount:
+                environment["JAMF_USERNAME"] = tenant.clientID
+                environment["JAMF_PASSWORD"] = clientSecret
+            }
         } else {
             environment = [
                 "JAMF_URL": tenant.region.gatewayURL.absoluteString,
@@ -119,7 +130,7 @@ actor JamformerRunner {
         // "No resources to query". Retry with a small searchable helper type
         // and drop its files from the result.
         if result.exitCode != 0,
-           provider != "jamfprotect",
+           provider == "jamfplatform",
            !includeResources.contains("category"),
            let events = try? String(contentsOf: outputURL.appending(path: "query_events.json"), encoding: .utf8),
            events.contains("No resources to query") {

@@ -59,6 +59,12 @@ public nonisolated enum ExportedObjectInventory {
     /// referencing values Jamf never exports (tokens, passwords — variables
     /// with neither a default nor a tfvars value) and types the provider
     /// cannot express as exported. Adopting them would break the preview.
+    /// Enrollment invitations are tenant-specific and cannot be managed as exported.
+    static let invitationTypes: Set<String> = [
+        "jamfplatform_pro_computer_invitation", "jamfplatform_pro_mobile_device_invitation",
+        "jamfpro_computer_invitation", "jamfpro_mobile_device_invitation",
+    ]
+
     public static func unmanageable(directory: URL) -> [String: String] {
         let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
         let values = BlockCapture.parseTfvars(at: directory.appending(path: "terraform.tfvars"))
@@ -73,7 +79,7 @@ public nonisolated enum ExportedObjectInventory {
             for block in topLevelBlocks(in: text) {
                 guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) else { continue }
                 let address = "\(header.1).\(header.2)"
-                if header.1 == "jamfplatform_pro_computer_invitation" || header.1 == "jamfplatform_pro_mobile_device_invitation" {
+                if Self.invitationTypes.contains(String(header.1)) {
                     result[address] = "enrollment invitations cannot be managed as exported"
                     continue
                 }
@@ -136,7 +142,7 @@ public nonisolated enum ExportedObjectInventory {
         guard !leftOut.isEmpty else { return }
         for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf") {
             let text = try String(contentsOf: file, encoding: .utf8)
-            let updated = BlockCapture.replacing(in: text, pattern: #"\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.id\b"#) { match in
+            let updated = BlockCapture.replacing(in: text, pattern: #"\b((?:jamfplatform|jamfpro)_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.id\b"#) { match in
                 leftOut[match[1]].map { "\"\($0)\"" }
             }
             if updated != text { try Data(updated.utf8).write(to: file) }
@@ -163,7 +169,7 @@ public nonisolated enum ExportedObjectInventory {
         }
         func requiredReferences(of address: String) -> Set<String> {
             guard let block = blocks[address] else { return [] }
-            return Set(block.matches(of: /\b(jamfplatform_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.([a-z_]+)\b/)
+            return Set(block.matches(of: /\b((?:jamfplatform|jamfpro)_[a-z0-9_]+\.[A-Za-z0-9_-]+)\.([a-z_]+)\b/)
                 .filter { $0.2 != "id" }
                 .map { String($0.1) }
                 .filter { blocks[$0] != nil && !alreadyManaged.contains($0) })
@@ -233,8 +239,10 @@ public nonisolated enum ExportedObjectInventory {
                 options: .regularExpression
             )
             // The workspace defines the provider itself.
-            text = text.replacingOccurrences(of: "  provider = jamfplatform\n\n", with: "")
-            text = text.replacingOccurrences(of: "  provider = jamfplatform\n", with: "")
+            for name in ["jamfplatform", "jamfpro"] {
+                text = text.replacingOccurrences(of: "  provider = \(name)\n\n", with: "")
+                text = text.replacingOccurrences(of: "  provider = \(name)\n", with: "")
+            }
             try Data(text.utf8).write(to: file)
         }
     }
@@ -246,6 +254,8 @@ public nonisolated enum ExportedObjectInventory {
     static let omittablePreStageSections: [String: [String]] = [
         "jamfplatform_pro_computer_prestage_enrollment": ["account_settings", "location_information", "purchasing_information", "skip_setup_items"],
         "jamfplatform_pro_mobile_device_prestage_enrollment": ["location_information", "names", "purchasing_information", "skip_setup_items"],
+        "jamfpro_computer_prestage_enrollment": ["account_settings", "location_information", "purchasing_information", "skip_setup_items"],
+        "jamfpro_mobile_device_prestage_enrollment": ["location_information", "names", "purchasing_information", "skip_setup_items"],
     ]
 
     public static func protectOmittedSections(directory: URL) throws {

@@ -25,6 +25,7 @@ final class ComponentUpdateChecker {
         Component(name: "Deployment engine (OpenTofu)", repository: "opentofu/opentofu", pinned: EngineInfo.openTofuVersion),
         Component(name: "Jamf Platform provider", repository: "jamf/terraform-provider-jamfplatform", pinned: EngineInfo.jamfPlatformProviderVersion),
         Component(name: "Jamf Protect provider", repository: "Jamf-Concepts/terraform-provider-jamfprotect", pinned: EngineInfo.jamfProtectProviderVersion),
+        Component(name: "Jamf Pro provider (Deployment Theory)", repository: "deploymenttheory/terraform-provider-jamfpro", pinned: EngineInfo.jamfProProviderVersion),
         Component(name: "Exporter (jamformer)", repository: "Jamf-Concepts/jamformer", pinned: EngineInfo.jamformerVersion),
     ]
 

@@ -5,18 +5,42 @@ import DeployerKit
 /// The secret is read from the Keychain by the caller and lives in memory
 /// only for the lifetime of the client.
 nonisolated struct JamfAPIConfiguration: Sendable {
+    /// How requests authenticate and which path dialect they use.
+    enum Flavor: Sendable {
+        /// The Platform API gateway (OAuth client credentials).
+        case platform
+        /// A Jamf Pro instance with an API client (OAuth client credentials).
+        case jamfProAPIClient
+        /// A Jamf Pro instance with a user account (basic auth for a token).
+        case jamfProUser
+    }
+
+    /// The gateway, or the Jamf Pro instance URL for Jamf Pro connections.
     var gatewayURL: URL
+    var flavor: Flavor = .platform
+    /// Client ID, or the username for `.jamfProUser`.
     var clientID: String
+    /// Client secret, or the password for `.jamfProUser`.
     var clientSecret: String
     /// Exactly one scope header per request: X-Environment-Id (preferred)
     /// or X-Tenant-Id (legacy).
     var scopeHeaderName: String?
     var scopeHeaderValue: String?
+    /// A Jamf Pro tenant whose saved URL is not a valid instance URL; no
+    /// credentials are sent anywhere.
+    var hasInvalidInstanceURL = false
 
     init(tenant: Tenant, clientSecret: String) {
-        gatewayURL = tenant.region.gatewayURL
         clientID = tenant.clientID
         self.clientSecret = clientSecret
+        if tenant.isJamfPro {
+            let instance = Self.instanceURL(tenant.jamfProURL ?? "")
+            gatewayURL = instance ?? tenant.region.gatewayURL
+            hasInvalidInstanceURL = instance == nil
+            flavor = tenant.jamfProAuth == .userAccount ? .jamfProUser : .jamfProAPIClient
+            return
+        }
+        gatewayURL = tenant.region.gatewayURL
         switch tenant.apiScope {
         case .environment:
             scopeHeaderName = "X-Environment-Id"
@@ -34,6 +58,30 @@ nonisolated struct JamfAPIConfiguration: Sendable {
         scopeHeaderName = environmentID == nil ? nil : "X-Environment-Id"
         scopeHeaderValue = environmentID
     }
+
+    /// A Jamf Pro connection made before the tenant exists (the wizard).
+    init(jamfProURL: URL, auth: Tenant.JamfProAuth, clientID: String, clientSecret: String) {
+        gatewayURL = jamfProURL
+        flavor = auth == .userAccount ? .jamfProUser : .jamfProAPIClient
+        self.clientID = clientID
+        self.clientSecret = clientSecret
+    }
+
+    /// Normalizes what a user types ("example.jamfcloud.com",
+    /// "https://example.jamfcloud.com/") to "https://host[:port]".
+    static func instanceURL(_ raw: String) -> URL? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.lowercased().hasPrefix("https://") && !text.lowercased().hasPrefix("http://") {
+            text = "https://" + text
+        }
+        guard let components = URLComponents(string: text), components.scheme?.lowercased() == "https",
+              let host = components.host, !host.isEmpty else { return nil }
+        var normalized = URLComponents()
+        normalized.scheme = "https"
+        normalized.host = host
+        normalized.port = components.port
+        return normalized.url
+    }
 }
 
 nonisolated enum JamfAPIError: LocalizedError {
@@ -44,7 +92,7 @@ nonisolated enum JamfAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notAuthenticated(let detail):
-            "Jamf did not accept the credentials. Check the client ID, client secret and region. (\(detail))"
+            "Jamf did not accept the credentials. Check them and the region or Jamf Pro URL. (\(detail))"
         case .http(let status, let path):
             "Jamf answered \(path) with HTTP \(status)."
         case .invalidResponse:
@@ -53,9 +101,10 @@ nonisolated enum JamfAPIError: LocalizedError {
     }
 }
 
-/// Direct Jamf Platform API client: everything outside the engine
-/// (preflight, Day 0, token expiry, pickers). OAuth tokens live 900 seconds
-/// and are refreshed one minute early. Never logs secrets or headers.
+/// Direct Jamf API client, for the Platform API gateway or a Jamf Pro
+/// instance: everything outside the engine (preflight, Day 0, token expiry,
+/// pickers). Tokens are refreshed one minute before they expire. Never logs
+/// secrets or headers, and never follows a redirect to another host.
 actor JamfPlatformClient {
     private let configuration: JamfAPIConfiguration
     private let activityLog: ActivityLog?
@@ -97,7 +146,7 @@ actor JamfPlatformClient {
         query: [URLQueryItem] = []
     ) async throws -> T {
         let (data, status) = try await send(method: "GET", path: path, query: query)
-        guard status == 200 else { throw JamfAPIError.http(status: status, path: path) }
+        guard status == 200 else { throw JamfAPIError.http(status: status, path: Self.mapped(path, for: configuration.flavor)) }
         do {
             return try JSONDecoder().decode(type, from: data)
         } catch {
@@ -115,9 +164,10 @@ actor JamfPlatformClient {
         attempt: Int = 1
     ) async throws -> (Data, Int) {
         let accessToken = try await validToken()
+        let wirePath = Self.mapped(path, for: configuration.flavor)
 
         guard var components = URLComponents(
-            url: configuration.gatewayURL.appending(path: path),
+            url: configuration.gatewayURL.appending(path: wirePath),
             resolvingAgainstBaseURL: false
         ) else { throw JamfAPIError.invalidResponse }
         if !query.isEmpty {
@@ -141,10 +191,17 @@ actor JamfPlatformClient {
 
         let start = ContinuousClock.now
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request, delegate: SameHostRedirects.shared)
             guard let http = response as? HTTPURLResponse else { throw JamfAPIError.invalidResponse }
             let duration = (ContinuousClock.now - start).seconds
-            log(method: method, path: path, status: http.statusCode, duration: duration, note: attempt > 1 ? "attempt \(attempt)" : nil)
+            log(method: method, path: wirePath, status: http.statusCode, duration: duration, note: attempt > 1 ? "attempt \(attempt)" : nil)
+
+            // A token that ended early (revoked, or a shorter server
+            // lifetime) is discarded and fetched again once.
+            if http.statusCode == 401, attempt == 1 {
+                token = nil
+                return try await send(method: method, path: path, query: query, body: body, contentType: contentType, accept: accept, attempt: attempt + 1)
+            }
 
             // A write that timed out at the gateway may still have happened,
             // so only reads retry on server errors; rate limits always retry.
@@ -155,7 +212,7 @@ actor JamfPlatformClient {
             }
             return (data, http.statusCode)
         } catch let error as URLError where method == "GET" && isTransient(error) && attempt < 4 {
-            log(method: method, path: path, status: nil, duration: (ContinuousClock.now - start).seconds, note: "network error, will retry: \(error.code.rawValue)")
+            log(method: method, path: wirePath, status: nil, duration: (ContinuousClock.now - start).seconds, note: "network error, will retry: \(error.code.rawValue)")
             try await backOff(attempt: attempt, retryAfter: nil)
             return try await send(method: method, path: path, query: query, body: body, contentType: contentType, accept: accept, attempt: attempt + 1)
         }
@@ -167,8 +224,15 @@ actor JamfPlatformClient {
         if let token, token.expiry > .now + 60 {
             return token.value
         }
+        if configuration.hasInvalidInstanceURL {
+            throw JamfAPIError.notAuthenticated("the saved Jamf Pro URL is not valid")
+        }
 
-        var request = URLRequest(url: configuration.gatewayURL.appending(path: "/auth/token"))
+        if configuration.flavor == .jamfProUser {
+            return try await jamfProUserToken()
+        }
+        let tokenPath = configuration.flavor == .platform ? "/auth/token" : "/api/oauth/token"
+        var request = URLRequest(url: configuration.gatewayURL.appending(path: tokenPath))
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         // Strict form encoding: URLComponents leaves "+" unescaped in query
@@ -189,9 +253,9 @@ actor JamfPlatformClient {
         request.httpBody = Data(body.utf8)
 
         let start = ContinuousClock.now
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: SameHostRedirects.shared)
         guard let http = response as? HTTPURLResponse else { throw JamfAPIError.invalidResponse }
-        log(method: "POST", path: "/auth/token", status: http.statusCode, duration: (ContinuousClock.now - start).seconds, note: nil)
+        log(method: "POST", path: tokenPath, status: http.statusCode, duration: (ContinuousClock.now - start).seconds, note: nil)
 
         guard http.statusCode == 200 else {
             throw JamfAPIError.notAuthenticated("HTTP \(http.statusCode)")
@@ -207,6 +271,47 @@ actor JamfPlatformClient {
         let expiry = Date.now + (decoded.expires_in ?? 900)
         token = (decoded.access_token, expiry)
         return decoded.access_token
+    }
+
+    /// Jamf Pro user accounts trade basic credentials for a bearer token.
+    private func jamfProUserToken() async throws -> String {
+        var request = URLRequest(url: configuration.gatewayURL.appending(path: "/api/v1/auth/token"))
+        request.httpMethod = "POST"
+        let credentials = Data("\(configuration.clientID):\(configuration.clientSecret)".utf8).base64EncodedString()
+        request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let start = ContinuousClock.now
+        let (data, response) = try await session.data(for: request, delegate: SameHostRedirects.shared)
+        guard let http = response as? HTTPURLResponse else { throw JamfAPIError.invalidResponse }
+        log(method: "POST", path: "/api/v1/auth/token", status: http.statusCode, duration: (ContinuousClock.now - start).seconds, note: nil)
+        guard http.statusCode == 200 else {
+            throw JamfAPIError.notAuthenticated("HTTP \(http.statusCode)")
+        }
+        struct TokenResponse: Decodable {
+            let token: String
+            let expires: String?
+        }
+        guard let decoded = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+            throw JamfAPIError.invalidResponse
+        }
+        // Jamf Pro reports the expiry as ISO 8601, with or without
+        // fractional seconds; without one, assume the 30-minute default and
+        // refresh well before.
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let expiry = decoded.expires.flatMap { withFraction.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
+        token = (decoded.token, expiry ?? Date.now + 20 * 60)
+        return decoded.token
+    }
+
+    /// Callers use Platform gateway paths; a Jamf Pro instance serves the
+    /// same resources under its own prefixes.
+    static func mapped(_ path: String, for flavor: JamfAPIConfiguration.Flavor) -> String {
+        guard flavor != .platform else { return path }
+        if path.hasPrefix("/pro/") { return "/api/" + path.dropFirst("/pro/".count) }
+        if path.hasPrefix("/proclassic/") { return "/JSSResource/" + path.dropFirst("/proclassic/".count) }
+        return path
     }
 
     // MARK: Helpers
@@ -253,5 +358,22 @@ actor JamfPlatformClient {
 extension Duration {
     nonisolated var seconds: Double {
         Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
+}
+
+/// Refuses redirects that leave the original host or HTTPS, so credentials
+/// and tokens never reach a host the user did not enter.
+private nonisolated final class SameHostRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    static let shared = SameHostRedirects()
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        let sameHost = request.url?.scheme == "https" && request.url?.host == task.originalRequest?.url?.host
+        completionHandler(sameHost ? request : nil)
     }
 }

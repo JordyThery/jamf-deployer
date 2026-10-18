@@ -1451,6 +1451,7 @@ public nonisolated enum BlockCapture {
         var words = type
             .replacingOccurrences(of: "jamfplatform_pro_", with: "")
             .replacingOccurrences(of: "jamfplatform_", with: "")
+            .replacingOccurrences(of: "jamfpro_", with: "")
             .split(separator: "_").map(String.init)
         words = words.map { ["macos": "macOS", "ios": "iOS", "sso": "SSO", "smtp": "SMTP", "gsx": "GSX", "mdm": "MDM", "url": "URL", "ldap": "LDAP"][$0] ?? $0 }
         var label = words.joined(separator: " ")

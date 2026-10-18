@@ -49,6 +49,11 @@ struct AboutView: View {
                     url: "https://github.com/Jamf-Concepts/terraform-provider-jamfprotect"
                 )
                 acknowledgement(
+                    "jamfpro provider",
+                    detail: "Jamf Pro API resources, by Deployment Theory (MPL-2.0)",
+                    url: "https://github.com/deploymenttheory/terraform-provider-jamfpro"
+                )
+                acknowledgement(
                     "jamformer",
                     detail: "tenant export tooling",
                     url: "https://github.com/Jamf-Concepts/jamformer"

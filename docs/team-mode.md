@@ -16,7 +16,7 @@ Everything in the repository is reviewable: tenant records are JSON, history is 
 
 | In the repository | Never in the repository |
 | --- | --- |
-| Tenant records (names, selected blocks, settings, scope) | API client secrets |
+| Tenant records (names, selected blocks, settings, scope) | API client secrets and Jamf Pro passwords |
 | Engine state — **encrypted** (AES-GCM, per-tenant passphrase) | State passphrases, in the clear |
 | History, including a readable copy of each applied plan with every sensitive value masked | Secret-typed block settings |
 | Adopted configuration, the list of catalog sources | Private encryption keys |
@@ -29,7 +29,7 @@ Anyone with repository access can see tenant names, structure and encrypted stat
 So a teammate can work on a tenant without re-entering its credentials:
 
 1. The first time an engineer runs **Share Credentials with the Team…**, the app creates their Curve25519 identity. The private key stays in their Keychain; only the public key is published to the repository (`team/engineers/`).
-2. The same action seals each tenant's Platform API secret, Jamf Protect secret and state passphrase once per published engineer (X25519 key agreement → HKDF-SHA256 → ChaCha20-Poly1305) into `team/secrets/`. The repository only ever carries ciphertext. Secret-typed block settings are not shared — each engineer enters those on their own Mac.
+2. The same action seals each tenant's API client secret (or Jamf Pro password), Jamf Protect secret and state passphrase once per published engineer (X25519 key agreement → HKDF-SHA256 → ChaCha20-Poly1305) into `team/secrets/`. The repository only ever carries ciphertext. Secret-typed block settings are not shared — each engineer enters those on their own Mac.
 3. On sync, each Mac decrypts the envelopes addressed to it and stores the secrets in its own Keychain.
 
 A new engineer runs **Share Credentials with the Team…** once to publish their key; an existing member then runs it again to grant them access. GitHub never sees a usable secret.
@@ -37,6 +37,8 @@ A new engineer runs **Share Credentials with the Team…** once to publish their
 ![Team settings: the team space repository, last sync, and the Sync Now, Leave Team Mode and Share Credentials actions](screenshot-team.png)
 
 ## Setting up
+
+Everyone on the team needs Jamf Deployer 1.0.4 or later before a tenant is connected through the Jamf Pro API: earlier versions do not know the connection type and would treat the tenant as a Jamf Platform API tenant.
 
 **Create** (first engineer): Settings, under **Team**: enter the URL of an empty private GitHub repository under **Repository URL** → **Create Team Space…**. The app zips a backup of the local store first, then pushes it as-is.
 

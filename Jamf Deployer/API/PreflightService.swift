@@ -1,4 +1,5 @@
 import Foundation
+import JamfDeployerCore
 import DeployerKit
 
 /// One green/amber/red row in the preflight list, with a fix-it hint.
@@ -31,17 +32,21 @@ nonisolated enum PreflightService {
 
     /// Dry-read probes for the permissions the app needs from day one.
     /// Each tuple: title, path, required permission shown in the hint.
-    private static let permissionProbes: [(title: String, path: String, permission: String)] = [
-        ("Read categories", "/pro/v1/categories", "categories:read"),
-        ("Read scripts", "/pro/v1/scripts", "scripts:read"),
-        ("Read Automated Device Enrollment", "/pro/v1/device-enrollments", "device-enrollment-program-instances:read"),
-        ("Read volume purchasing", "/pro/v1/volume-purchasing-locations", "volume-purchasing-locations:read"),
+    /// `permission` is the Platform privilege; `jamfProPrivilege` the Jamf
+    /// Pro API role privilege for Jamf Pro API connections.
+    private static let permissionProbes: [(title: String, path: String, permission: String, jamfProPrivilege: String)] = [
+        ("Read categories", "/pro/v1/categories", "categories:read", "Read Categories"),
+        ("Read scripts", "/pro/v1/scripts", "scripts:read", "Read Scripts"),
+        ("Read Automated Device Enrollment", "/pro/v1/device-enrollments", "device-enrollment-program-instances:read", "Read Device Enrollment Program Instances"),
+        ("Read volume purchasing", "/pro/v1/volume-purchasing-locations", "volume-purchasing-locations:read", "Read Volume Purchasing Locations"),
     ]
 
     static func run(
         client: JamfPlatformClient,
+        connection: ConnectionKind = .platform,
         onProgress: @MainActor @Sendable ([PreflightCheck]) -> Void
     ) async -> PreflightReport {
+        let isJamfPro = connection == .jamfPro
         var checks: [PreflightCheck] = []
         var snapshot = PreflightSnapshot(date: .now, allGreen: false)
 
@@ -63,7 +68,7 @@ nonisolated enum PreflightService {
             await record(PreflightCheck(
                 id: "auth", title: "Credentials",
                 outcome: .pass,
-                detail: "Signed in to the Jamf Platform gateway."
+                detail: isJamfPro ? "Signed in to the Jamf Pro API." : "Signed in to the Jamf Platform gateway."
             ))
             if meetsMinimumVersion(version) {
                 await record(PreflightCheck(
@@ -83,7 +88,7 @@ nonisolated enum PreflightService {
                 id: "auth", title: "Credentials",
                 outcome: .fail,
                 detail: (error as? LocalizedError)?.errorDescription
-                    ?? "Jamf did not accept the credentials. Check the client ID, secret, region and environment ID."
+                    ?? "Jamf did not accept the credentials."
             ))
             return PreflightReport(checks: checks, snapshot: snapshot)
         }
@@ -104,7 +109,9 @@ nonisolated enum PreflightService {
                     await record(PreflightCheck(
                         id: probe.path, title: probe.title,
                         outcome: .fail,
-                        detail: "Not allowed. Add the \"\(probe.permission)\" permission to the API integration in Jamf Account."
+                        detail: isJamfPro
+                            ? "Not allowed. Add the \"\(probe.jamfProPrivilege)\" privilege to the API role or user account in Jamf Pro."
+                            : "Not allowed. Add the \"\(probe.permission)\" permission to the API integration in Jamf Account."
                     ))
                 default:
                     await record(PreflightCheck(
@@ -121,8 +128,9 @@ nonisolated enum PreflightService {
             }
         }
 
-        // 3. Cloud Services Connection (needed for the App Catalog).
-        do {
+        // 3. Cloud Services Connection (needed for the App Catalog block,
+        //    which Jamf Pro API connections cannot use).
+        if !isJamfPro { do {
             let (_, status) = try await client.get(
                 "/pro/v1/app-installers/titles",
                 query: [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")]
@@ -144,7 +152,7 @@ nonisolated enum PreflightService {
                 id: "csc", title: "Cloud Services Connection",
                 outcome: .warn, detail: "Could not check: \(error.localizedDescription)"
             ))
-        }
+        } }
 
         // 4. Existing content: decides whether to suggest Adopt first.
         do {

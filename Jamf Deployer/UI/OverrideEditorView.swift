@@ -12,18 +12,28 @@ actor SchemaProvider {
     func catalog() async throws -> ProviderSchemaCatalog {
         if let cached { return cached }
 
+        // Named by plugin versions, so an app update with newer plugins
+        // regenerates the schema.
+        let versions = [EngineInfo.jamfPlatformProviderVersion, EngineInfo.jamfProtectProviderVersion, EngineInfo.jamfProProviderVersion]
         let cacheURL = URL.applicationSupportDirectory
-            .appending(path: "Jamf Deployer/engine/providers-schema.json")
+            .appending(path: "Jamf Deployer/engine/providers-schema-\(versions.joined(separator: "-")).json")
         if let data = try? Data(contentsOf: cacheURL),
            let parsed = try? ProviderSchemaCatalog.parse(schemaJSON: data) {
             cached = parsed
             return parsed
         }
 
-        // One-time generation in a scratch workspace with both providers.
+        // One-time generation in a scratch workspace with every plugin.
         let workspace = URL.applicationSupportDirectory
             .appending(path: "Jamf Deployer/engine/schema-workspace")
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        // Release builds re-sign the plugin archives, so a lock file or
+        // plugin cache from an earlier version no longer matches.
+        for leftover in [".terraform.lock.hcl", ".terraform"] {
+            try? FileManager.default.removeItem(at: workspace.appending(path: leftover))
+        }
+        try? FileManager.default.removeItem(at: URL.applicationSupportDirectory
+            .appending(path: "Jamf Deployer/engine/providers-schema.json"))
         try Data("""
         terraform {
           required_providers {
@@ -34,6 +44,10 @@ actor SchemaProvider {
             jamfprotect = {
               source  = "Jamf-Concepts/jamfprotect"
               version = "\(EngineInfo.jamfProtectProviderVersion)"
+            }
+            jamfpro = {
+              source  = "deploymenttheory/jamfpro"
+              version = "\(EngineInfo.jamfProProviderVersion)"
             }
           }
         }
@@ -179,7 +193,10 @@ struct OverrideEditorView: View {
     }
 
     private var filteredTypes: [ProviderSchemaCatalog.ResourceType] {
-        let all = (catalog?.resourceTypes ?? []).filter(\.isFormEditable)
+        // Only types the tenant's connection can manage.
+        let all = (catalog?.resourceTypes ?? []).filter { type in
+            type.isFormEditable && (type.name.hasPrefix("jamfpro_") == tenant.isJamfPro)
+        }
         guard !searchText.isEmpty else { return all }
         return all.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
@@ -226,6 +243,7 @@ struct OverrideEditorView: View {
         typeName
             .replacingOccurrences(of: "jamfplatform_pro_", with: "")
             .replacingOccurrences(of: "jamfplatform_", with: "")
+            .replacingOccurrences(of: "jamfpro_", with: "")
             .replacingOccurrences(of: "jamfprotect_", with: "Protect: ")
             .replacingOccurrences(of: "_", with: " ")
             .capitalized

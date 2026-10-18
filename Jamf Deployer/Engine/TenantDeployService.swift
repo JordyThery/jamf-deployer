@@ -231,7 +231,9 @@ final class TenantDeployService {
             namePrefix: tenant.namePrefix,
             selections: selections,
             providerVersion: EngineInfo.jamfPlatformProviderVersion,
-            removals: tenant.pendingRemovals
+            removals: tenant.isJamfPro ? [] : tenant.pendingRemovals,
+            connection: tenant.connection,
+            jamfProProviderVersion: EngineInfo.jamfProProviderVersion
         ))
         try WorkspaceGenerator.materialize(
             output,
@@ -463,9 +465,56 @@ final class TenantDeployService {
 
     // MARK: Engine plumbing
 
+    /// Encrypts the tenant record and saved plans with the tenant's passphrase.
+    private func encryptionConfiguration(for tenant: Tenant) throws -> String {
+        """
+        key_provider "pbkdf2" "passphrase" {
+          passphrase = "\(try statePassphrase(for: tenant))"
+        }
+        method "aes_gcm" "default" {
+          keys = key_provider.pbkdf2.passphrase
+        }
+        state {
+          method   = method.aes_gcm.default
+          enforced = true
+        }
+        plan {
+          method   = method.aes_gcm.default
+          enforced = true
+        }
+        """
+    }
+
+    /// The community jamfpro plugin reads its instance and credentials
+    /// from JAMFPRO_* variables; nothing is written to the workspace.
+    private func jamfProEnvironment(for tenant: Tenant, secret: String) throws -> [String: String] {
+        guard let url = JamfAPIConfiguration.instanceURL(tenant.jamfProURL ?? "") else {
+            throw DeployError.missingCredentials
+        }
+        var environment: [String: String] = [
+            "JAMFPRO_INSTANCE_FQDN": url.absoluteString,
+            "JAMFPRO_AUTH_PROVIDER": "direct",
+        ]
+        switch tenant.jamfProAuth ?? .apiClient {
+        case .apiClient:
+            environment["JAMFPRO_AUTH_METHOD"] = "oauth2"
+            environment["JAMFPRO_CLIENT_ID"] = tenant.clientID
+            environment["JAMFPRO_CLIENT_SECRET"] = secret
+        case .userAccount:
+            environment["JAMFPRO_AUTH_METHOD"] = "basic"
+            environment["JAMFPRO_BASIC_USERNAME"] = tenant.clientID
+            environment["JAMFPRO_BASIC_PASSWORD"] = secret
+        }
+        environment["TF_ENCRYPTION"] = try encryptionConfiguration(for: tenant)
+        return environment
+    }
+
     private func environment(for tenant: Tenant) throws -> [String: String] {
         guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
             throw DeployError.missingCredentials
+        }
+        if tenant.isJamfPro {
+            return try jamfProEnvironment(for: tenant, secret: secret)
         }
         let needsProtect = (try? loadCatalog()).map { catalog in
             tenant.blockSelections.contains { selection in
@@ -494,22 +543,7 @@ final class TenantDeployService {
             environment["JAMFPROTECT_CLIENT_ID"] = protectClientID
             environment["JAMFPROTECT_CLIENT_SECRET"] = protectSecret
         }
-        environment["TF_ENCRYPTION"] = """
-        key_provider "pbkdf2" "passphrase" {
-          passphrase = "\(try statePassphrase(for: tenant))"
-        }
-        method "aes_gcm" "default" {
-          keys = key_provider.pbkdf2.passphrase
-        }
-        state {
-          method   = method.aes_gcm.default
-          enforced = true
-        }
-        plan {
-          method   = method.aes_gcm.default
-          enforced = true
-        }
-        """
+        environment["TF_ENCRYPTION"] = try encryptionConfiguration(for: tenant)
         return environment
     }
 
@@ -633,7 +667,8 @@ final class TenantDeployService {
             result = try await runner.run(
                 // Jamf's classic API fails more creates under load; four
                 // concurrent operations measurably reduce that at little cost.
-                arguments: ["apply", "-input=false", "-json", "-parallelism=4", session.planFileName]
+                // The Jamf Pro plugin requires one operation at a time.
+                arguments: ["apply", "-input=false", "-json", "-parallelism=\(tenant.isJamfPro ? 1 : 4)", session.planFileName]
             ) { event in
                 if event.type == .applyComplete || event.type == .applyErrored {
                     let message = event.message

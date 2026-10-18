@@ -87,6 +87,11 @@ struct ExportView: View {
 
     private let runner = JamformerRunner()
 
+    /// Building blocks and clones are written for the Platform API.
+    private var availableKinds: [ExportKind] {
+        tenant.isJamfPro ? [.snapshot, .documentation] : ExportKind.allCases
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Exports read the tenant and never change it. Discovery runs on Terraform, which is downloaded from HashiCorp on first use — deploys always use the built-in engine.")
@@ -95,7 +100,7 @@ struct ExportView: View {
 
             HStack {
                 Picker("Export type", selection: $kind) {
-                    ForEach(ExportKind.allCases, id: \.self) { kind in
+                    ForEach(availableKinds, id: \.self) { kind in
                         Text(kind.rawValue).tag(kind)
                     }
                 }
@@ -105,16 +110,18 @@ struct ExportView: View {
                 // intrinsic size makes it overdraw its layout frame.
                 .fixedSize()
 
-                Picker("From", selection: $exportProvider) {
-                    Text("Jamf Pro and Platform").tag("jamfplatform")
-                    Text("Jamf Protect").tag("jamfprotect")
-                        .disabled(tenant.protectURL == nil)
+                if !tenant.isJamfPro {
+                    Picker("From", selection: $exportProvider) {
+                        Text("Jamf Pro and Platform").tag("jamfplatform")
+                        Text("Jamf Protect").tag("jamfprotect")
+                            .disabled(tenant.protectURL == nil)
+                    }
+                    .fixedSize()
+                    .disabled(kind == .clone)
+                    .help(tenant.protectURL == nil
+                        ? "Connect Jamf Protect in the Day 0 Setup tab to export from it"
+                        : "Which product to read from")
                 }
-                .fixedSize()
-                .disabled(kind == .clone)
-                .help(tenant.protectURL == nil
-                    ? "Connect Jamf Protect in the Day 0 Setup tab to export from it"
-                    : "Which product to read from")
             }
             .onChange(of: kind) {
                 // Clones come from Jamf Pro and Platform only.
@@ -125,6 +132,11 @@ struct ExportView: View {
                     resourceTypes = (try? await runner.listResourceTypes(provider: exportProvider)) ?? []
                     selectedTypes = []
                 }
+            }
+            if tenant.isJamfPro {
+                Text("Building blocks and clones need a Jamf Platform API connection; this tenant is connected through the Jamf Pro API.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             terraformRow
@@ -208,6 +220,10 @@ struct ExportView: View {
             }
         }
         .task {
+            if tenant.isJamfPro {
+                exportProvider = tenant.connection.exporterProvider
+                if !availableKinds.contains(kind) { kind = .snapshot }
+            }
             resourceTypes = (try? await runner.listResourceTypes(provider: exportProvider)) ?? []
             // Returning to a finished export: restore the derived object list
             // with the types the run actually exported.
@@ -429,9 +445,10 @@ struct ExportView: View {
     @ViewBuilder
     private func cloneForm(_ result: JamformerRunner.ExportResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            let targets = tenantStore.tenants.filter { $0.id != tenant.id && !$0.isHandedOver }
+            // Clones are written for the Platform API.
+            let targets = tenantStore.tenants.filter { $0.id != tenant.id && !$0.isHandedOver && !$0.isJamfPro }
             if targets.isEmpty {
-                Text("Connect the destination tenant first — cloning previews and deploys there like any other change.")
+                Text("Connect the destination tenant through the Jamf Platform API first — cloning previews and deploys there like any other change.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
@@ -784,11 +801,11 @@ struct ExportView: View {
         // Write the manifest, then zip the export.
         let manifest: [String: Any] = [
             "tenant": tenant.name,
-            "scopeID": tenant.scopeID,
+            "scopeID": tenant.connectionLabel,
             "date": Date.now.formatted(.iso8601),
             "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev",
             "jamformerVersion": EngineInfo.jamformerVersion,
-            "providerVersion": EngineInfo.jamfPlatformProviderVersion,
+            "providerVersion": tenant.isJamfPro ? EngineInfo.jamfProProviderVersion : EngineInfo.jamfPlatformProviderVersion,
         ]
         try? JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
             .write(to: result.outputURL.appending(path: "manifest.json"))

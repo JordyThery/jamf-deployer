@@ -44,7 +44,7 @@ struct TenantDetailView: View {
                         DetailHeader(
                             systemImage: "building.2",
                             title: tenant.name,
-                            subtitle: tenant.scopeID
+                            subtitle: tenant.connectionLabel
                         )
                         StatusBadge(
                             tenant.isProduction ? "Production" : "Test",
@@ -116,15 +116,26 @@ struct TenantDetailView: View {
 
                     GroupBox("Connection") {
                         VStack(alignment: .leading, spacing: 6) {
-                            LabeledContent("Region", value: tenant.region.displayName)
-                            LabeledContent("Scope") {
-                                Text(tenant.apiScope == .environment ? "Platform environment" : "Tenant (legacy)")
+                            if tenant.isJamfPro {
+                                LabeledContent("Connected through", value: "Jamf Pro API")
+                                LabeledContent("Jamf Pro URL", value: tenant.jamfProURL ?? "")
+                                LabeledContent(tenant.jamfProAuth == .userAccount ? "Username" : "Client ID") {
+                                    Text(tenant.clientID)
+                                        .font(.callout.monospaced())
+                                        .textSelection(.enabled)
+                                }
+                            } else {
+                                LabeledContent("Region", value: tenant.region.displayName)
+                                LabeledContent("Scope") {
+                                    Text(tenant.apiScope == .environment ? "Platform environment" : "Tenant (legacy)")
+                                }
+                                LabeledContent("Client ID") {
+                                    Text(tenant.clientID)
+                                        .font(.callout.monospaced())
+                                        .textSelection(.enabled)
+                                }
                             }
-                            LabeledContent("Client ID") {
-                                Text(tenant.clientID)
-                                    .font(.callout.monospaced())
-                                    .textSelection(.enabled)
-                            }
+                            if !tenant.isJamfPro {
                             LabeledContent("Name prefix") {
                                 TextField("Name prefix", text: Binding(
                                     get: { tenant.namePrefix },
@@ -140,15 +151,16 @@ struct TenantDetailView: View {
                                 .labelsHidden()
                                 .help("Prefix for managed object names; changing it renames objects on the next deploy")
                             }
+                            }
                             if let version = tenant.preflight?.jamfProVersion {
                                 LabeledContent("Jamf Pro", value: PreflightService.displayVersion(version))
                             }
                             if let protectURL = tenant.protectURL {
                                 LabeledContent("Jamf Protect", value: protectURL)
                             }
-                            Button("Update Client Secret…") { isUpdatingSecret = true }
+                            Button(tenant.jamfProAuth == .userAccount ? "Update Password…" : "Update Client Secret…") { isUpdatingSecret = true }
                                 .controlSize(.small)
-                                .help("Store a new client secret for this tenant's API integration in the Keychain")
+                                .help("Store new credentials for this tenant in the Keychain")
                         }
                         .font(.callout)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -208,10 +220,17 @@ struct TenantDetailView: View {
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Building blocks add new objects and settings to this tenant. Objects that already exist don't need a block — adopt them instead.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                            if let catalog {
+                            if !tenant.isJamfPro {
+                                Text("Building blocks add new objects and settings to this tenant. Objects that already exist don't need a block — adopt them instead.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if tenant.isJamfPro {
+                                Label("Building blocks need a Jamf Platform API connection. This tenant is connected through the Jamf Pro API, so it manages adopted and custom objects: adopt what exists, check for changes and keep or restore them. To use building blocks later, hand the tenant over, connect it again with Jamf Platform API credentials and adopt its objects.", systemImage: "info.circle")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else if let catalog {
                                 BaselineEditorView(tenant: tenant, catalog: catalog) {
                                     self.catalog = try? deployService.loadCatalog()
                                 }
@@ -554,7 +573,7 @@ struct TenantDetailView: View {
             activityLog: activityLog
         )
         Task {
-            let report = await PreflightService.run(client: client) { progress in
+            let report = await PreflightService.run(client: client, connection: tenant.connection) { progress in
                 checks = progress
             }
             checks = report.checks
@@ -580,12 +599,13 @@ struct UpdateClientSecretSheet: View {
 
     private var secrets: TenantSecrets { TenantSecrets(tenantID: tenant.id) }
     private var needsPassphrase: Bool { secrets.statePassphrase.load() == nil }
+    private var usesPassword: Bool { tenant.isJamfPro && tenant.jamfProAuth == .userAccount }
 
     var body: some View {
-        SheetFrame(title: "Update Client Secret", systemImage: "key") {
+        SheetFrame(title: usesPassword ? "Update Password" : "Update Client Secret", systemImage: "key") {
             Form {
-                LabeledContent("Client ID", value: tenant.clientID)
-                SecureField("Client secret", text: $secret)
+                LabeledContent(usesPassword ? "Username" : "Client ID", value: tenant.clientID)
+                SecureField(usesPassword ? "Password" : "Client secret", text: $secret)
                 if needsPassphrase {
                     SecureField("Recovery passphrase", text: $passphrase)
                     Text("This Mac has no passphrase for the tenant's record. Enter the one from its recovery sheet, or leave it empty for a tenant that was never deployed.")
