@@ -11,7 +11,7 @@ struct AppStorePickerView: View {
 
         var title: String {
             switch self {
-            case .mac: "Mac App Store"
+            case .mac: "Mac App Store Apps"
             case .mobile: "iPad and iPhone Apps"
             }
         }
@@ -128,7 +128,7 @@ struct AppStorePickerView: View {
 
             if let loadError {
                 ContentUnavailableView(
-                    "Couldn't Load Apps and Books",
+                    "Apps and Books Unavailable",
                     systemImage: "exclamationmark.icloud",
                     description: Text(loadError)
                 )

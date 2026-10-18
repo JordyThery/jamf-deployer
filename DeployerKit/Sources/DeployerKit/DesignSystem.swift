@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The recurring visual idioms shared with Intune Deployer, packaged as
-/// small components so both apps read the same way.
+/// The app's recurring visual idioms, packaged as small components so every
+/// screen reads the same way.
 
 /// Capsule status pill, e.g. "Managed", "Test tenant".
 public struct StatusBadge: View {

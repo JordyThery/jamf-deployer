@@ -35,7 +35,7 @@ nonisolated enum GitCatalogManager {
     }
 
     private static func availableTagsSync(remote: String) throws -> [String] {
-        let output = try git(["ls-remote", "--tags", "--refs", remote], in: nil)
+        let output = try git(["ls-remote", "--tags", "--refs", "--", remote], in: nil)
         return output
             .split(separator: "\n")
             .compactMap { line -> String? in
@@ -54,7 +54,7 @@ nonisolated enum GitCatalogManager {
             at: destination.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        _ = try git(["clone", "--depth", "1", "--branch", tag, remote, destination.path], in: nil)
+        _ = try git(["clone", "--depth", "1", "--branch", tag, "--", remote, destination.path], in: nil)
         // The checkout is a snapshot; its git history is dead weight.
         try? FileManager.default.removeItem(at: destination.appending(path: ".git"))
         guard FileManager.default.fileExists(atPath: destination.appending(path: "catalog.json").path) else {

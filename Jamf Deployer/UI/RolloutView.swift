@@ -107,7 +107,7 @@ struct RolloutView: View {
     private var setup: some View {
         Form {
             Section("What to roll out") {
-                Picker("Change", selection: $change) {
+                Picker("What to roll out", selection: $change) {
                     Text("Each tenant's current baseline").tag(Change.currentBaselines)
                     ForEach(gitSources) { source in
                         Text("The latest release of \(source.name)").tag(Change.catalogRelease(source.id))
@@ -158,7 +158,7 @@ struct RolloutView: View {
         VStack(spacing: 12) {
             if let prepareError {
                 ContentUnavailableView(
-                    "Couldn't Stage the Release",
+                    "Staging Failed",
                     systemImage: "exclamationmark.triangle",
                     description: Text(prepareError)
                 )
@@ -298,7 +298,10 @@ struct RolloutView: View {
             readyIndex = index
             return
         }
-        guard let tenant = tenantStore.tenant(id: entry.id) else { return }
+        guard let tenant = tenantStore.tenant(id: entry.id) else {
+            prepareError = "This tenant is no longer connected."
+            return
+        }
         do {
             let available = try await deployService.availableBaselineUpdates(for: tenant)
             guard let release = available.first(where: { $0.source.id == sourceID }) else {
@@ -306,9 +309,11 @@ struct RolloutView: View {
                 advance(from: index)
                 return
             }
-            stagedBaseline = (tenant.id, tenant.blockSelections, tenant.catalogPins)
+            // Re-read: checking for updates can repair the tenant's selections.
+            let current = tenantStore.tenant(id: tenant.id) ?? tenant
+            stagedBaseline = (current.id, current.blockSelections, current.catalogPins)
             deployService.applyBaselineUpdate(
-                tenant: tenant, source: release.source, tag: release.tag,
+                tenant: current, source: release.source, tag: release.tag,
                 blockIDs: Set(release.updates.map(\.blockID)))
             readyIndex = index
         } catch {
@@ -336,6 +341,11 @@ struct RolloutView: View {
         case .closedWithoutDeploying:
             restoreStagedBaseline()
             stage = .deciding(index)
+        case .deployFailed(let message):
+            // Partly applied: keep the staged release so the record matches.
+            stagedBaseline = nil
+            outcomes[id] = .failed(message)
+            stage = .finished
         }
     }
 

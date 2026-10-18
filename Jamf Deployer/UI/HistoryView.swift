@@ -2,7 +2,7 @@ import SwiftUI
 import DeployerKit
 import JamfDeployerCore
 
-/// Every preview and deploy across the fleet: who, when, what.
+/// Every deploy across the fleet: who, when, what.
 struct HistoryView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(TenantDeployService.self) private var deployService
@@ -16,6 +16,8 @@ struct HistoryView: View {
 
     @State private var rows: [Row] = []
     @State private var rollbackMessage: String?
+    @State private var rollbackFailed = false
+    @State private var rowPendingRollback: Row?
 
     var body: some View {
         Group {
@@ -52,10 +54,10 @@ struct HistoryView: View {
                     }
                     TableColumn("Roll back") { row in
                         Button("Roll Back…") {
-                            rollBack(row)
+                            rowPendingRollback = row
                         }
                         .controlSize(.small)
-                        .help("Restore this entry's baseline selection; the next preview plans back to it against the tenant's current state")
+                        .help("Restore this deploy's baseline; preview and deploy to apply it")
                     }
                     .width(90)
                     TableColumn("Blocks") { row in
@@ -76,7 +78,22 @@ struct HistoryView: View {
                 reload()
             }
         }
-        .alert("Baseline Restored", isPresented: Binding(
+        .confirmationDialog(
+            "Roll back “\(rowPendingRollback?.tenantName ?? "")”?",
+            isPresented: Binding(
+                get: { rowPendingRollback != nil },
+                set: { if !$0 { rowPendingRollback = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Roll Back") {
+                if let row = rowPendingRollback { rollBack(row) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The tenant's baseline returns to the one from this deploy. Nothing changes in Jamf until you preview and deploy.")
+        }
+        .alert(rollbackFailed ? "Roll Back Failed" : "Baseline Restored", isPresented: Binding(
             get: { rollbackMessage != nil },
             set: { if !$0 { rollbackMessage = nil } }
         )) {
@@ -90,9 +107,11 @@ struct HistoryView: View {
         guard let tenant = tenantStore.tenant(id: row.tenantID) else { return }
         do {
             try deployService.rollback(tenant: tenant, toHistoryEntry: row.entry.id)
+            rollbackFailed = false
             rollbackMessage = "“\(tenant.name)” now uses the baseline from \(row.entry.date.formatted(date: .abbreviated, time: .shortened)). Open the tenant and Preview Changes to apply it."
         } catch {
-            rollbackMessage = "Could not restore: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+            rollbackFailed = true
+            rollbackMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 

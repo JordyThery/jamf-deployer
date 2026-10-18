@@ -46,7 +46,9 @@ struct ContentView: View {
         case .fleet, nil:
             FleetDashboardView(selection: $selection, isConnectingTenant: $isConnectingTenant)
         case .tenant(let id):
+            // A fresh view per tenant: no form state carries over.
             TenantDetailView(tenantID: id)
+                .id(id)
         case .catalog:
             CatalogView()
         case .history:

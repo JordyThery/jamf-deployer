@@ -38,7 +38,6 @@ nonisolated struct JamfAPIConfiguration: Sendable {
 
 nonisolated enum JamfAPIError: LocalizedError {
     case notAuthenticated(String)
-    case permissionDenied(path: String)
     case http(status: Int, path: String)
     case invalidResponse
 
@@ -46,8 +45,6 @@ nonisolated enum JamfAPIError: LocalizedError {
         switch self {
         case .notAuthenticated(let detail):
             "Jamf did not accept the credentials. Check the client ID, client secret and region. (\(detail))"
-        case .permissionDenied(let path):
-            "The API integration is missing a permission for \(path). Add it in Jamf Account and try again."
         case .http(let status, let path):
             "Jamf answered \(path) with HTTP \(status)."
         case .invalidResponse:
@@ -149,12 +146,15 @@ actor JamfPlatformClient {
             let duration = (ContinuousClock.now - start).seconds
             log(method: method, path: path, status: http.statusCode, duration: duration, note: attempt > 1 ? "attempt \(attempt)" : nil)
 
-            if shouldRetry(status: http.statusCode), attempt < 4 {
+            // A write that timed out at the gateway may still have happened,
+            // so only reads retry on server errors; rate limits always retry.
+            let retryable = http.statusCode == 429 || (method == "GET" && shouldRetry(status: http.statusCode))
+            if retryable, attempt < 4 {
                 try await backOff(attempt: attempt, retryAfter: http.value(forHTTPHeaderField: "Retry-After"))
                 return try await send(method: method, path: path, query: query, body: body, contentType: contentType, accept: accept, attempt: attempt + 1)
             }
             return (data, http.statusCode)
-        } catch let error as URLError where isTransient(error) && attempt < 4 {
+        } catch let error as URLError where method == "GET" && isTransient(error) && attempt < 4 {
             log(method: method, path: path, status: nil, duration: (ContinuousClock.now - start).seconds, note: "network error, will retry: \(error.code.rawValue)")
             try await backOff(attempt: attempt, retryAfter: nil)
             return try await send(method: method, path: path, query: query, body: body, contentType: contentType, accept: accept, attempt: attempt + 1)

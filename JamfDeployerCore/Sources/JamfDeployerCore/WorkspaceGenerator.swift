@@ -95,6 +95,7 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     case unknownScope(block: String, scope: String)
     case scopeNotChosen(block: String)
     case missingRequiredSetting(block: String, setting: String)
+    case invalidNumber(block: String, setting: String, value: String)
     case unmetDependencies(block: String, type: String, names: [String])
     /// Two selected blocks manage the same tenant-wide setting.
     case conflictingSettings(type: String, blocks: [String])
@@ -109,6 +110,8 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
             "The block \"\(block)\" has no scope yet. Open its settings and choose a group."
         case .missingRequiredSetting(let block, let setting):
             "The block \"\(block)\" needs a value for its \"\(setting)\" setting."
+        case .invalidNumber(let block, let setting, let value):
+            "The block \"\(block)\" needs a number for its \"\(setting)\" setting, not \"\(value)\"."
         case .unmetDependencies(let block, let type, let names):
             "The block \"\(block)\" references \(type.replacingOccurrences(of: "_", with: " "))s no selected block creates: \(names.joined(separator: ", ")). Select the block that creates them, or remove this block."
         case .conflictingSettings(let type, let blocks):
@@ -258,7 +261,12 @@ public nonisolated enum WorkspaceGenerator {
                 case .bool:
                     arguments.append((setting.key, raw == "true" ? "true" : "false"))
                 case .number:
-                    arguments.append((setting.key, raw.isEmpty ? "null" : raw))
+                    // Written unquoted, so only a plain number is accepted.
+                    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                    guard trimmed.isEmpty || (Double(trimmed) != nil && trimmed.allSatisfy({ $0.isNumber || $0 == "." || $0 == "-" })) else {
+                        throw WorkspaceGeneratorError.invalidNumber(block: block.name, setting: setting.title, value: raw)
+                    }
+                    arguments.append((setting.key, trimmed.isEmpty ? "null" : trimmed))
                 case .string, .enumeration, .appPicker, .macAppStorePicker, .mobileAppStorePicker:
                     arguments.append((setting.key, hclString(raw)))
                 case .stringList:

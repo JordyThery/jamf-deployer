@@ -38,7 +38,7 @@ nonisolated enum EngineLocator {
         locate("Catalog")
     }
 
-    /// Writes (once per launch) the engine CLI configuration pointing
+    /// Writes the engine CLI configuration pointing
     /// provider installation at the bundled mirror, so init never downloads.
     static func ensureCLIConfig() throws -> URL {
         let url = URL.applicationSupportDirectory

@@ -12,9 +12,9 @@ nonisolated struct PreviewSession: Sendable {
     var createdAt: Date
 }
 
-/// Orchestrates everything between "Preview changes" and "Deploy" for one
-/// tenant: workspace generation, engine runs, history and state backups.
-/// One runner per tenant means a tenant never has two runs at once.
+/// Orchestrates everything between "Preview Changes" and "Deploy" for every
+/// tenant: workspace generation, engine runs, drift checks, history and
+/// state backups. A tenant never has two engine runs at once.
 @Observable
 final class TenantDeployService {
     enum Phase: Equatable {
@@ -40,6 +40,11 @@ final class TenantDeployService {
     /// workspace and invalidate the saved plan, so it is blocked until the
     /// preview is deployed or closed.
     private var activePreviewTenants: Set<UUID> = []
+    /// Tenants with an engine run in progress (preview, check or deploy):
+    /// one run per tenant workspace at a time.
+    private var busyTenants: Set<UUID> = []
+    /// Team locks this Mac acquired and has not released yet.
+    private var heldLocks: Set<UUID> = []
 
     /// Team-space state the UI shows.
     private(set) var isTeamMode = false
@@ -93,12 +98,14 @@ final class TenantDeployService {
     }
 
     /// Releases a preview lock when the sheet closes without deploying.
+    /// Only a lock this preview acquired is released.
     func abandonPreview(tenant: Tenant) {
         activePreviewTenants.remove(tenant.id)
-        guard isTeamMode else { return }
+        guard isTeamMode, heldLocks.remove(tenant.id) != nil else { return }
         Task {
             try? await gitStore.releaseLock(
                 tenantID: tenant.id,
+                engineer: engineerName,
                 message: "Preview \(tenant.name) (no deploy) — \(engineerName)"
             )
             await syncTeamState()
@@ -106,7 +113,12 @@ final class TenantDeployService {
     }
 
     func breakLock(tenant: Tenant) async {
-        try? await gitStore.breakLock(tenantID: tenant.id, by: engineerName)
+        do {
+            try await gitStore.breakLock(tenantID: tenant.id, by: engineerName)
+        } catch {
+            syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return
+        }
         await syncTeamState()
     }
 
@@ -120,6 +132,25 @@ final class TenantDeployService {
     /// tenant's pinned tags.
     func loadCatalog(for tenant: Tenant) throws -> LoadedCatalog {
         try catalogSources.loadMerged(pins: tenant.catalogPins)
+    }
+
+    /// Points selections at the custom source their block comes from.
+    /// Versions before 1.0.3 recorded every selection as built-in, which
+    /// left Git-catalog blocks outside release pins and updates. Persists
+    /// and returns the repaired tenant.
+    @discardableResult
+    func repairSourceIDs(for tenant: Tenant) -> Tenant {
+        guard let catalog = try? loadCatalog() else { return tenant }
+        var updated = tenant
+        for index in updated.blockSelections.indices {
+            let selection = updated.blockSelections[index]
+            guard selection.sourceID == "official" || selection.sourceID.isEmpty,
+                  let sourceID = catalog.sourceIDByBlockID[selection.blockID] else { continue }
+            updated.blockSelections[index].sourceID = sourceID
+        }
+        guard updated.blockSelections != tenant.blockSelections else { return tenant }
+        tenantStore.update(updated)
+        return updated
     }
 
     /// Downloads any tag checkouts the tenant's selections need before the
@@ -143,6 +174,7 @@ final class TenantDeployService {
     /// Per-block updates available from newer tags of the tenant's git
     /// sources (fetches the remotes' tag lists).
     func availableBaselineUpdates(for tenant: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
+        let tenant = repairSourceIDs(for: tenant)
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []
         let usedSourceIDs = Set(tenant.blockSelections.map(\.sourceID))
         for source in catalogSources.customSources
@@ -174,7 +206,7 @@ final class TenantDeployService {
         tag: String,
         blockIDs: Set<String>
     ) {
-        var updated = tenant
+        var updated = repairSourceIDs(for: tenantStore.tenant(id: tenant.id) ?? tenant)
         for index in updated.blockSelections.indices
         where updated.blockSelections[index].sourceID == source.id.uuidString {
             if blockIDs.contains(updated.blockSelections[index].blockID) {
@@ -245,8 +277,6 @@ final class TenantDeployService {
         } else if fileManager.fileExists(atPath: adopted.path) {
             let selectedModules = Set(selections.map { "module.\(WorkspaceGenerator.sanitized($0.block.id))" })
             for file in (try? fileManager.contentsOfDirectory(at: adopted, includingPropertiesForKeys: nil)) ?? [] {
-                // versions.tf would duplicate the workspace's own provider
-                // requirements and fail init.
                 if file.lastPathComponent == Self.recoveredImportsFile {
                     // Recovered creates of blocks no longer selected have
                     // nothing left to import into.
@@ -260,6 +290,8 @@ final class TenantDeployService {
                             .write(to: generated.appending(path: "adopted-\(file.lastPathComponent)"))
                     }
                 } else if file.pathExtension == "tf", !file.lastPathComponent.hasSuffix("versions.tf") {
+                    // versions.tf would duplicate the workspace's own provider
+                    // requirements and fail init.
                     try? fileManager.copyItem(
                         at: file,
                         to: generated.appending(path: "adopted-\(file.lastPathComponent)")
@@ -335,11 +367,11 @@ final class TenantDeployService {
         tenantStore.workspaceURL(for: tenant).appending(path: "generated")
     }
 
-    /// Hand-configured objects adopted into the tenant record live here as
-    /// root-level configuration (plus one-shot import blocks until applied).
     /// Import blocks for objects Jamf created despite an error.
     static let recoveredImportsFile = "recovered_import.tf"
 
+    /// Hand-configured objects adopted into the tenant record live here as
+    /// root-level configuration (plus one-shot import blocks until applied).
     func adoptedURL(for tenant: Tenant) -> URL {
         tenantStore.workspaceURL(for: tenant).appending(path: "adopted")
     }
@@ -378,14 +410,20 @@ final class TenantDeployService {
 
     // MARK: State passphrase and recovery escrow
 
-    /// Returns the state passphrase, creating one on first use.
-    func statePassphrase(for tenant: Tenant) -> String {
+    /// Returns the state passphrase, creating one for a tenant that has no
+    /// record yet. A missing passphrase for an existing record is an error:
+    /// a new one could never decrypt it.
+    func statePassphrase(for tenant: Tenant) throws -> String {
         let item = TenantSecrets(tenantID: tenant.id).statePassphrase
         if let existing = item.load() {
             return existing
         }
+        let stateURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
+        guard !FileManager.default.fileExists(atPath: stateURL.path) else {
+            throw DeployError.missingStatePassphrase
+        }
         let fresh = Data((0..<32).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
-        item.save(fresh)
+        guard item.save(fresh) else { throw DeployError.missingStatePassphrase }
         return fresh
     }
 
@@ -414,7 +452,7 @@ final class TenantDeployService {
 
         Recovery passphrase:
 
-            \(statePassphrase(for: tenant))
+            \((try? statePassphrase(for: tenant)) ?? "(not available on this Mac)")
 
         This passphrase encrypts the tenant record (the app's memory of what
         it manages in this tenant). Keep this sheet in a password manager or
@@ -458,7 +496,7 @@ final class TenantDeployService {
         }
         environment["TF_ENCRYPTION"] = """
         key_provider "pbkdf2" "passphrase" {
-          passphrase = "\(statePassphrase(for: tenant))"
+          passphrase = "\(try statePassphrase(for: tenant))"
         }
         method "aes_gcm" "default" {
           keys = key_provider.pbkdf2.passphrase
@@ -486,33 +524,41 @@ final class TenantDeployService {
         return runner
     }
 
-    func cancel(tenant: Tenant, force: Bool = false) {
+    func cancel(tenant: Tenant) {
         let runner = runners[tenant.id]
         Task {
-            await runner?.cancel(force: force)
+            await runner?.cancel()
         }
     }
 
     // MARK: Preview
 
-    func preview(tenant: Tenant) async throws -> PreviewSession {
+    func preview(tenant original: Tenant) async throws -> PreviewSession {
+        guard !busyTenants.contains(original.id) else { throw DeployError.tenantBusy }
+        busyTenants.insert(original.id)
         phase = .generating
         progress = []
-        defer { phase = .idle }
+        defer {
+            phase = .idle
+            busyTenants.remove(original.id)
+        }
 
         if isTeamMode {
             switch try await gitStore.acquireLock(
-                tenantID: tenant.id,
+                tenantID: original.id,
                 engineer: engineerName,
                 operation: "deploy"
             ) {
             case .acquired:
+                heldLocks.insert(original.id)
                 tenantStore.reload()
                 await syncTeamState()
             case .heldByOther(let holder):
                 throw DeployError.lockedByOther(holder.engineer, holder.host)
             }
         }
+        // Read after the pull: a teammate may have changed the baseline.
+        let tenant = repairSourceIDs(for: tenantStore.tenant(id: original.id) ?? original)
 
         try await ensureCatalogCheckouts(for: tenant)
         let catalog = try loadCatalog(for: tenant)
@@ -544,6 +590,8 @@ final class TenantDeployService {
 
         let diagnostics = planRun.events.compactMap(\.diagnostic)
         let summary = PreviewBuilder.build(plan: plan, diagnostics: diagnostics, blockNames: blockNames)
+        // A preview whose sheet already closed must not block later checks.
+        try Task.checkCancellation()
         activePreviewTenants.insert(tenant.id)
         return PreviewSession(
             planFileName: "plan.bin",
@@ -567,12 +615,15 @@ final class TenantDeployService {
 
     func deploy(tenant: Tenant, session: PreviewSession) async throws -> DeployOutcome {
         guard let runner = runners[tenant.id] else { throw DeployError.planExpired }
+        guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
+        busyTenants.insert(tenant.id)
 
         phase = .applying
         progress = []
         defer {
             phase = .idle
             activePreviewTenants.remove(tenant.id)
+            busyTenants.remove(tenant.id)
         }
 
         logEngine("apply", tenant: tenant)
@@ -597,7 +648,7 @@ final class TenantDeployService {
         }
 
         let succeeded = result.events.count { $0.type == .applyComplete }
-        let errors = result.errorDiagnostics.map { diagnostic in
+        var errors = result.errorDiagnostics.map { diagnostic in
             var text = diagnostic.summary
             if let address = diagnostic.address {
                 text = "\(address): \(text)"
@@ -606,6 +657,11 @@ final class TenantDeployService {
                 text += "\n\(detail)"
             }
             return text
+        }
+        // A non-zero exit without a reported error (a crash or a kill) is
+        // still a failed deploy.
+        if result.exitCode != 0 && errors.isEmpty {
+            errors.append("The engine stopped unexpectedly (exit code \(result.exitCode)). The Activity Log has the details.")
         }
 
         // Objects Jamf created despite reporting an error become imports
@@ -659,7 +715,8 @@ final class TenantDeployService {
             note: "\(succeeded) deployed, \(errors.count) failed"
         ))
 
-        var updated = tenant
+        // The store copy: the tenant passed in was read when the sheet opened.
+        var updated = tenantStore.tenant(id: tenant.id) ?? tenant
         updated.lastDeploy = DeployRecord(
             date: .now,
             engineerName: entry.engineerName,
@@ -694,7 +751,8 @@ final class TenantDeployService {
         // a push + lock release in team mode.
         let commitMessage = "Deploy \(tenant.name): \(entry.added) added · \(entry.changed) changed · \(entry.removed) removed · \(errors.count) failed — \(entry.engineerName)"
         if isTeamMode {
-            try? await gitStore.releaseLock(tenantID: tenant.id, message: commitMessage)
+            heldLocks.remove(tenant.id)
+            try? await gitStore.releaseLock(tenantID: tenant.id, engineer: engineerName, message: commitMessage)
             await syncTeamState()
         } else {
             _ = try? await gitStore.commitAll(message: commitMessage)
@@ -762,31 +820,39 @@ final class TenantDeployService {
 
     /// Runs a refresh-only plan and stores what changed outside the app.
     /// Also refreshes the Apple token expiry shown on the dashboard.
-    func checkDrift(tenant: Tenant) async throws {
-        guard isManaged(tenant) else { return }
-        guard !activePreviewTenants.contains(tenant.id) else {
+    func checkDrift(tenant original: Tenant) async throws {
+        guard isManaged(original) else { return }
+        guard !activePreviewTenants.contains(original.id) else {
             throw DeployError.previewInProgress
         }
+        guard !busyTenants.contains(original.id) else { throw DeployError.tenantBusy }
+        busyTenants.insert(original.id)
+        defer { busyTenants.remove(original.id) }
 
         if isTeamMode {
             switch try await gitStore.acquireLock(
-                tenantID: tenant.id,
+                tenantID: original.id,
                 engineer: engineerName,
                 operation: "check"
             ) {
             case .acquired:
+                heldLocks.insert(original.id)
                 tenantStore.reload()
             case .heldByOther(let holder):
                 throw DeployError.lockedByOther(holder.engineer, holder.host)
             }
         }
+        // Read after the pull: a teammate may have changed the baseline.
+        let tenant = repairSourceIDs(for: tenantStore.tenant(id: original.id) ?? original)
         defer {
             let name = tenant.name
             let id = tenant.id
             if isTeamMode {
+                heldLocks.remove(id)
                 Task {
                     try? await self.gitStore.releaseLock(
                         tenantID: id,
+                        engineer: self.engineerName,
                         message: "Check \(name) for changes — \(self.engineerName)"
                     )
                     await self.syncTeamState()
@@ -818,10 +884,14 @@ final class TenantDeployService {
             }
         }
 
+        // Token lookups can take a while; read the tenant afterwards so edits
+        // made meanwhile are kept.
+        var expiry = tenantStore.tenant(id: tenant.id) ?? tenant
+        await refreshTokenExpiry(&expiry)
         var updated = tenantStore.tenant(id: tenant.id) ?? tenant
+        updated.preflight = expiry.preflight
         updated.driftReport = DriftReportBuilder.build(plan: plan, blockNames: blockNames)
         updated.lastDriftCheck = .now
-        await refreshTokenExpiry(&updated)
         tenantStore.update(updated)
         fleetCheckFailures[tenant.id] = nil
     }
@@ -845,7 +915,7 @@ final class TenantDeployService {
         while !remaining.isEmpty {
             let batch = Array(remaining.prefix(Self.fleetCheckConcurrency))
             remaining = remaining.dropFirst(Self.fleetCheckConcurrency)
-            // Plain child tasks; the engine work happens off-main inside
+            // Unstructured tasks; the engine work happens off-main inside
             // each tenant's runner, so the batch runs concurrently.
             let tasks = batch.map { tenant in
                 Task {
@@ -867,6 +937,17 @@ final class TenantDeployService {
 
     func fleetCheckFailure(for tenantID: UUID) -> String? {
         fleetCheckFailures[tenantID]
+    }
+
+    /// One tenant's check from the UI: a failure is recorded where the
+    /// dashboard and the tenant page show it, instead of being dropped.
+    func checkDriftRecordingFailure(tenant: Tenant) async {
+        do {
+            try await checkDrift(tenant: tenant)
+            fleetCheckFailures[tenant.id] = nil
+        } catch {
+            fleetCheckFailures[tenant.id] = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     private func refreshTokenExpiry(_ tenant: inout Tenant) async {
@@ -1045,11 +1126,13 @@ final class TenantDeployService {
         case lockedByOther(String, String)
         case missingSecretSetting(block: String, setting: String)
         case previewInProgress
+        case tenantBusy
+        case missingStatePassphrase
 
         var errorDescription: String? {
             switch self {
             case .missingCredentials:
-                "The tenant's client secret is missing from the Keychain. Remove and reconnect the tenant."
+                "The tenant's client secret is missing from the Keychain. Enter it with Update Client Secret… on the tenant page."
             case .planExpired:
                 "This preview is no longer valid. Run Preview Changes again before deploying."
             case .blockMissingFromCatalog(let id):
@@ -1064,6 +1147,10 @@ final class TenantDeployService {
                 "The \"\(block)\" block needs its \"\(setting)\" secret on this Mac. Enter it in the block's settings — secrets stay in each engineer's Keychain."
             case .previewInProgress:
                 "A preview is open for this tenant. Finish or close it before checking for changes."
+            case .missingStatePassphrase:
+                "This tenant's record is encrypted with a passphrase this Mac does not have. Enter the passphrase from the tenant's recovery sheet with Update Client Secret… on the tenant page; in Team Mode, Sync Now fetches shared credentials."
+            case .tenantBusy:
+                "This tenant is already being previewed, checked or deployed. Try again when that finishes."
             }
         }
     }

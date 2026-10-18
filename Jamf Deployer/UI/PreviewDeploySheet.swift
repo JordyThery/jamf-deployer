@@ -22,6 +22,8 @@ struct PreviewDeploySheet: View {
         case nothingToDeploy
         /// Closed before deploying, or the preview failed.
         case closedWithoutDeploying
+        /// The deploy itself failed; the tenant may be partly changed.
+        case deployFailed(String)
     }
 
     enum Stage {
@@ -32,11 +34,14 @@ struct PreviewDeploySheet: View {
         case deploying(PreviewSession)
         case finished(TenantDeployService.DeployOutcome)
         case failed(String, detail: String)
+        case deployFailed(String, detail: String)
     }
 
     @State private var stage: Stage = .previewing
     @State private var typedName = ""
     @State private var isExportingRecovery = false
+    /// Built when the user saves the sheet, never during rendering.
+    @State private var recoveryText = ""
     @AppStorage("showsTechnicalDetails") private var showsTechnicalDetails = false
 
     private var tenant: Tenant? {
@@ -66,7 +71,7 @@ struct PreviewDeploySheet: View {
         }
         .fileExporter(
             isPresented: $isExportingRecovery,
-            document: TextExportDocument(text: tenant.map { deployService.recoverySheetText(for: $0) } ?? ""),
+            document: TextExportDocument(text: recoveryText),
             contentType: .plainText,
             defaultFilename: "Jamf Deployer Recovery — \(tenant?.name ?? "tenant").txt"
         ) { result in
@@ -77,6 +82,11 @@ struct PreviewDeploySheet: View {
                 }
             }
         }
+    }
+
+    private var isDeployFailure: Bool {
+        if case .deployFailed = stage { return true }
+        return false
     }
 
     private var isBusy: Bool {
@@ -172,12 +182,14 @@ struct PreviewDeploySheet: View {
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-        case .failed(let message, let detail):
+        case .failed(let message, let detail), .deployFailed(let message, let detail):
             VStack(alignment: .leading, spacing: 10) {
                 ContentUnavailableView(
-                    "Preview Failed",
+                    isDeployFailure ? "Deploy Failed" : "Preview Failed",
                     systemImage: "xmark.octagon",
-                    description: Text(message)
+                    description: Text(isDeployFailure
+                        ? "\(message)\nSome changes may have been applied. Check History, then run a new preview."
+                        : message)
                 )
                 if showsTechnicalDetails, !detail.isEmpty {
                     ScrollView {
@@ -297,12 +309,15 @@ struct PreviewDeploySheet: View {
                 .help(session.summary.isEmpty ? "There is nothing to deploy" : "Write these changes to the tenant")
 
         case .needsRecovery:
-            Label("First deploy: save the recovery sheet for this tenant's record first.", systemImage: "key")
+            Label("First deploy: save this tenant's recovery sheet before deploying.", systemImage: "key")
                 .font(.callout)
             Spacer()
             Button("Close") { close(.closedWithoutDeploying) }
                 .keyboardShortcut(.cancelAction)
-            Button("Save Recovery Sheet…") { isExportingRecovery = true }
+            Button("Save Recovery Sheet…") {
+                recoveryText = tenant.map { deployService.recoverySheetText(for: $0) } ?? ""
+                isExportingRecovery = true
+            }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
 
@@ -334,6 +349,11 @@ struct PreviewDeploySheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
 
+        case .deployFailed(let message, _):
+            Spacer()
+            Button("Close") { close(.deployFailed(message)) }
+                .keyboardShortcut(.defaultAction)
+
         case .failed:
             Spacer()
             Button("Close") { close(.closedWithoutDeploying) }
@@ -345,9 +365,6 @@ struct PreviewDeploySheet: View {
             .buttonStyle(.borderedProminent)
 
         case .previewing:
-            Text("Nothing happens without a preview.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
             Spacer()
             Button("Cancel") {
                 if let tenant {
@@ -430,10 +447,10 @@ struct PreviewDeploySheet: View {
             } catch {
                 let raw = String(describing: error)
                 if let described = (error as? LocalizedError)?.errorDescription {
-                    stage = .failed(described, detail: raw)
+                    stage = .deployFailed(described, detail: raw)
                 } else {
                     let translated = ErrorTranslation.translate(raw)
-                    stage = .failed(translated.message, detail: raw)
+                    stage = .deployFailed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: raw)
                 }
             }
         }

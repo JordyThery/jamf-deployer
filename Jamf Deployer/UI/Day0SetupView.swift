@@ -96,7 +96,7 @@ struct Day0SetupView: View {
                 if case .pending = step.state {
                     actions(for: step, service: service)
                 } else if case .skipped = step.state {
-                    Button("Unskip") { setSkipped(step.id, false) }
+                    Button("Undo Skip") { setSkipped(step.id, false) }
                         .controlSize(.small)
                 }
             }
@@ -126,7 +126,7 @@ struct Day0SetupView: View {
                 DatePicker("Completed on", selection: $apnsDate, displayedComponents: .date)
                     .frame(maxWidth: 220)
                 Button("Mark as Done") {
-                    var updated = tenant
+                    var updated = tenantStore.tenant(id: tenant.id) ?? tenant
                     updated.day0.apnsConfirmedDate = apnsDate
                     tenantStore.update(updated)
                     detect()
@@ -174,7 +174,7 @@ struct Day0SetupView: View {
                 HStack {
                     TextField("API client ID", text: $protectClientID)
                         .font(.callout.monospaced())
-                    SecureField("API client password", text: $protectSecret)
+                    SecureField("API client secret", text: $protectSecret)
                 }
                 Button("Link Jamf Protect") {
                     registerProtect()
@@ -229,7 +229,7 @@ struct Day0SetupView: View {
     }
 
     private func setSkipped(_ stepID: String, _ skipped: Bool) {
-        var updated = tenant
+        var updated = tenantStore.tenant(id: tenant.id) ?? tenant
         if skipped {
             if !updated.day0.skippedSteps.contains(stepID) {
                 updated.day0.skippedSteps.append(stepID)
@@ -300,11 +300,14 @@ struct Day0SetupView: View {
                 clientID: protectClientID,
                 password: protectSecret
             )
-            var updated = tenant
+            // Re-read after the network call so newer changes are kept.
+            var updated = tenantStore.tenant(id: tenant.id) ?? tenant
             updated.protectURL = protectURL
             updated.protectClientID = protectClientID
             tenantStore.update(updated)
-            TenantSecrets(tenantID: tenant.id).protectClientSecret.save(protectSecret)
+            guard TenantSecrets(tenantID: tenant.id).protectClientSecret.save(protectSecret) else {
+                throw Day0Error.keychainSaveFailed
+            }
         }
     }
 }
@@ -324,5 +327,16 @@ nonisolated struct PEMDocument: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: data)
+    }
+}
+
+nonisolated enum Day0Error: LocalizedError {
+    case keychainSaveFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .keychainSaveFailed:
+            "Jamf Protect is linked, but its client secret could not be saved to the Keychain. Enter it again in Day 0 Setup."
+        }
     }
 }

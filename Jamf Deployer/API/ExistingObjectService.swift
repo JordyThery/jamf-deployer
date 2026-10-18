@@ -8,7 +8,7 @@ nonisolated enum ExistingObjectService {
         case missingSecret
 
         var errorDescription: String? {
-            "The tenant's stored credentials are missing. Remove and reconnect the tenant."
+            "The tenant's client secret is missing from the Keychain. Enter it with Update Client Secret… on the tenant page."
         }
     }
 

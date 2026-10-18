@@ -37,7 +37,7 @@ enum JamfDeployerTour {
         ),
         TourStep(
             title: "Everything is recorded",
-            text: "Every preview and deploy lands in History, and the Activity Log window (⌘⇧L) shows each call the app makes. Secrets are never logged."
+            text: "Every deploy lands in History, and the Activity Log window (⌘⇧L) shows each call the app makes. Secrets are never logged."
         ),
         TourStep(
             title: "Try it on a test tenant",

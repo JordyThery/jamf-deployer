@@ -18,6 +18,7 @@ struct BaselineEditorView: View {
     @State private var isSavingPreset = false
     @State private var blockPendingRemoval: BlockMetadata?
     @State private var isCheckingUpdates = false
+    @State private var presetPendingApply: Preset?
 
     private var selectionIndex: [String: BlockSelection] {
         Dictionary(uniqueKeysWithValues: tenant.blockSelections.map { ($0.blockID, $0) })
@@ -28,7 +29,9 @@ struct BaselineEditorView: View {
             HStack {
                 Menu("Apply a Preset", systemImage: "square.stack.3d.up") {
                     ForEach(catalog.presets) { preset in
-                        Button(preset.name) { apply(preset) }
+                        Button(preset.name) {
+                            if tenant.blockSelections.isEmpty { apply(preset) } else { presetPendingApply = preset }
+                        }
                             .help(preset.summary)
                     }
                     if !catalog.presets.isEmpty { Divider() }
@@ -98,6 +101,21 @@ struct BaselineEditorView: View {
         }
         .sheet(isPresented: $isCheckingUpdates) {
             BaselineUpdateSheet(tenant: tenant)
+        }
+        .confirmationDialog(
+            "Apply “\(presetPendingApply?.name ?? "")”?",
+            isPresented: Binding(
+                get: { presetPendingApply != nil },
+                set: { if !$0 { presetPendingApply = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Apply Preset") {
+                if let preset = presetPendingApply { apply(preset) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The preset replaces the current block selection. Deployed blocks it leaves out stop being managed; their objects stay in Jamf.")
         }
         .confirmationDialog(
             "Remove “\(blockPendingRemoval?.name ?? "")” from the baseline?",
@@ -204,7 +222,7 @@ struct BaselineEditorView: View {
                 Spacer()
 
                 if isSelected && (block.scope.kind != .none || !block.settings.isEmpty) {
-                    Button(expandedBlockID == block.id ? "Hide Settings" : "Settings…") {
+                    Button(expandedBlockID == block.id ? "Hide Settings" : "Show Settings") {
                         expandedBlockID = expandedBlockID == block.id ? nil : block.id
                     }
                     .buttonStyle(.borderless)
@@ -223,7 +241,7 @@ struct BaselineEditorView: View {
             }
 
             if isSelected, let missing = prerequisitesMissing.first {
-                Label("Also selects \(missing) — this block needs it.", systemImage: "info.circle")
+                Label("Also selects \(catalog.block(id: missing)?.name ?? missing) — this block needs it.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -353,7 +371,12 @@ struct BaselineEditorView: View {
             settings[setting.key] = setting.default
         }
         let withFoundation = selectedIDs.contains("foundation") && catalog.block(id: "foundation") != nil
-        var selection = BlockSelection(blockID: block.id, settings: settings, scope: "")
+        var selection = BlockSelection(
+            blockID: block.id,
+            sourceID: catalog.sourceIDByBlockID[block.id] ?? "official",
+            settings: settings,
+            scope: ""
+        )
         if block.scope.kind != .none {
             if let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)) {
                 if selectedIDs.contains(provided.blockID) { selection.providedScope = provided }
@@ -458,6 +481,12 @@ struct BaselineEditorView: View {
             }
             return selection
         }
+        // Deployed blocks the preset leaves out are released, never deleted.
+        for blockID in tenant.deployedBlockVersions.keys where !presetIDs.contains(blockID)
+            && !updated.pendingRemovals.contains(where: { $0.blockID == blockID }) {
+            updated.pendingRemovals.append(BlockRemoval(blockID: blockID, keepInJamf: true))
+        }
+        updated.pendingRemovals.removeAll { presetIDs.contains($0.blockID) }
         tenantStore.update(updated)
     }
 }

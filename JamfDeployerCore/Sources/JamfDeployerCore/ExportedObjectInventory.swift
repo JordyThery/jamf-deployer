@@ -97,7 +97,11 @@ public nonisolated enum ExportedObjectInventory {
             if let value = values[name] {
                 literal[name] = "\"\(value)\""
             } else if let match = declaration.firstMatch(of: /(?m)^\s*default\s*=\s*(.+?)\s*$/) {
-                literal[name] = String(match.1)
+                // Only single-line defaults inline; `[`, `{` or a heredoc
+                // opening a multi-line value stays a variable.
+                let value = String(match.1)
+                let opensBlock = ["[", "{"].contains(value) || value.hasPrefix("<<")
+                if !opensBlock { literal[name] = value }
             }
         }
         for (name, value) in values where literal[name] == nil { literal[name] = "\"\(value)\"" }
@@ -237,9 +241,8 @@ public nonisolated enum ExportedObjectInventory {
 
     /// PreStage sections the exporter can leave out (device naming,
     /// purchasing, location, account settings, Setup Assistant skips) would
-    /// be cleared by the
-    /// first deploy after adoption. They are ignored instead, so the values
-    /// in Jamf stay as they are.
+    /// be cleared by the first deploy after adoption. They are ignored
+    /// instead, so the values in Jamf stay as they are.
     static let omittablePreStageSections: [String: [String]] = [
         "jamfplatform_pro_computer_prestage_enrollment": ["account_settings", "location_information", "purchasing_information", "skip_setup_items"],
         "jamfplatform_pro_mobile_device_prestage_enrollment": ["location_information", "names", "purchasing_information", "skip_setup_items"],

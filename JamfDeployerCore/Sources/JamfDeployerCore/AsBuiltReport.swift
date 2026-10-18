@@ -48,7 +48,7 @@ public nonisolated enum AsBuiltReport {
         lines.append("Generated \(input.date.formatted(date: .long, time: .shortened)) by Jamf Deployer \(input.appVersion).")
         let total = sections.values.map(\.count).reduce(0, +)
         lines.append("")
-        lines.append("**\(total) objects** across \(sections.count) areas.")
+        lines.append("**\(total) object\(total == 1 ? "" : "s")** across \(sections.count) area\(sections.count == 1 ? "" : "s").")
 
         for areaName in sections.keys.sorted() {
             lines.append("")

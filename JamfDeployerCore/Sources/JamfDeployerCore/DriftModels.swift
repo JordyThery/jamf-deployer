@@ -116,9 +116,11 @@ public nonisolated enum DriftReportBuilder {
             let new = afterObject[key] ?? .null
             guard old != new else { continue }
             let path = prefix.isEmpty ? key : "\(prefix).\(key)"
+            // A mask of `true` covers the whole value, nested fields included.
+            let wholeSensitive = sensitiveBefore[key]?.boolValue == true || sensitiveAfter[key]?.boolValue == true
 
             // Recurse into nested objects so the exact field is named.
-            if depth < 3, old.objectValue != nil, new.objectValue != nil {
+            if !wholeSensitive, depth < 3, old.objectValue != nil, new.objectValue != nil {
                 diffs.append(contentsOf: deepFieldDiffs(
                     before: old,
                     after: new,
@@ -132,15 +134,22 @@ public nonisolated enum DriftReportBuilder {
 
             // Same-length object arrays diff element-wise, so a change
             // inside a blueprint's component list names its exact field.
-            if depth < 3,
+            if !wholeSensitive, depth < 3,
                case .array(let oldItems) = old,
                case .array(let newItems) = new,
                oldItems.count == newItems.count,
                oldItems.allSatisfy({ $0.objectValue != nil }) {
+                // Sensitivity masks mirror the value: one mask per element.
+                func elementMask(_ mask: JSONValue?, _ index: Int) -> JSONValue? {
+                    guard case .array(let masks)? = mask, index < masks.count else { return nil }
+                    return masks[index]
+                }
                 for (index, pair) in zip(oldItems, newItems).enumerated() where pair.0 != pair.1 {
                     diffs.append(contentsOf: deepFieldDiffs(
                         before: pair.0,
                         after: pair.1,
+                        beforeSensitive: elementMask(sensitiveBefore[key], index),
+                        afterSensitive: elementMask(sensitiveAfter[key], index),
                         prefix: "\(path)[\(index)]",
                         depth: depth + 1
                     ))
@@ -148,14 +157,13 @@ public nonisolated enum DriftReportBuilder {
                 continue
             }
 
-            let sensitive = sensitiveBefore[key]?.boolValue == true || sensitiveAfter[key]?.boolValue == true
-            let maskedOld = sensitiveBefore[key]?.boolValue == true ? "••••••" : old.displayText
-            let maskedNew = sensitiveAfter[key]?.boolValue == true ? "••••••" : new.displayText
+            let maskedOld = wholeSensitive ? "••••••" : old.displayText
+            let maskedNew = wholeSensitive ? "••••••" : new.displayText
             diffs.append(FieldDiff(
                 path: path,
                 before: maskedOld,
                 after: maskedNew,
-                rawAfter: sensitive ? nil : new.settingValue
+                rawAfter: wholeSensitive ? nil : new.settingValue
             ))
         }
         return diffs

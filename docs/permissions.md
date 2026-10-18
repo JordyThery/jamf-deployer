@@ -51,8 +51,15 @@ or read/update for tenant-wide settings).
 | Jamf Protect Baseline | none on the Platform client — see the Protect client below |
 
 Picking an existing group or category in a block's settings lists them
-with `computer-groups:read` and `categories:read`; mobile-scoped blocks
-list mobile device groups with the mobile device group read privilege.
+with read access to computer groups (mobile device groups for iPad and
+iPhone blocks) and `categories:read`. The App Store pickers read the
+tenant's Apps and Books locations and their licensed content with
+`volume-purchasing-locations:read`.
+
+Captured blocks list the privileges recorded at export, narrowed to their
+own object types, plus read access for the lookups capture adds: the
+Automated Device Enrollment instance, Jamf's built-in groups and the Apps
+and Books location.
 
 ### Per feature
 
@@ -61,8 +68,10 @@ list mobile device groups with the mobile device group read privilege.
 | **Export / capture blocks** | Read privileges for the object types you export — nothing is ever written during an export |
 | **Adopt** | Read during discovery; the adopted objects' own create/read/update/delete on first deploy |
 | **Check for changes (drift)** | The read half of the deployed blocks' privileges |
+| **Day 0: ADE public key download** | `device-enrollment-program-instances:read` |
 | **Day 0: ADE token upload** | Create/update for device enrollment instances |
-| **Day 0: VPP token upload** | Create/update for volume purchasing locations |
+| **Day 0: Apps and Books token upload** | Create/update for volume purchasing locations |
+| **Day 0: Self Service branding** | Create for Self Service branding |
 | **Day 0: Protect registration** | The Jamf Pro ↔ Protect registration privilege |
 
 ## Jamf Protect API client

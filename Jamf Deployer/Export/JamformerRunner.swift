@@ -45,6 +45,23 @@ actor JamformerRunner {
         return types
     }
 
+    /// Removes export folders older than a day from the temporary
+    /// directory; each holds a copy of the provider download.
+    nonisolated static func removeStaleExports() {
+        let fileManager = FileManager.default
+        let temporary = fileManager.temporaryDirectory
+        let cutoff = Date.now.addingTimeInterval(-86_400)
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: temporary, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+        for entry in entries where entry.lastPathComponent.hasPrefix("jamf-deployer-export-") {
+            let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, modified < cutoff {
+                try? fileManager.removeItem(at: entry)
+            }
+        }
+    }
+
     /// Exports the chosen object types into a fresh temp folder.
     /// `onLine` receives each output line as it happens, for live progress.
     func export(

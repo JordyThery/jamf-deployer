@@ -9,8 +9,8 @@ The app ships the blocks that carry **no configuration opinions of their own** �
 | Built-in block | Creates | Impact |
 | --- | --- | --- |
 | **App Catalog** | Apps from Jamf's App Catalog, installed and kept up to date automatically — no packaging. Pick apps with the built-in picker. | Medium |
-| **Mac App Store Apps** | Mac App Store apps the tenant holds Apps and Books licenses for, assigned to devices — no Apple Account needed. Pick apps with the built-in picker. | Medium |
-| **iPad and iPhone Apps** | App Store apps for iPads and iPhones the tenant holds licenses for, assigned to devices as managed apps. | Medium |
+| **Mac App Store Apps** | Mac App Store apps the tenant holds Apps and Books licenses for, assigned to devices — no Apple Account needed on the Mac. Pick apps with the built-in picker. | Medium |
+| **iPad and iPhone Apps** | App Store apps for iPads and iPhones the tenant holds Apps and Books licenses for, assigned to devices as managed apps. Pick apps with the built-in picker. | Medium |
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
 | **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
 
@@ -38,7 +38,9 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Mobile Passcode** | A passcode policy for iPads and iPhones: minimum length, no simple values, automatic lock. | Medium |
 | **Mobile Enrollment** | A mobile PreStage for Automated Device Enrollment: supervised, MDM non-removable, consumer setup panes skipped. | Medium |
 
-The App Store blocks list only apps the tenant holds Apps and Books licenses for — every tenant they deploy to needs licenses for the same apps, free apps included. The built-in App Catalog block picks its apps with a searchable picker, with per-app delivery, update behavior and category (an app without its own category uses the block's default category):
+Both App Store blocks pick apps with **Choose Apps…**, which lists only apps the tenant holds Apps and Books licenses for. Every tenant they deploy to needs licenses for the same apps, free apps included. Per app you choose the delivery (install automatically or offer in Self Service) and a category. When a tenant has several Apps and Books locations, the picker asks which one; the block stores its name in the **Apps and Books location** setting, which is looked up by name on each tenant.
+
+The App Catalog block picks its apps with a searchable picker, with per-app delivery, update behavior and category (an app without its own category uses the block's default category):
 
 ![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
 
@@ -60,7 +62,7 @@ A tenant-wide setting can belong to one block only: selecting two blocks that ma
 
 ## Presets
 
-Presets come from the catalogs you follow. The demo catalog ships three:
+Presets come from the catalogs you follow. The demo catalog ships four:
 
 - **Standard** — device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1 (monitor), Rosetta 2.
 - **Minimal** — device groups, categories and software updates; a starting point to grow from.
@@ -93,10 +95,10 @@ Three ways:
    - PreStages keep their enrollment customization when it is part of the export; otherwise they deploy without one, with a warning. Jamf's own Device Compliance group is looked up by name like the All Managed groups.
    - Catalogs can contain blocks written for a newer version of the app; those are listed as unavailable instead of preventing the rest of the catalog from loading.
 
-2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks…** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
+2. **Duplicate a block.** Built-in blocks are read-only — they ship inside the app and update with it — and blocks from a Git catalog follow their published tag. **Duplicate to My Blocks…** in a block's detail view copies either kind into one of your folder sources under a new ID, where everything is editable.
 3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.
 
-Custom blocks are managed from their detail view: edit the name, summary and version in place, reveal the folder in Finder for deeper changes, or delete the block (the app warns when tenants still select it). Sources themselves are managed under **Manage Sources…** in the library's toolbar: **Add Folder…** uses a new or existing folder for your own blocks and presets, **Add Git Catalog…** follows a published catalog, and **Remove…** detaches a source without deleting anything.
+Custom blocks are managed from their detail view: **Edit Details…** changes the name, summary, version and category; **Reveal in Finder** opens the folder for deeper changes; **Delete Block…** removes it (the app warns when tenants still select it); **Mark as Reviewed** clears a captured block's review flag. Capturing never replaces an existing block: choose a new block ID, or delete the old block first. Sources themselves are managed under **Manage Sources…** in the library's toolbar: **Add Folder…** uses a new or existing folder for your own blocks and presets, **Add Git Catalog…** follows a published catalog, and **Remove…** detaches a source without deleting anything.
 
 ## Catalog sources
 
@@ -105,4 +107,4 @@ Blocks come from catalog sources. Besides the built-in catalog:
 - **Local folder** — a folder of blocks on disk (where captured blocks land). Always used at its current content.
 - **Git repository** — a repository of blocks, pinned by release tag. Tenants record the tag they use, so a published update never changes a tenant until you opt in. This is the way to share a catalog across a team or publish one publicly.
 
-On conflicting block IDs the built-in catalog always wins; custom blocks are used only where a tenant explicitly selects them.
+On conflicting block IDs the built-in catalog always wins. A block selected from a Git catalog follows the release tag the tenant is pinned to; **Baseline Updates…** in the tenant's baseline and **Roll Out…** on the dashboard move tenants to a newer release.

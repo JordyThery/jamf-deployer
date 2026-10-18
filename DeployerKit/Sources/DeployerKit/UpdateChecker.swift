@@ -28,9 +28,9 @@ public nonisolated struct AppRelease: Sendable {
     public var zipAssetName: String
 }
 
-/// Checks GitHub Releases for a newer version. Carried over from Intune
-/// Deployer: at most one automatic check per 24 hours, silent failures on
-/// the automatic path, and a release is only offered automatically once.
+/// Checks GitHub Releases for a newer version: at most one automatic check
+/// per 24 hours, silent failures on the automatic path, and a release is
+/// only offered automatically once.
 @Observable
 public final class UpdateChecker {
     public enum Status {

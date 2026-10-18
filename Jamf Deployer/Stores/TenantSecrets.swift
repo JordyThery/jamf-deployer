@@ -20,7 +20,8 @@ nonisolated struct TenantSecrets: Sendable {
     }
 
     /// Encrypts the tenant record (OpenTofu state). Losing it makes the
-    /// record unreadable — recovery escrow is enforced at first deploy.
+    /// record unreadable, so a recovery sheet is required before the first
+    /// deploy.
     var statePassphrase: KeychainItem {
         item(purpose: "state-passphrase")
     }
@@ -37,6 +38,7 @@ nonisolated struct TenantSecrets: Sendable {
         platformClientSecret.delete()
         protectClientSecret.delete()
         statePassphrase.delete()
+        KeychainItem.deleteAll(service: "\(Self.bundleID).block-setting", accountPrefix: "\(tenantID.uuidString).")
     }
 
     private func item(purpose: String) -> KeychainItem {

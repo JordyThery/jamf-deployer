@@ -19,6 +19,9 @@ struct FleetDashboardView: View {
                 let needsAttention = tenant.preflight?.allGreen == false
                     || !tenant.outstandingDrift.isEmpty
                     || (tenant.lastDeploy?.failed ?? 0) > 0
+                    || deployService.fleetCheckFailure(for: tenant.id) != nil
+                    || [tenant.preflight?.adeTokenExpiration, tenant.preflight?.vppTokenExpiration]
+                        .contains { daysUntil($0).map { $0 < 30 } ?? false }
                 guard needsAttention else { return false }
             }
             guard !searchText.isEmpty else { return true }
@@ -143,15 +146,6 @@ struct FleetDashboardView: View {
         }
     }
 
-    private enum StatusKind {
-        case neverDeployed
-        case attention
-    }
-
-    private func statusKind(for tenant: Tenant) -> StatusKind {
-        tenant.preflight?.allGreen == false ? .attention : .neverDeployed
-    }
-
     @ViewBuilder
     private func statusLabel(for tenant: Tenant) -> some View {
         if tenant.isHandedOver {
@@ -198,7 +192,7 @@ struct FleetDashboardView: View {
                 }.count
             } ?? 0
             HStack(spacing: 5) {
-                Text("\(tenant.deployedBlockVersions.count) blocks")
+                Text("\(tenant.deployedBlockVersions.count) block\(tenant.deployedBlockVersions.count == 1 ? "" : "s")")
                 if updates > 0 {
                     StatusBadge("Update available", style: .warning)
                 }
@@ -211,16 +205,27 @@ struct FleetDashboardView: View {
 
     @ViewBuilder
     private func expiryText(_ raw: String?) -> some View {
-        if let raw, let date = parseExpiry(raw) {
-            let days = Calendar.current.dateComponents([.day], from: .now, to: date).day ?? 0
+        if let raw, let date = parseExpiry(raw), let days = daysUntil(raw) {
             Text(date, format: .dateTime.day().month().year())
                 .foregroundStyle(days < 30 ? AnyShapeStyle(.yellow) : AnyShapeStyle(.primary))
-                .help(days < 30 ? "Expires in \(days) days — renew it soon" : "Expires in \(days) days")
+                .help(expiryHelp(days))
         } else {
             Text("—")
                 .foregroundStyle(.secondary)
                 .help("Run a preflight on the tenant to read token expiry")
         }
+    }
+
+    private func daysUntil(_ raw: String?) -> Int? {
+        guard let raw, let date = parseExpiry(raw) else { return nil }
+        return Calendar.current.dateComponents([.day], from: .now, to: date).day
+    }
+
+    private func expiryHelp(_ days: Int) -> String {
+        let plural = abs(days) == 1 ? "" : "s"
+        if days < 0 { return "Expired \(-days) day\(plural) ago — renew it in Jamf Pro" }
+        if days < 30 { return "Expires in \(days) day\(plural) — renew it soon" }
+        return "Expires in \(days) day\(plural)"
     }
 
     private func parseExpiry(_ raw: String) -> Date? {

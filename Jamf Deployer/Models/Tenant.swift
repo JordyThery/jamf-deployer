@@ -52,9 +52,9 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
 
     /// Prefix applied to every object name this app creates in the tenant.
     var namePrefix: String
-    /// Catalog source → pinned release tag. Populated from Phase 2.
+    /// Git catalog source ID → the release tag this tenant is pinned to.
     var catalogPins: [String: String]
-    /// Selected building blocks. Populated from Phase 2.
+    /// Selected building blocks.
     var blockSelections: [BlockSelection]
 
     /// Manual Day 0 progress (live checks run on demand and are not stored).

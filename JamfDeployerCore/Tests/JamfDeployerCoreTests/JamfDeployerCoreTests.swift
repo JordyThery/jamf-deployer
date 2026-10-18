@@ -654,6 +654,50 @@ struct BlockCaptureTests {
         #expect((manifest?["requires"] as? [String]) == [])
     }
 
+    /// Exclusions keep their captured wiring: only targets collapse onto the
+    /// per-tenant scope, or the policy would exclude its own target group.
+    @Test func perTenantCaptureLeavesExclusionsAlone() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "exclusions-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let source = FileManager.default.temporaryDirectory
+            .appending(path: "exclusions-src-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: exportFixtureURL(), to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let policyURL = source.appending(path: "pro_policy.tf")
+        let original = try String(contentsOf: policyURL, encoding: .utf8)
+        try original.replacingOccurrences(
+            of: "exclusions = {\n      computer_group_ids = []",
+            with: "exclusions = {\n      computer_group_ids = [\"70\"]"
+        ).write(to: policyURL, atomically: true, encoding: .utf8)
+
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "exclusions-block",
+            name: "Exclusions",
+            summary: "Policy with an exclusion.",
+            namePrefix: "JD - ",
+            sourceDirectory: source,
+            catalogRootDirectory: destination,
+            rebind: .perTenant
+        ))
+        let policy = try String(contentsOf: result.blockFolderURL.appending(path: "pro_policy.tf"), encoding: .utf8)
+        let exclusions = try #require(policy.range(of: #"exclusions = \{[^}]*\}"#, options: .regularExpression))
+        #expect(!policy[exclusions].contains("var.scope_jamf_pro_group_id"))
+        #expect(policy.contains("computer_group_ids = [var.scope_jamf_pro_group_id]"))
+    }
+
+    @Test func mentionsMatchesWholeAddressesOnly() {
+        #expect(BlockCapture.mentions("icon_id = jamfplatform_pro_icon.icon_9.id", address: "jamfplatform_pro_icon.icon_9"))
+        #expect(!BlockCapture.mentions("icon_id = jamfplatform_pro_icon.icon_99.id", address: "jamfplatform_pro_icon.icon_9"))
+        #expect(!BlockCapture.mentions("x = jamfplatform_pro_script.foo_bar.id", address: "jamfplatform_pro_script.foo"))
+    }
+
+    @Test func outsideExclusionsSkipsNestedObjects() {
+        let text = "a = 1\nexclusions = {\n  inner = { a = 1 }\n  a = 1\n}\na = 1"
+        let result = BlockCapture.outsideExclusions(text) { $0.replacingOccurrences(of: "a = 1", with: "a = 2") }
+        #expect(result == "a = 2\nexclusions = {\n  inner = { a = 1 }\n  a = 1\n}\na = 2")
+    }
+
     @Test func prestigeWiresToDestinationEnrollmentInstance() throws {
         let destination = FileManager.default.temporaryDirectory
             .appending(path: "prestage-test-\(UUID().uuidString)")
@@ -817,6 +861,18 @@ struct AsBuiltTests {
 
 @Suite("Catalog merging")
 struct CatalogMergeTests {
+    /// Catalog values end up in generated configuration and paths, so a
+    /// block with an unsafe ID or setting key is skipped.
+    @Test func rejectsBlocksWithUnsafeIdentifiers() throws {
+        let official = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        var block = try #require(official.blocks.first)
+        #expect(LoadedCatalog.hasSafeIdentifiers(block))
+        block.id = "evil\" { }"
+        #expect(!LoadedCatalog.hasSafeIdentifiers(block))
+        block.id = "../escape"
+        #expect(!LoadedCatalog.hasSafeIdentifiers(block))
+    }
+
     @Test func mergesCustomSourceAfterOfficial() throws {
         let official = try LoadedCatalog.load(from: CatalogTests.catalogURL)
 
@@ -834,10 +890,14 @@ struct CatalogMergeTests {
             sourceDirectory: Bundle.module.url(forResource: "Fixtures/jamformer-export", withExtension: nil)!,
             catalogRootDirectory: customRoot
         ))
-        let custom = try LoadedCatalog.load(from: customRoot)
+        var custom = try LoadedCatalog.load(from: customRoot)
+        custom.sourceID = "source-1"
 
         let merged = LoadedCatalog.merge([official, custom])
         #expect(merged.blocks.count == official.blocks.count + 1)
+        // Selections record where a block comes from, so release pins apply.
+        #expect(merged.sourceIDByBlockID["captured-rosetta"] == "source-1")
+        #expect(official.blocks.allSatisfy { merged.sourceIDByBlockID[$0.id] == nil })
         #expect(merged.block(id: "captured-rosetta") != nil)
         #expect(merged.sourceName(for: "captured-rosetta") == "My Blocks")
         #expect(merged.sourceName(for: "foundation") == "Built-in")
@@ -974,6 +1034,30 @@ struct DriftBindingTests {
         let diff = try #require(diffs.first)
         #expect(diff.path == "component_blocks[0].software_update_settings.deferral_major_period_days")
         #expect(diff.rawAfter == "30")
+    }
+
+    /// Drift reports are saved with the tenant record, so sensitive values
+    /// must be masked at every depth.
+    @Test func deepDiffsMaskSensitiveValuesInListsAndWholeObjects() throws {
+        func json(_ text: String) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)) }
+        let listDiffs = DriftReportBuilder.deepFieldDiffs(
+            before: try json(#"{"local_accounts":[{"name":"admin","password":"old"}]}"#),
+            after: try json(#"{"local_accounts":[{"name":"admin","password":"new"}]}"#),
+            beforeSensitive: try json(#"{"local_accounts":[{"password":true}]}"#),
+            afterSensitive: try json(#"{"local_accounts":[{"password":true}]}"#)
+        )
+        #expect(listDiffs.count == 1)
+        #expect(listDiffs.first?.after == "••••••")
+        #expect(listDiffs.first?.rawAfter == nil)
+
+        let objectDiffs = DriftReportBuilder.deepFieldDiffs(
+            before: try json(#"{"credentials":{"secret":"old"}}"#),
+            after: try json(#"{"credentials":{"secret":"new"}}"#),
+            beforeSensitive: try json(#"{"credentials":true}"#),
+            afterSensitive: try json(#"{"credentials":true}"#)
+        )
+        #expect(objectDiffs.count == 1)
+        #expect(!objectDiffs.contains { $0.before.contains("old") || $0.after.contains("new") })
     }
 }
 

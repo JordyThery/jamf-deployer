@@ -24,6 +24,7 @@ struct MyApp: App {
             activityLog: activityLog,
             catalogSources: catalogSources
         ))
+        Task.detached(priority: .background) { JamformerRunner.removeStaleExports() }
     }
 
     @State private var updates = UpdateChecker(
@@ -83,7 +84,7 @@ struct MyApp: App {
                 Button("Check for Changes", systemImage: "arrow.clockwise") {
                     if let id = appState.selectedTenantID,
                        let tenant = tenantStore.tenant(id: id) {
-                        Task { try? await deployService.checkDrift(tenant: tenant) }
+                        Task { await deployService.checkDriftRecordingFailure(tenant: tenant) }
                     } else {
                         Task { await deployService.checkAllTenants() }
                     }

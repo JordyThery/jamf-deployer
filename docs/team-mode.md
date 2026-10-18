@@ -38,14 +38,14 @@ A new engineer runs **Share Credentials with the Team…** once to publish their
 
 ## Setting up
 
-**Create** (first engineer): Settings → Team → enter the URL of an empty private GitHub repository under **Repository URL** → **Create Team Space…**. The app zips a backup of the local store first, then pushes it as-is.
+**Create** (first engineer): Settings, under **Team**: enter the URL of an empty private GitHub repository under **Repository URL** → **Create Team Space…**. The app zips a backup of the local store first, then pushes it as-is.
 
-**Join** (everyone else): Settings → Team → enter the repository URL → **Join Team Space…**. Local tenants the team space doesn't know yet are copied in; tenants with the same ID are skipped, never overwritten. The team's settings — including its list of catalog sources — replace this Mac's (a backup is kept). Ask a teammate to share credentials, then you're fully operational.
+**Join** (everyone else): Settings, under **Team**: enter the repository URL → **Join Team Space…**. Local tenants the team space doesn't know yet are copied in; tenants with the same ID are skipped, never overwritten. The team's settings — including its list of catalog sources — replace this Mac's (a backup is kept). Ask a teammate to share credentials, then you're fully operational.
 
-**Leave**: Settings → Team → **Leave Team Mode…**. This Mac keeps a full local copy with history and stops syncing; the team space itself is untouched.
+**Leave**: Settings, under **Team**: **Leave Team Mode…**. This Mac keeps a full local copy with history and stops syncing; the team space itself is untouched.
 
 ## Requirements and caveats
 
 - Each Mac needs push access with Git credentials already configured (SSH key or `gh auth login`); the app never prompts for Git passwords.
-- Locks don't expire on their own — the holder, host and age are always shown, and **Break Lock** is available when a Mac went away mid-operation.
+- Locks don't expire on their own — the holder, host and age are always shown, and **Break Lock…** is available when a Mac went away mid-operation.
 - Two operations on the same tenant from the same Mac are serialized by the engine itself.

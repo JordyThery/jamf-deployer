@@ -111,7 +111,7 @@ struct AppCatalogPickerView: View {
 
             if let loadError {
                 ContentUnavailableView(
-                    "Couldn't Load the Catalog",
+                    "App Catalog Unavailable",
                     systemImage: "exclamationmark.icloud",
                     description: Text(loadError)
                 )
@@ -211,7 +211,7 @@ struct AppCatalogPickerView: View {
                                     Text(category.name).tag(category.id)
                                 }
                             }
-                            .help("Categories already in the tenant. Categories another block creates can be chosen for the whole block in its settings.")
+                            .help("Categories already in the tenant; one that another block creates is chosen in the block's settings")
                         }
                         .controlSize(.small)
                         .padding(.vertical, 4)

@@ -77,8 +77,6 @@ public nonisolated enum BlockCapture {
         "jamfplatform_pro_enrollment_customization": "enrollment_customization",
     ]
 
-    /// Exported types that can never deploy into another tenant; captured
-    /// blocks leave them out with a warning.
     /// Device groups Jamf creates itself: the All Managed groups in every
     /// tenant, and the Device Compliance group when that integration is on.
     /// They are looked up by name instead of captured.
@@ -86,6 +84,8 @@ public nonisolated enum BlockCapture {
         name.hasPrefix("All Managed ") || name == "Jamf Device Compliance Group"
     }
 
+    /// Exported types that can never deploy into another tenant; captured
+    /// blocks leave them out with a warning.
     static let unportableTypes: [String: String] = [
         "jamfplatform_pro_computer_invitation":
             "enrollment invitations are tenant-specific and expire",
@@ -128,6 +128,7 @@ public nonisolated enum BlockCapture {
         /// Carries the reasons objects were left out, when there were any.
         case nothingToCapture(reasons: [String] = [])
         case invalidBlockID
+        case blockExists(String)
 
         public var errorDescription: String? {
             switch self {
@@ -137,6 +138,8 @@ public nonisolated enum BlockCapture {
                 "The export contains no objects to capture."
             case .invalidBlockID:
                 "Block IDs use lowercase letters, digits and dashes only."
+            case .blockExists(let id):
+                "A block with the ID “\(id)” already exists in this source. Choose another ID, or delete the existing block first."
             }
         }
     }
@@ -149,7 +152,10 @@ public nonisolated enum BlockCapture {
         let fileManager = FileManager.default
         let blockURL = request.catalogRootDirectory
             .appending(path: "blocks/\(request.blockID)")
-        try? fileManager.removeItem(at: blockURL)
+        // Never replace a block: it may be curated and selected by tenants.
+        guard !fileManager.fileExists(atPath: blockURL.path) else {
+            throw CaptureError.blockExists(request.blockID)
+        }
         try fileManager.createDirectory(at: blockURL, withIntermediateDirectories: true)
 
         var warnings: [String] = []
@@ -430,25 +436,25 @@ public nonisolated enum BlockCapture {
                 // are covered; everything else keeps its wiring below.
                 enum Rebind { case jamfPro, platform, category, jamfProMobile }
                 var scopeRewrites: [(pattern: String, replacement: String, kind: Rebind)] = [
-                    (#"mobile_device_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#,
+                    (#"(?<![A-Za-z0-9_])mobile_device_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#,
                      "mobile_device_group_ids = [var.scope_jamf_pro_mobile_group_id]", .jamfProMobile),
-                    (#"mobile_device_group_ids\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
+                    (#"(?<![A-Za-z0-9_])mobile_device_group_ids\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
                      "mobile_device_group_ids = [var.scope_jamf_pro_mobile_group_id]", .jamfProMobile),
-                    (#"computer_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#,
+                    (#"(?<![A-Za-z0-9_])computer_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#,
                      "computer_group_ids = [var.scope_jamf_pro_group_id]", .jamfPro),
-                    (#"computer_group_ids\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
+                    (#"(?<![A-Za-z0-9_])computer_group_ids\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
                      "computer_group_ids = [var.scope_jamf_pro_group_id]", .jamfPro),
-                    (#"smart_group_id\s*=\s*"\d+""#,
+                    (#"(?<![A-Za-z0-9_])smart_group_id\s*=\s*"\d+""#,
                      "smart_group_id = var.scope_jamf_pro_group_id", .jamfPro),
-                    (#"smart_group_id\s*=\s*jamfplatform_device_group\.[A-Za-z0-9_-]+\.jamf_pro_id"#,
+                    (#"(?<![A-Za-z0-9_])smart_group_id\s*=\s*jamfplatform_device_group\.[A-Za-z0-9_-]+\.jamf_pro_id"#,
                      "smart_group_id = var.scope_jamf_pro_group_id", .jamfPro),
-                    (#"category_id\s*=\s*"\d+"( # TODO: unresolved reference)?"#,
+                    (#"(?<![A-Za-z0-9_])category_id\s*=\s*"\d+"( # TODO: unresolved reference)?"#,
                      "category_id = var.category_id", .category),
-                    (#"category_id\s*=\s*jamfplatform_pro_category\.[A-Za-z0-9_-]+\.id"#,
+                    (#"(?<![A-Za-z0-9_])category_id\s*=\s*jamfplatform_pro_category\.[A-Za-z0-9_-]+\.id"#,
                      "category_id = var.category_id", .category),
-                    (#"target_device_groups\s*=\s*\[[^\]]*"[0-9a-f-]{36}"[^\]]*\]"#,
+                    (#"(?<![A-Za-z0-9_])target_device_groups\s*=\s*\[[^\]]*"[0-9a-f-]{36}"[^\]]*\]"#,
                      "target_device_groups = [var.scope_platform_group_uuid]", .platform),
-                    (#"target_device_groups\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
+                    (#"(?<![A-Za-z0-9_])target_device_groups\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
                      "target_device_groups = [var.scope_platform_group_uuid]", .platform),
                 ]
                 // A block has one per-tenant scope: with computer objects in
@@ -460,9 +466,14 @@ public nonisolated enum BlockCapture {
                         mobileScopeKept = true
                     }
                 }
-                for rewrite in scopeRewrites where text.range(of: rewrite.pattern, options: .regularExpression) != nil {
-                    text = text.replacingOccurrences(
-                        of: rewrite.pattern, with: rewrite.replacement, options: .regularExpression)
+                for rewrite in scopeRewrites {
+                    // Exclusions stay as captured: collapsing them onto the
+                    // scope variable would exclude the very group targeted.
+                    let rewritten = Self.outsideExclusions(text) {
+                        $0.replacingOccurrences(of: rewrite.pattern, with: rewrite.replacement, options: .regularExpression)
+                    }
+                    guard rewritten != text else { continue }
+                    text = rewritten
                     switch rewrite.kind {
                     case .jamfPro: usesJamfProScope = true
                     case .platform: usesPlatformScope = true
@@ -471,12 +482,15 @@ public nonisolated enum BlockCapture {
                     }
                 }
                 let deviceGroupsPattern = #"(^|\n)(\s*)device_groups\s*=\s*\[[^\]]*("[0-9a-f-]{36}"|jamfplatform_device_group\.)[^\]]*\]"#
-                if text.range(of: deviceGroupsPattern, options: .regularExpression) != nil {
-                    text = text.replacingOccurrences(
+                let withDeviceGroups = Self.outsideExclusions(text) {
+                    $0.replacingOccurrences(
                         of: deviceGroupsPattern,
                         with: "$1$2device_groups = [var.scope_platform_group_uuid]",
                         options: .regularExpression
                     )
+                }
+                if withDeviceGroups != text {
+                    text = withDeviceGroups
                     usesPlatformScope = true
                 }
             }
@@ -610,11 +624,7 @@ public nonisolated enum BlockCapture {
             }
         }
 
-        // 2. Support files move after variables are known — see below: only
-        // files the block actually references are copied, so a block carved
-        // out of a larger export does not drag everything along.
-
-        // 3. variables.tf for the block.
+        // 2. variables.tf for the block.
         var variables = """
         variable "name_prefix" {
           description = "Prefix applied to every object name."
@@ -906,7 +916,7 @@ public nonisolated enum BlockCapture {
         }
         """.utf8).write(to: blockURL.appending(path: "versions.tf"))
 
-        // 4. block.json, including the permissions the export recorded —
+        // 3. block.json, including the permissions the export recorded —
         // narrowed to this block's own types, with the write actions a
         // deploy needs (tenant-wide settings are only read and updated).
         let permissionsURL = request.sourceDirectory.appending(path: "PERMISSIONS.md")
@@ -923,12 +933,16 @@ public nonisolated enum BlockCapture {
                     for action in actions { set.insert("\(name):\(action)") }
                 }
             }
-            // Lookups the capture adds itself only read.
-            if adeReferenced { set.insert("device-enrollment-program-instances:read") }
-            if !builtinGroupNames.isEmpty { set.insert("device-groups:read") }
             permissions = set.sorted()
         }
-        if permissions.isEmpty {
+        let recordedAny = !permissions.isEmpty
+        // Lookups the capture adds itself only read.
+        var lookups: [String] = []
+        if adeReferenced { lookups.append("device-enrollment-program-instances:read") }
+        if !builtinGroupNames.isEmpty { lookups.append("device-groups:read") }
+        if vppReferenced { lookups.append("volume-purchasing-locations:read") }
+        permissions = Array(Set(permissions + lookups)).sorted()
+        if !recordedAny {
             warnings.append("No PERMISSIONS.md found in the export — the block lists no permissions.")
         }
 
@@ -990,7 +1004,7 @@ public nonisolated enum BlockCapture {
         )
         try json.write(to: blockURL.appending(path: "block.json"))
 
-        // 5. README seeded with provenance and the secret-scan outcome.
+        // 4. README seeded with provenance and the secret-scan outcome.
         var readme = """
         # \(request.name)
 
@@ -1019,7 +1033,6 @@ public nonisolated enum BlockCapture {
         )
     }
 
-    /// Reads the capability set out of jamformer's PERMISSIONS.md.
     /// Removes one named attribute object (`name = { … }`) from a block.
     static func strippingAttributeObject(named attribute: String, from text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -1063,7 +1076,7 @@ public nonisolated enum BlockCapture {
                     depth += next.filter { $0 == "{" }.count - next.filter { $0 == "}" }.count
                 }
                 let body = chunk.joined(separator: "\n")
-                if addresses.contains(where: { body.contains($0) }) {
+                if addresses.contains(where: { Self.mentions(body, address: $0) }) {
                     index = cursor + 1
                     continue
                 }
@@ -1071,7 +1084,7 @@ public nonisolated enum BlockCapture {
                 index = cursor + 1
                 continue
             }
-            if addresses.contains(where: { line.contains($0) }) {
+            if addresses.contains(where: { Self.mentions(line, address: $0) }) {
                 index += 1
                 continue
             }
@@ -1140,7 +1153,7 @@ public nonisolated enum BlockCapture {
         }
 
         // category_id = "7" (with or without the exporter's TODO note).
-        text = replacing(in: text, pattern: #"category_id\s*= "(\d+)"( # TODO: unresolved reference)?"#) { match in
+        text = replacing(in: text, pattern: #"(?<![A-Za-z0-9_])category_id\s*= "(\d+)"( # TODO: unresolved reference)?"#) { match in
             guard let name = table.name(type: "jamfplatform_pro_category", id: match[1]) else { return nil }
             return "category_id = \(record("category", name))"
         }
@@ -1249,16 +1262,27 @@ public nonisolated enum BlockCapture {
                 guard body.contains("\"") else { return nil }
                 var elements: [String] = []
                 var resolvedAll = true
-                for element in body.matches(of: /"([0-9a-fA-F-]{36})"/) {
-                    if let name = table.name(type: "jamfplatform_device_group", id: String(element.1)) {
+                var resolvedAny = false
+                // Elements that are already references stay as they are.
+                let tokens = body.split(whereSeparator: { $0 == "," || $0 == "\n" })
+                    .map { $0.split(separator: "#", maxSplits: 1).first.map(String.init) ?? "" }
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                for token in tokens {
+                    guard let uuid = token.wholeMatch(of: /"([0-9a-fA-F-]{36})"/)?.1 else {
+                        elements.append(token)
+                        continue
+                    }
+                    if let name = table.name(type: "jamfplatform_device_group", id: String(uuid)) {
                         elements.append(Self.isBuiltinGroupName(name)
                             ? builtinGroupUUIDLookup(name)
                             : record("device_group", name))
+                        resolvedAny = true
                     } else {
                         resolvedAll = false
                     }
                 }
-                guard resolvedAll, !elements.isEmpty else { return nil }
+                guard resolvedAll, resolvedAny else { return nil }
                 return "\(attribute) = [\(elements.joined(separator: ", "))]"
             }
         }
@@ -1291,7 +1315,39 @@ public nonisolated enum BlockCapture {
         return needs
     }
 
-    /// Regex replacement with a closure; returning nil keeps the original.
+    /// Whether `text` references `address` as a whole word, so stripping
+    /// `…icon.icon_9` leaves `…icon.icon_99` alone.
+    static func mentions(_ text: String, address: String) -> Bool {
+        let pattern = NSRegularExpression.escapedPattern(for: address) + "(?![A-Za-z0-9_-])"
+        return text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// Applies `transform` to the text outside every `exclusions = { … }`
+    /// object, leaving the exclusions themselves untouched.
+    static func outsideExclusions(_ text: String, _ transform: (String) -> String) -> String {
+        guard let opener = try? NSRegularExpression(pattern: #"exclusions\s*=\s*\{"#) else { return transform(text) }
+        let source = text as NSString
+        var result = ""
+        var cursor = 0
+        for match in opener.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+            guard match.range.location >= cursor else { continue }
+            // Find the brace that closes this object.
+            var depth = 0
+            var end = match.range.location + match.range.length - 1
+            for index in end..<source.length {
+                let character = source.character(at: index)
+                if character == 123 { depth += 1 }       // {
+                if character == 125 { depth -= 1 }       // }
+                if depth == 0 { end = index; break }
+            }
+            result += transform(source.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+            result += source.substring(with: NSRange(location: match.range.location, length: end + 1 - match.range.location))
+            cursor = end + 1
+        }
+        result += transform(source.substring(from: cursor))
+        return result
+    }
+
     /// Removes a top-level attribute (`  name = …`, including a bracketed
     /// or braced multi-line value) from a resource block.
     static func removingAttribute(_ name: String, from block: String) -> String {
@@ -1309,6 +1365,7 @@ public nonisolated enum BlockCapture {
         return lines.joined(separator: "\n")
     }
 
+    /// Regex replacement with a closure; returning nil keeps the original.
     static func replacing(in text: String, pattern: String, transform: ([String]) -> String?) -> String {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
         var result = text
@@ -1403,6 +1460,7 @@ public nonisolated enum BlockCapture {
         return label
     }
 
+    /// Reads the capability set out of jamformer's PERMISSIONS.md.
     static func parsePermissions(at url: URL) -> [String] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         var inCodeBlock = false

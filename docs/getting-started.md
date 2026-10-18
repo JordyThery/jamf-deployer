@@ -13,16 +13,16 @@ On first launch a guided tour points out the main areas. Revisit it any time fro
 You need an API integration for the Jamf Platform API gateway:
 
 1. In Jamf Account, create an API integration scoped to the tenant's Platform environment and note the **client ID** and **client secret**. The wizard lists the permissions to grant (see [Permissions](permissions.md)).
-2. In Jamf Deployer, click **Connect a Tenant…** and enter a display name, the region (US, EU or APAC), whether it is a test tenant, and the credentials. The wizard can look up the environment ID for you.
-3. The wizard runs a preflight — credentials, Jamf Pro version, read permissions, Automated Device Enrollment and volume purchasing token expiry, and the Cloud Services Connection — and names anything missing before you save. You can still add the tenant and fix permissions later.
+2. In Jamf Deployer, click **Connect a Tenant…** and enter a display name, the region (US, EU or APAC), whether it is a test tenant, and the credentials. **Fetch Environments from Jamf Account** looks up the environment ID for organization-scope integrations; otherwise paste it. Older integrations scoped to a single tenant use **Integration uses legacy tenant scope**.
+3. The wizard runs a preflight — credentials, Jamf Pro version, read permissions, Automated Device Enrollment and Apps and Books token expiry, and the Cloud Services Connection — and names anything missing before you save. You can still add the tenant and fix permissions later.
 
-The client secret goes straight into your Keychain. It is never written to a file.
+The client secret goes straight into your Keychain. It is never written to a file. To enter a rotated secret later, use **Update Client Secret…** in the tenant's Connection section.
 
-Connecting a Jamf Protect tenant (for the Protect building blocks) is an optional wizard step, or later from the tenant's **Day 0 Setup** tab: Protect URL, client ID and secret.
+Connecting Jamf Protect (for the Protect building blocks) is an optional wizard step, or later from the tenant's **Day 0 Setup** tab: enter the Protect console URL, API client ID and secret, then **Link Jamf Protect**. This also registers Jamf Pro with Protect.
 
 ## 3. Compose a baseline
 
-First visit to **Building Blocks**: the app ships only the configuration-free blocks (App Catalog, Mac App Store Apps, iPad and iPhone Apps, Jamf Protect, Security Cloud) — add the **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** to try a full baseline (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings, Self Service maintenance and macOS version groups — versioned by release tag). For real fleets, capture your own blocks or publish your own catalog — the demo repository is the template.
+First visit to **Building Blocks**: the app ships only the configuration-free blocks (App Catalog, Mac App Store Apps, iPad and iPhone Apps, Jamf Protect Baseline, Security Cloud) — add the **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** to try a full baseline (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings, Self Service maintenance and macOS version groups — versioned by release tag). For real fleets, capture your own blocks or publish your own catalog — the demo repository is the template.
 
 Then compose the baseline in the tenant's **Overview** tab, under **Add from the catalog**:
 
@@ -36,11 +36,15 @@ See [Building Blocks](building-blocks.md) for what each block creates.
 
 Click **Preview Changes** (⌘P). The app generates the configuration, compares it with the tenant, and lists every object it would add, change or remove — grouped by block, with field-level detail. Nothing has happened to the tenant yet.
 
-If the preview looks right, click **Deploy**. Only the previewed plan is applied; if anything changed in between, the deploy stops. If Jamf reports a server error for an object it actually created, the app finds it by name after the deploy, and the next preview adopts it instead of creating a duplicate. The first deploy produces a **recovery sheet** with the passphrase that encrypts this tenant's records — store it somewhere safe. Every deploy is recorded under **History**, with rollback.
+Before the first deploy, the app asks you to save a **recovery sheet** (**Save Recovery Sheet…**) with the passphrase that encrypts this tenant's records — store it somewhere safe.
+
+If the preview looks right, click **Deploy**. Only the previewed plan is applied; if anything changed in between, the deploy stops. On a production tenant, a deploy that removes or replaces objects asks you to type the tenant name first. If Jamf reports a server error for an object it actually created, the app finds it by name after the deploy, and the next preview adopts it instead of creating a duplicate.
+
+Every deploy is recorded in **History** (sidebar). **Roll Back…** restores the baseline of an earlier deploy, which you then preview and deploy.
 
 ## Day 0 checklist
 
-The **Day 0 Setup** tab tracks the things an API cannot fully do — APNs certificate, Apple Business Manager enrollment and VPP tokens, branding — with live status where Jamf exposes it and links to the right console pages where it does not.
+The **Day 0 Setup** tab tracks the things an API cannot fully do — APNs certificate, Automated Device Enrollment and Apps and Books tokens, branding, single sign-on, the Jamf Protect link and the Cloud Services Connection — with live status where Jamf exposes it and links to the right console pages where it does not.
 
 ![The Day 0 Setup tab: APNs, Automated Device Enrollment, volume purchasing, branding, single sign-on and the Jamf Protect link, each with live status](screenshot-day0.png)
 
@@ -48,5 +52,6 @@ The **Day 0 Setup** tab tracks the things an API cannot fully do — APNs certif
 
 - **Check for Changes** (⌘R) shows what was changed directly in Jamf since the last deploy — keep each change or restore the baseline. **Check All Tenants** on the dashboard does the same for the whole fleet. To stop managing a block's objects without touching Jamf, use **Stop Managing** in the baseline. **Hand Over Tenant…** does that for everything — blocks and adopted objects — when another team or tool takes over: confirm with the tenant name to prepare it, review it with **Preview Hand-Over…** and deploy, or use **Cancel Hand-Over** to restore the baseline. Once deployed, the record is archived.
 - **Roll Out…** on the dashboard deploys to several tenants one at a time. Choose each tenant's current baseline or the latest release of a Git catalog, then put tenants in rings (test tenants start in ring 1). Every tenant still shows its own preview and waits for you to click Deploy. The rollout stops when a deploy has problems, can pause before each new ring, and ends with a summary. A tenant you skip keeps its current catalog release.
-- **Export** captures an existing tenant's objects as reusable blocks, documentation or a snapshot; **Adopt Existing Configuration…** (under **Managed in this tenant** on the tenant's Overview) brings hand-configured objects under management without recreating them. Adopted objects are managed as they are — Check for Changes covers them and they need no building block; building blocks are for adding what isn't there yet. **Adopt More…** adds objects later and leaves those already adopted untouched. **Add a Custom Object…** creates an object no block covers yet, from a form built from the provider schema.
+- The **Export** tab has four types: **Building block** (capture objects as a reusable block), **Full snapshot** (**Save Snapshot…** writes a zip of the exported configuration with a `manifest.json` of tenant, date and tool versions), **As-built documentation** (Markdown) and **Clone to tenant** (**Stage Clone** stages the objects on another connected tenant, which then previews and deploys them). Exports read Jamf Pro and Platform or Jamf Protect and never change the tenant. **Adopt Existing Configuration…** (under **Managed in this tenant** on the tenant's Overview) brings hand-configured objects under management without recreating them. Adopted objects are managed as they are — Check for Changes covers them and they need no building block; building blocks are for adding what isn't there yet. **Adopt More…** adds objects later and leaves those already adopted untouched. **Add a Custom Object…** creates an object no block covers yet, from a form built from the provider schema.
+- Everyday tools: the **Activity Log** window (⌘⇧L) lists every call the app makes; **Needs Attention** on the dashboard filters to tenants with problems; **Remove Tenant…** (right-click a tenant in the sidebar) removes it from this Mac without touching Jamf; **Settings** holds your engineer name, technical details and **Create Support Bundle…**.
 - Working with colleagues? Set up a shared repository: [Team Mode](team-mode.md).

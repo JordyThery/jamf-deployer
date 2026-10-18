@@ -1,6 +1,6 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-10-17 (1.0.2). Consolidates the open items from every phase report and the 1.0.x work.
+As of 2026-10-18 (1.0.3). Consolidates the open items from every phase report and the 1.0.x work.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - **protect-baseline block** — no non-production Jamf Protect tenant exists to apply it to. The provider wiring itself *is* live-verified read-only (auth + all four data sources against production).
@@ -17,20 +17,23 @@ As of 2026-10-17 (1.0.2). Consolidates the open items from every phase report an
 - **Object editor** handles primitive attributes only (honestly labeled in the UI).
 - Day 0: branding icon/banner upload (multipart) and full onboarding config are assist-level; APNs expiry has no public API anywhere (manual date).
 - Drift noise classification is a curated attribute list — new computed attributes would initially show as actionable.
+- **Fleet rollouts** run one tenant at a time in up to three rings (production tenants start in ring 2) and need at least two tenants with something to deploy. Catalog-release mode lists Git catalog sources only. A deploy with failures ends the rollout; a tenant closed without deploying gets its previous selections and release pin back. Live-verified with a local two-tag catalog (Sandbox deployed v1.0.1, Demo skipped and stayed on v1.0.0).
+- Blocks picked from a Git catalog before 1.0.3 were recorded as built-in, so release pins and updates skipped them; they are repaired automatically on the next preview, check or update check.
 
 ## Team mode caveats
 - Git auth assumes the Mac has gh/SSH credentials configured; an in-app PAT flow is designed, not built.
 - Lock expiry is manual (age shown + Break Lock); no auto-TTL.
 - Join-time tenant ID conflicts are skipped, not merged.
 - Repo access = access to all tenant records (names, scope IDs, encrypted state). Secrets are never in the repo in the clear: Share Credentials seals them per engineer (Curve25519 + ChaCha20-Poly1305) into `team/secrets/`, and private keys stay in each engineer's Keychain.
-- Two operations on one tenant from the *same* Mac are guarded only by the engine's state lock.
+- A tenant runs one engine operation at a time on a Mac (preview, check or deploy); a second request is refused with a message.
+- A lost lock race undoes only the lock commit; releasing never removes another engineer's lock.
 
 ## Ejecting to plain OpenTofu
 Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFORM_*`, `TF_ENCRYPTION` with the recovery-sheet passphrase) run under vanilla OpenTofu ≥ 1.13 with providers from the public registry once the copied lock file is removed (it records the bundled, re-signed provider checksums). After a one-time decrypt with OpenTofu, HashiCorp Terraform 1.16 plans the same state with "No changes". The ejector owns the HCL from then on. A one-click "Export as standalone configuration" bundle is planned.
 
 ## Packaging and release
 - 1.0 shipped signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
-- No app-target unit tests; JamfDeployerCore carries 77 tests, DeployerKit 4. The Jamf DeployerUITests target drives a live fleet rollout across two test tenants (Scripts/run-rollout-ui-tests.sh connects, deploys and cleans up).
+- No app-target unit tests; JamfDeployerCore carries 82 tests, DeployerKit 4. The Jamf DeployerUITests target runs live against two test tenants: a fleet rollout (Scripts/run-rollout-ui-tests.sh) and a walk through every main function — connect, catalog sources, deploys, drift, removals, adoption, App Store picker, hand-over, Day 0, export, clone, snapshot, history and settings (Scripts/run-function-ui-tests.sh). Both scripts clean up after themselves.
 - App Sandbox is off by design (child-process engine); Developer ID + notarisation is the distribution model.
 
 ## Adopting an existing tenant

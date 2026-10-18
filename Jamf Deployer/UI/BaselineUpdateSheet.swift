@@ -30,7 +30,7 @@ struct BaselineUpdateSheet: View {
             Button("Stage Selected Updates") { apply() }
                 .buttonStyle(.borderedProminent)
                 .disabled(chosen.isEmpty)
-                .help("Chosen blocks move to the newer catalog tag. Preview Changes shows exactly what the update does before anything deploys.")
+                .help("Moves the chosen blocks to the newer tag; Preview Changes shows the effect")
         }
         .frame(width: 620, height: 460)
         .task {

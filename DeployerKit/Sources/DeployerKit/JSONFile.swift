@@ -1,7 +1,7 @@
 import Foundation
 
-/// Pretty-printed, sorted-keys, atomic JSON persistence — the storage style
-/// Intune Deployer uses for its profile files, shared here.
+/// Pretty-printed, sorted-keys, atomic JSON persistence, so stored files
+/// diff cleanly in Git.
 public nonisolated enum JSONFile {
     public static func load<T: Decodable>(_ type: T.Type, from url: URL) throws -> T {
         let data = try Data(contentsOf: url)

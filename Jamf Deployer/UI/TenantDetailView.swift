@@ -2,8 +2,8 @@ import SwiftUI
 import DeployerKit
 import JamfDeployerCore
 
-/// Per-tenant overview: connection details and preflight, with the deploy
-/// surface arriving in later phases.
+/// Per-tenant page: drift, connection, preflight, managed objects, the
+/// baseline and hand-over, plus the Day 0 Setup and Export tabs.
 struct TenantDetailView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(ActivityLog.self) private var activityLog
@@ -27,6 +27,8 @@ struct TenantDetailView: View {
     @State private var isConfirmingHandOver = false
     @State private var handOverTypedName = ""
     @State private var keepOutcomes: [String: String] = [:]
+    @State private var isUpdatingSecret = false
+    @State private var isConfirmingBreakLock = false
     @State private var catalog: LoadedCatalog?
     @State private var adoptedSummary: [(label: String, count: Int)] = []
 
@@ -49,12 +51,13 @@ struct TenantDetailView: View {
                             style: tenant.isProduction ? .tinted : .neutral
                         )
                         Spacer()
-                        Picker("", selection: $tab) {
+                        Picker("Section", selection: $tab) {
                             ForEach(Tab.allCases, id: \.self) { tab in
                                 Text(tab.rawValue).tag(tab)
                             }
                         }
                         .pickerStyle(.segmented)
+                        .labelsHidden()
                         .fixedSize()
                     }
 
@@ -73,10 +76,18 @@ struct TenantDetailView: View {
                                 .font(.callout)
                                 Spacer()
                                 Button("Break Lock…", role: .destructive) {
-                                    Task { await deployService.breakLock(tenant: tenant) }
+                                    isConfirmingBreakLock = true
                                 }
                                 .controlSize(.small)
-                                .help("Only for stale locks after a crash — breaking a live lock risks two engineers deploying at once")
+                                .help("Only for stale locks left by a crash")
+                                .confirmationDialog("Break the lock on “\(tenant.name)”?", isPresented: $isConfirmingBreakLock, titleVisibility: .visible) {
+                                    Button("Break Lock", role: .destructive) {
+                                        Task { await deployService.breakLock(tenant: tenant) }
+                                    }
+                                    Button("Cancel", role: .cancel) {}
+                                } message: {
+                                    Text("Only break a lock left behind by a crash. Breaking a live lock lets two engineers deploy to this tenant at once.")
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(4)
@@ -95,6 +106,12 @@ struct TenantDetailView: View {
                         }
                     }
 
+                    if let failure = deployService.fleetCheckFailure(for: tenant.id) {
+                        Label("The last check for changes failed: \(failure)", systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     driftSection(tenant)
 
                     GroupBox("Connection") {
@@ -109,7 +126,7 @@ struct TenantDetailView: View {
                                     .textSelection(.enabled)
                             }
                             LabeledContent("Name prefix") {
-                                TextField("", text: Binding(
+                                TextField("Name prefix", text: Binding(
                                     get: { tenant.namePrefix },
                                     set: { newValue in
                                         var updated = tenantStore.tenant(id: tenant.id) ?? tenant
@@ -120,7 +137,8 @@ struct TenantDetailView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 160)
                                 .multilineTextAlignment(.trailing)
-                                .help("Applied to every prefixed object name. Changing it renames managed objects on the next deploy — the preview shows every rename first.")
+                                .labelsHidden()
+                                .help("Prefix for managed object names; changing it renames objects on the next deploy")
                             }
                             if let version = tenant.preflight?.jamfProVersion {
                                 LabeledContent("Jamf Pro", value: PreflightService.displayVersion(version))
@@ -128,6 +146,9 @@ struct TenantDetailView: View {
                             if let protectURL = tenant.protectURL {
                                 LabeledContent("Jamf Protect", value: protectURL)
                             }
+                            Button("Update Client Secret…") { isUpdatingSecret = true }
+                                .controlSize(.small)
+                                .help("Store a new client secret for this tenant's API integration in the Keychain")
                         }
                         .font(.callout)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -168,7 +189,7 @@ struct TenantDetailView: View {
                                 runPreflight(tenant: tenant)
                             }
                             .disabled(isRunningPreflight)
-                            .help("Checks credentials, version, permissions and connections. Nothing is changed in Jamf.")
+                            .help("Checks credentials, version, permissions and connections without changing anything in Jamf")
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(4)
@@ -285,6 +306,9 @@ struct TenantDetailView: View {
             .sheet(isPresented: $isAddingCustomObject) {
                 OverrideEditorView(tenant: tenant)
             }
+            .sheet(isPresented: $isUpdatingSecret) {
+                UpdateClientSecretSheet(tenant: tenant)
+            }
             .onChange(of: appState.previewRequestCount) {
                 if !tenant.isHandedOver, hasAnythingToPreview(tenant) {
                     isPreviewing = true
@@ -294,16 +318,20 @@ struct TenantDetailView: View {
                 TextField("Type the tenant name to confirm", text: $handOverTypedName)
                 Button("Cancel", role: .cancel) { handOverTypedName = "" }
                 Button("Prepare Hand-Over", role: .destructive) {
-                    guard handOverTypedName == tenant.name else { return }
                     handOverTypedName = ""
                     deployService.prepareHandOver(tenant: tenant)
                     isPreviewing = true
                 }
+                .disabled(handOverTypedName != tenant.name)
             } message: {
                 Text(handOverMessage(tenant))
             }
             .task {
                 catalog = try? deployService.loadCatalog()
+            }
+            // Kept-change notes belong to one check of one tenant.
+            .onChange(of: "\(tenant.id)|\(tenant.lastDriftCheck?.timeIntervalSince1970 ?? 0)") {
+                keepOutcomes = [:]
             }
             .task(id: "\(tenant.id)|\(tenant.lastDeploy?.date.timeIntervalSince1970 ?? 0)|\(isAdopting)|\(isPreviewing)|\(isAddingCustomObject)") {
                 adoptedSummary = deployService.adoptedSummary(for: tenant)
@@ -350,7 +378,7 @@ struct TenantDetailView: View {
                     Button("Add a Custom Object…", systemImage: "plus.rectangle.on.rectangle") {
                         isAddingCustomObject = true
                     }
-                    .help("Create an object the catalog doesn't cover yet — the form comes from the live provider schema, no configuration language needed")
+                    .help("Create an object the catalog doesn't cover, using a form built from the provider schema")
                 }
                 .disabled(tenant.handOverPending)
             }
@@ -377,7 +405,7 @@ struct TenantDetailView: View {
         if blockCount > 0 { parts.append("\(blockCount) building block\(blockCount == 1 ? "" : "s")") }
         let subject = parts.joined(separator: " and ")
         if tenant.lastDeploy == nil {
-            return "\(subject) staged — Preview Changes to bring them under management. Nothing is recreated."
+            return "\(subject) staged. Preview Changes brings \(adoptedCount + blockCount == 1 ? "it" : "them") under management; nothing is recreated."
         }
         return "\(subject) managed by this app. Check for Changes compares them with Jamf, and you can keep or undo any change made there. Adopted objects need no building block."
     }
@@ -396,7 +424,7 @@ struct TenantDetailView: View {
     private func driftSection(_ tenant: Tenant) -> some View {
         let outstanding = tenant.outstandingDrift
         let informational = (tenant.driftReport?.objects ?? []).filter(\.isComputedOnly)
-        if tenant.driftReport != nil, !outstanding.isEmpty || !informational.isEmpty {
+        if tenant.driftReport != nil, !outstanding.isEmpty || !informational.isEmpty || !keepOutcomes.isEmpty {
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(outstanding) { object in
@@ -423,19 +451,15 @@ struct TenantDetailView: View {
                                     HStack(spacing: 8) {
                                         Button("Keep This Change") {
                                             let outcome = deployService.keepDrift(tenant: tenant, object: object, field: field)
-                                            keepOutcomes["\(object.address)|\(field.path)"] = switch outcome {
+                                            let note = switch outcome {
                                             case .adoptedIntoSetting:
-                                                "Kept — the baseline setting now uses this value."
+                                                "kept — the baseline setting now uses this value."
                                             case .acknowledged:
-                                                "Noted — a future deploy would still restore the baseline value."
+                                                "noted — a future deploy would still restore the baseline value."
                                             }
+                                            keepOutcomes["\(object.address)|\(field.path)"] = "\(object.displayName) · \(field.path): \(note)"
                                         }
-                                        .help("Accept the value as it is in Jamf. Where a block setting controls this field, the baseline adopts the value; otherwise the change is noted and a deploy would still restore it.")
-                                        if let outcome = keepOutcomes["\(object.address)|\(field.path)"] {
-                                            Text(outcome)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
+                                        .help("Accept the value in Jamf; the baseline adopts it where a block setting controls the field")
                                     }
                                     .controlSize(.small)
                                     .padding(.top, 2)
@@ -443,6 +467,12 @@ struct TenantDetailView: View {
                                 .padding(.vertical, 2)
                             }
                         }
+                    }
+                    // A kept field leaves the list at once, so its outcome is shown here.
+                    ForEach(keepOutcomes.keys.sorted(), id: \.self) { key in
+                        Label(keepOutcomes[key] ?? "", systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     if !outstanding.isEmpty {
                         HStack {
@@ -504,7 +534,7 @@ struct TenantDetailView: View {
         isCheckingDrift = true
         Task {
             defer { isCheckingDrift = false }
-            try? await deployService.checkDrift(tenant: tenant)
+            await deployService.checkDriftRecordingFailure(tenant: tenant)
         }
     }
 
@@ -513,7 +543,7 @@ struct TenantDetailView: View {
             checks = [PreflightCheck(
                 id: "secret", title: "Stored credentials",
                 outcome: .fail,
-                detail: "The client secret is missing from the Keychain. Remove and reconnect the tenant."
+                detail: "The client secret is missing from the Keychain. Enter it with Update Client Secret… in the Connection section."
             )]
             return
         }
@@ -533,6 +563,62 @@ struct TenantDetailView: View {
             updated.preflight = report.snapshot
             tenantStore.update(updated)
             isRunningPreflight = false
+        }
+    }
+}
+
+/// Replaces the tenant's client secret in the Keychain, for a rotated
+/// secret or a Mac that does not have it yet. When the record's passphrase
+/// is missing too, it can be entered from the recovery sheet. The workspace
+/// and its encrypted record are untouched.
+struct UpdateClientSecretSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let tenant: Tenant
+    @State private var secret = ""
+    @State private var passphrase = ""
+    @State private var message: String?
+
+    private var secrets: TenantSecrets { TenantSecrets(tenantID: tenant.id) }
+    private var needsPassphrase: Bool { secrets.statePassphrase.load() == nil }
+
+    var body: some View {
+        SheetFrame(title: "Update Client Secret", systemImage: "key") {
+            Form {
+                LabeledContent("Client ID", value: tenant.clientID)
+                SecureField("Client secret", text: $secret)
+                if needsPassphrase {
+                    SecureField("Recovery passphrase", text: $passphrase)
+                    Text("This Mac has no passphrase for the tenant's record. Enter the one from its recovery sheet, or leave it empty for a tenant that was never deployed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let message {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+        } footer: {
+            Spacer()
+            Button("Cancel") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+            Button("Save") { save() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(secret.isEmpty && passphrase.isEmpty)
+        }
+        .frame(width: 480, height: needsPassphrase ? 340 : 260)
+    }
+
+    private func save() {
+        let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedSecret = secret.isEmpty || secrets.platformClientSecret.save(secret)
+        let savedPassphrase = trimmed.isEmpty || secrets.statePassphrase.save(trimmed)
+        if savedSecret && savedPassphrase {
+            dismiss()
+        } else {
+            message = "The Keychain did not accept the change."
         }
     }
 }

@@ -3,8 +3,7 @@ import Security
 
 /// One generic-password item in the login Keychain.
 ///
-/// Convention (carried over from Intune Deployer's token store):
-/// `service` is `<bundle id>.<purpose>` and `account` names the specific
+/// Convention: `service` is `<bundle id>.<purpose>` and `account` names the specific
 /// credential (for per-tenant secrets, the tenant's UUID string).
 public nonisolated struct KeychainItem: Sendable {
     public let service: String
@@ -52,6 +51,23 @@ public nonisolated struct KeychainItem: Sendable {
             status = SecItemAdd(add as CFDictionary, nil)
         }
         return status == errSecSuccess
+    }
+
+    /// Deletes every item of `service` whose account starts with `prefix`.
+    public static func deleteAll(service: String, accountPrefix prefix: String) {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecMatchLimit: kSecMatchLimitAll,
+            kSecReturnAttributes: true,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[CFString: Any]] else { return }
+        for item in items {
+            guard let account = item[kSecAttrAccount] as? String, account.hasPrefix(prefix) else { continue }
+            KeychainItem(service: service, account: account).delete()
+        }
     }
 
     public func delete() {

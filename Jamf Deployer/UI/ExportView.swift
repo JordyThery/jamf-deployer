@@ -28,7 +28,6 @@ struct ExportView: View {
     @State private var selectedTypes: Set<String> = []
     @State private var typeFilter = ""
     @State private var includePackageFiles = false
-    @State private var hasConsentedToTerraform = false
 
     @Environment(ExportSessionStore.self) private var exportSessions
 
@@ -112,10 +111,14 @@ struct ExportView: View {
                         .disabled(tenant.protectURL == nil)
                 }
                 .fixedSize()
-                .disabled(kind == .clone && exportProvider == "jamfprotect")
+                .disabled(kind == .clone)
                 .help(tenant.protectURL == nil
                     ? "Connect Jamf Protect in the Day 0 Setup tab to export from it"
                     : "Which product to read from")
+            }
+            .onChange(of: kind) {
+                // Clones come from Jamf Pro and Platform only.
+                if kind == .clone { exportProvider = "jamfplatform" }
             }
             .onChange(of: exportProvider) {
                 Task {
@@ -206,7 +209,6 @@ struct ExportView: View {
         }
         .task {
             resourceTypes = (try? await runner.listResourceTypes(provider: exportProvider)) ?? []
-            if case .installed = terraform.status { hasConsentedToTerraform = true }
             // Returning to a finished export: restore the derived object list
             // with the types the run actually exported.
             if let result = session.result, exportedObjects.isEmpty {
@@ -363,12 +365,16 @@ struct ExportView: View {
                     }
                 case .documentation:
                     Button("Save As-Built Documentation…", systemImage: "doc.text") {
-                        documentationText = try? AsBuiltReport.markdown(AsBuiltReport.Input(
-                            tenantName: tenant.name,
-                            exportDirectory: result.outputURL,
-                            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-                        ))
-                        isExportingDocumentation = documentationText != nil
+                        do {
+                            documentationText = try AsBuiltReport.markdown(AsBuiltReport.Input(
+                                tenantName: tenant.name,
+                                exportDirectory: result.outputURL,
+                                appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+                            ))
+                            isExportingDocumentation = true
+                        } catch {
+                            errorMessage = "The documentation could not be generated: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                        }
                     }
                 }
 
@@ -452,7 +458,8 @@ struct ExportView: View {
         guard let targetID = cloneTargetID,
               var target = tenantStore.tenant(id: targetID) else { return }
         do {
-            try ExportedObjectInventory.prune(directory: result.outputURL, keeping: selectedObjects)
+            let staging = try prunedCopy(of: result, keeping: selectedObjects)
+            defer { try? FileManager.default.removeItem(at: staging) }
             // Clones live in an app-managed source, one block per clone.
             let cloneRoot = URL.applicationSupportDirectory.appending(path: "Jamf Deployer/cloned-blocks")
             let source: CatalogSourceStore.CustomSource
@@ -467,10 +474,11 @@ struct ExportView: View {
                 name: "Clone of \(tenant.name) (\(Date.now.formatted(date: .abbreviated, time: .omitted)))",
                 summary: "Objects cloned from \(tenant.name).",
                 namePrefix: tenant.namePrefix,
-                sourceDirectory: result.outputURL,
+                sourceDirectory: staging,
                 catalogRootDirectory: URL(filePath: source.path),
                 secretFindings: result.secretFindings,
-                originTenantScopeID: tenant.scopeID
+                originTenantScopeID: tenant.scopeID,
+                resolutionDirectory: result.outputURL
             ))
             // Clones keep their own groups and categories; a capture that
             // collapsed scope onto a variable leaves the group to be chosen
@@ -547,7 +555,7 @@ struct ExportView: View {
         Toggle("Choose scope and category per tenant (portable block)", isOn: $choosesScopePerTenant)
             .toggleStyle(.checkbox)
             .font(.callout)
-            .help("Replaces the captured group and category references with a scope and category you pick on each tenant. When off, associations are kept and wired between captured blocks.")
+            .help("Replace captured group and category references with choices made per tenant; when off, they stay wired between captured blocks")
     }
 
     /// Where captured blocks are saved — shared by both capture modes.
@@ -597,6 +605,8 @@ struct ExportView: View {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Remove Block")
+                    .help("Remove this block")
                     .disabled(splitGroups.count == 1)
                 }
             }
@@ -614,7 +624,7 @@ struct ExportView: View {
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Picker("", selection: Binding(
+                            Picker("Block for \(object.displayName)", selection: Binding(
                                 get: { groupAssignment[object.address] },
                                 set: { groupAssignment[object.address] = $0 }
                             )) {
@@ -624,6 +634,7 @@ struct ExportView: View {
                                         .tag(Optional(group.id))
                                 }
                             }
+                            .labelsHidden()
                             .frame(width: 220)
                         }
                     }
@@ -663,6 +674,15 @@ struct ExportView: View {
         for (address, group) in groupAssignment where group == id {
             groupAssignment[address] = nil
         }
+    }
+
+    /// A pruned copy of the export, so the export itself stays complete for
+    /// further captures, clones, snapshots and documentation.
+    private func prunedCopy(of result: JamformerRunner.ExportResult, keeping objects: Set<String>) throws -> URL {
+        let staging = FileManager.default.temporaryDirectory.appending(path: "capture-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: result.outputURL, to: staging)
+        try ExportedObjectInventory.prune(directory: staging, keeping: objects)
+        return staging
     }
 
     /// Captures each populated group as its own block from the one export:
@@ -731,18 +751,20 @@ struct ExportView: View {
         guard let sourceID = effectiveSourceID,
               let source = catalogSources.customSources.first(where: { $0.id == sourceID }) else { return }
         do {
-            try ExportedObjectInventory.prune(directory: result.outputURL, keeping: selectedObjects)
+            let staging = try prunedCopy(of: result, keeping: selectedObjects)
+            defer { try? FileManager.default.removeItem(at: staging) }
             let captured = try BlockCapture.capture(BlockCapture.Request(
                 blockID: blockID.trimmingCharacters(in: .whitespaces),
                 name: blockName,
                 summary: blockSummary.isEmpty ? "Captured from \(tenant.name)." : blockSummary,
                 namePrefix: tenant.namePrefix,
-                sourceDirectory: result.outputURL,
+                sourceDirectory: staging,
                 catalogRootDirectory: URL(filePath: source.path),
                 secretFindings: result.secretFindings,
                 originTenantScopeID: tenant.scopeID,
                 rebind: choosesScopePerTenant ? .perTenant : .fidelity,
-                prefixAllNames: prefixAllNames
+                prefixAllNames: prefixAllNames,
+                resolutionDirectory: result.outputURL
             ))
             var outcome = "Captured \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") into “\(source.name)” — find it in the Building Blocks library."
             if !captured.warnings.isEmpty {
@@ -759,7 +781,7 @@ struct ExportView: View {
     }
 
     private func saveSnapshot(_ result: JamformerRunner.ExportResult) {
-        // Manifest, then zip with ditto.
+        // Write the manifest, then zip the export.
         let manifest: [String: Any] = [
             "tenant": tenant.name,
             "scopeID": tenant.scopeID,
@@ -776,15 +798,27 @@ struct ExportView: View {
         panel.nameFieldStringValue = "Snapshot-\(tenant.name)-\(Date.now.formatted(.iso8601.year().month().day())).zip"
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
-        let ditto = Process()
-        ditto.standardInput = FileHandle.nullDevice
-        ditto.executableURL = URL(filePath: "/usr/bin/ditto")
-        ditto.arguments = ["-c", "-k", "--sequesterRsrc", result.outputURL.path, destination.path]
-        try? ditto.run()
-        ditto.waitUntilExit()
-        captureOutcome = ditto.terminationStatus == 0
-            ? "Snapshot saved to \(destination.lastPathComponent)."
-            : "The snapshot could not be written."
+        // zip adds to an existing archive, so a replaced file starts empty.
+        try? FileManager.default.removeItem(at: destination)
+        let zip = Process()
+        zip.standardInput = FileHandle.nullDevice
+        zip.executableURL = URL(filePath: "/usr/bin/zip")
+        zip.currentDirectoryURL = result.outputURL
+        // The provider download under .terraform is tens of megabytes and
+        // is fetched again by `terraform init`.
+        zip.arguments = ["-r", "-q", "-y", destination.path, ".", "-x", ".terraform/*"]
+        do {
+            try zip.run()
+        } catch {
+            errorMessage = "The snapshot could not be written."
+            return
+        }
+        zip.waitUntilExit()
+        guard zip.terminationStatus == 0 else {
+            errorMessage = "The snapshot could not be written."
+            return
+        }
+        captureOutcome = "Snapshot saved to \(destination.lastPathComponent)."
         NSWorkspace.shared.activateFileViewerSelecting([destination])
     }
 }

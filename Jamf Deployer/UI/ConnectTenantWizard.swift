@@ -55,6 +55,7 @@ struct ConnectTenantWizard: View {
     @State private var checks: [PreflightCheck] = []
     @State private var report: PreflightReport?
     @State private var isRunningPreflight = false
+    @State private var saveError: String?
 
     var body: some View {
         SheetFrame(
@@ -117,9 +118,9 @@ struct ConnectTenantWizard: View {
                         Text(region.displayName).tag(region)
                     }
                 }
-                .help("The regional gateway the tenant lives on. It's shown in Jamf Account next to the API integration.")
+                .help("The regional gateway shown next to the API integration in Jamf Account")
                 Toggle("This is a test tenant", isOn: $isTestTenant)
-                    .help("Test tenants get a grey tag and relaxed guardrails. Production tenants require extra confirmation for risky changes.")
+                    .help("Production tenants ask for extra confirmation before risky changes")
             } footer: {
                 Text("The name is only used inside this app.")
                     .font(.caption)
@@ -191,7 +192,7 @@ struct ConnectTenantWizard: View {
                     .font(.body.monospaced())
                 SecureField("Client secret", text: $clientSecret)
                 Toggle("Integration uses legacy tenant scope", isOn: $usesLegacyTenantScope)
-                    .help("Most integrations target a Platform environment. Only turn this on for an older integration created against a single tenant.")
+                    .help("Only for an older integration created against a single tenant")
                 TextField(
                     usesLegacyTenantScope ? "Tenant ID" : "Environment ID",
                     text: $scopeID,
@@ -346,6 +347,11 @@ struct ConnectTenantWizard: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
+        if let saveError {
+            Text(saveError)
+                .font(.callout)
+                .foregroundStyle(.red)
+        }
         Spacer()
         Button("Cancel") { dismiss() }
             .keyboardShortcut(.cancelAction)
@@ -421,10 +427,12 @@ struct ConnectTenantWizard: View {
         }
 
         let secrets = TenantSecrets(tenantID: tenant.id)
-        secrets.platformClientSecret.save(trimmedSecret)
         let protectSecret = protectClientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !protectSecret.isEmpty {
-            secrets.protectClientSecret.save(protectSecret)
+        guard secrets.platformClientSecret.save(trimmedSecret),
+              protectSecret.isEmpty || secrets.protectClientSecret.save(protectSecret) else {
+            secrets.deleteAll()
+            saveError = "The Keychain did not accept the credentials, so the tenant was not added."
+            return
         }
 
         tenantStore.add(tenant)

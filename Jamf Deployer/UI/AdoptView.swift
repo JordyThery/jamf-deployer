@@ -42,6 +42,7 @@ struct AdoptView: View {
     /// Selected objects that could not be staged, and why.
     @State private var stagingNote: String?
     @State private var logTail: [String] = []
+    @State private var secretFindings: [String] = []
 
     private let runner = JamformerRunner()
 
@@ -87,7 +88,7 @@ struct AdoptView: View {
                     Button("All") { selectedTypes = Set(resourceTypes.map(\.filterKey)) }
                     Button("None") { selectedTypes = [] }
                     Spacer()
-                    Text("\(selectedTypes.count) types")
+                    Text("\(selectedTypes.count) type\(selectedTypes.count == 1 ? "" : "s") selected")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -121,13 +122,23 @@ struct AdoptView: View {
         case .pickObjects:
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("\(objects.count) objects found — choose what the app should manage.")
+                    Text("\(objects.count) object\(objects.count == 1 ? "" : "s") found — choose what the app should manage.")
                         .font(.callout)
                     Spacer()
                     Button("All") { selectedObjects = Set(objects.map(\.address)) }
                     Button("None") { selectedObjects = [] }
                 }
                 .controlSize(.small)
+                if !secretFindings.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("The secret scan reported findings. Adopted objects are stored in the tenant record, so review these first:", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                        ForEach(secretFindings, id: \.self) { finding in
+                            Text(finding).font(.caption.monospaced())
+                        }
+                    }
+                    .font(.caption)
+                }
                 if !unmanageableNotes.isEmpty {
                     Text("Left out — the app cannot manage these: " + unmanageableNotes.joined(separator: "; ") + ". They stay in Jamf unchanged.")
                         .font(.caption)
@@ -158,7 +169,7 @@ struct AdoptView: View {
                         Spacer()
                         if object.hasProvenanceTag {
                             StatusBadge("Created by a building block", style: .warning)
-                                .help("This object carries a Jamf Deployer provenance tag — it probably belongs to a building block. Adopting it here manages it as a standalone object instead.")
+                                .help("Tagged by Jamf Deployer, so it likely belongs to a building block")
                         }
                     }
                 }
@@ -239,9 +250,12 @@ struct AdoptView: View {
                     clientSecret: secret,
                     includeResources: types,
                     includePackageFiles: false,
-                    terraformPath: terraformURL.path
+                    terraformPath: terraformURL.path,
+                    onLine: { line in
+                        Task { @MainActor in logTail.append(line) }
+                    }
                 )
-                logTail = result.logLines
+                secretFindings = result.secretFindings
                 guard result.exitCode == 0 else {
                     step = .failed("The discovery stopped with an error. Check the Activity Log.")
                     return

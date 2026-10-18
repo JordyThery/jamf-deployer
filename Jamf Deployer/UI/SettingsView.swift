@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import DeployerKit
 
 /// Versions of the tools that ship inside the app. They only change with app
-/// updates, never silently; bundling into the app wrapper lands in Phase 2.
+/// updates, never silently.
 nonisolated enum EngineInfo {
     static let openTofuVersion = "1.13.1"
     static let jamfPlatformProviderVersion = "1.5.0"
@@ -31,7 +31,7 @@ struct SettingsView: View {
             } header: {
                 Text("History")
             } footer: {
-                Text("Recorded with every preview and deploy, so a team can see who changed what.")
+                Text("Recorded with every deploy, so a team can see who changed what.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -135,7 +135,10 @@ struct SupportBundleButton: View {
             ditto.arguments = ["-c", "-k", staging.path, destination.path]
             try ditto.run()
             ditto.waitUntilExit()
-            message = "Saved \(destination.lastPathComponent)."
+            try? FileManager.default.removeItem(at: staging)
+            message = ditto.terminationStatus == 0
+                ? "Saved \(destination.lastPathComponent)."
+                : "The support bundle could not be written."
         } catch {
             message = error.localizedDescription
         }

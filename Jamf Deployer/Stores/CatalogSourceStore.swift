@@ -3,9 +3,9 @@ import DeployerKit
 import JamfDeployerCore
 import os
 
-/// The catalog sources blocks come from: the built-in official source plus
-/// any custom local folders (captured blocks land in one of these).
-/// Git-tag sources join later with the team features.
+/// The catalog sources blocks come from: the built-in source plus custom
+/// local folders (captured blocks land in one of these) and Git catalogs
+/// pinned by release tag.
 @Observable
 final class CatalogSourceStore {
     nonisolated struct CustomSource: Codable, Sendable, Identifiable, Equatable {
@@ -41,6 +41,15 @@ final class CatalogSourceStore {
             kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .localFolder
             gitURL = try container.decodeIfPresent(String.self, forKey: .gitURL)
             defaultTag = try container.decodeIfPresent(String.self, forKey: .defaultTag)
+            // The source list syncs in Team Mode: a Git source's cache lives
+            // under this Mac's own Application Support folder.
+            if kind == .gitRepository {
+                path = Self.cacheRoot(for: id).path
+            }
+        }
+
+        static func cacheRoot(for id: UUID) -> URL {
+            URL.applicationSupportDirectory.appending(path: "Jamf Deployer/catalog-cache/\(id.uuidString)")
         }
     }
 
@@ -94,7 +103,9 @@ final class CatalogSourceStore {
         var catalogs = [try LoadedCatalog.load(from: EngineLocator.catalogURL)]
         for source in customSources {
             do {
-                catalogs.append(try load(source: source, tag: pins[source.id.uuidString]))
+                var loaded = try load(source: source, tag: pins[source.id.uuidString])
+                loaded.sourceID = source.id.uuidString
+                catalogs.append(loaded)
             } catch {
                 logger.error("Catalog source \(source.name, privacy: .public) unreadable: \(error.localizedDescription, privacy: .public)")
             }
@@ -132,8 +143,7 @@ final class CatalogSourceStore {
     @discardableResult
     func addGitSource(name: String, url: String, tag: String) async throws -> CustomSource {
         let id = UUID()
-        let cacheRoot = URL.applicationSupportDirectory
-            .appending(path: "Jamf Deployer/catalog-cache/\(id.uuidString)")
+        let cacheRoot = CustomSource.cacheRoot(for: id)
         try await GitCatalogManager.fetchTag(remote: url, tag: tag, into: cacheRoot.appending(path: tag))
         let source = CustomSource(
             id: id,

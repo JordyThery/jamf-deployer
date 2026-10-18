@@ -48,6 +48,11 @@ public nonisolated struct ProviderSchemaCatalog: Sendable {
             attributes.filter { $0.optional && !$0.required && $0.isEditablePrimitive }
         }
 
+        /// Writable secrets, which the form leaves out (see `isEditablePrimitive`).
+        public var sensitiveWritables: [Attribute] {
+            attributes.filter { $0.isWritable && $0.sensitive }
+        }
+
         public var complexWritables: [Attribute] {
             attributes.filter { $0.isWritable && !$0.isEditablePrimitive }
         }

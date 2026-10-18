@@ -43,15 +43,11 @@ actor EngineRunner {
         self.configuration = configuration
     }
 
-    /// Requests a graceful stop (single SIGINT, OpenTofu finishes in-flight
-    /// operations). A force kill is a separate, second user action.
-    func cancel(force: Bool = false) {
+    /// Requests a graceful stop (a single SIGINT: OpenTofu finishes
+    /// in-flight operations and releases its state lock).
+    func cancel() {
         guard let process = currentProcess, process.isRunning else { return }
-        if force {
-            process.terminate()
-        } else {
-            process.interrupt()
-        }
+        process.interrupt()
     }
 
     /// Runs one engine command. Decoded events are collected into the result;
@@ -131,7 +127,7 @@ actor EngineRunner {
         return result
     }
 
-    /// Raw stdout of an arbitrary engine command (schema dumps).
+    /// Raw stdout of an engine command (schema dumps, `show -json` of the state).
     func rawCommandOutput(arguments: [String]) async throws -> Data {
         let process = Process()
         process.executableURL = configuration.engineURL

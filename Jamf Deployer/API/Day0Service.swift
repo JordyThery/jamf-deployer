@@ -185,7 +185,7 @@ final class Day0Service {
     func downloadADEPublicKey(tenant: Tenant) async throws -> Data {
         let client = try client(for: tenant)
         let (data, status) = try await client.getRaw("/pro/v1/device-enrollments/public-key", accept: "application/x-pem-file")
-        guard status == 200 else { throw JamfAPIError.http(status: status, path: "/v1/device-enrollments/public-key") }
+        guard status == 200 else { throw JamfAPIError.http(status: status, path: "/pro/v1/device-enrollments/public-key") }
         return data
     }
 
@@ -197,7 +197,7 @@ final class Day0Service {
             "encodedToken": tokenFile.base64EncodedString(),
         ])
         guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/v1/device-enrollments/upload-token")
+            throw JamfAPIError.http(status: status, path: "/pro/v1/device-enrollments/upload-token")
         }
     }
 
@@ -212,7 +212,7 @@ final class Day0Service {
             "serviceToken": serviceToken,
         ])
         guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/v1/volume-purchasing-locations")
+            throw JamfAPIError.http(status: status, path: "/pro/v1/volume-purchasing-locations")
         }
     }
 
@@ -225,7 +225,7 @@ final class Day0Service {
             "homeHeading": "Welcome to \(brandingName)",
         ])
         guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/v1/self-service/branding/macos")
+            throw JamfAPIError.http(status: status, path: "/pro/v1/self-service/branding/macos")
         }
     }
 
@@ -242,7 +242,7 @@ final class Day0Service {
             "password": password,
         ])
         guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/v1/jamf-protect/register")
+            throw JamfAPIError.http(status: status, path: "/pro/v1/jamf-protect/register")
         }
     }
 }

@@ -351,6 +351,12 @@ public nonisolated struct LoadedCatalog: Sendable {
     /// preserved when catalogs from several sources merge.
     public var blockRoots: [String: URL] = [:]
     public var sourceNameByBlockID: [String: String] = [:]
+    /// The app's identifier for this source when it is a custom source
+    /// (nil for the built-in catalog); set by the loader's caller.
+    public var sourceID: String?
+    /// Custom-source identifiers of merged-in blocks, by block ID. Blocks
+    /// absent here come from the first (built-in) catalog.
+    public var sourceIDByBlockID: [String: String] = [:]
     /// Block folders this version of the app cannot read (typically blocks
     /// written for a newer version), by folder name. They are left out
     /// rather than failing the whole catalog.
@@ -382,6 +388,9 @@ public nonisolated struct LoadedCatalog: Sendable {
                 merged.blocks.append(block)
                 merged.blockRoots[block.id] = catalog.blockFolderURL(id: block.id)
                 merged.sourceNameByBlockID[block.id] = catalog.manifest.name
+                if let sourceID = catalog.sourceID {
+                    merged.sourceIDByBlockID[block.id] = sourceID
+                }
             }
             merged.unreadableBlocks += catalog.unreadableBlocks
             merged.presets.append(contentsOf: catalog.presets.filter { preset in
@@ -390,6 +399,14 @@ public nonisolated struct LoadedCatalog: Sendable {
         }
         merged.blocks.sort { $0.name < $1.name }
         return merged
+    }
+
+    static func hasSafeIdentifiers(_ block: BlockMetadata) -> Bool {
+        let blockID = "^[a-z0-9][a-z0-9-]*$"
+        let variable = "^[A-Za-z_][A-Za-z0-9_]*$"
+        guard block.id.range(of: blockID, options: .regularExpression) != nil else { return false }
+        let names = block.settings.map(\.key) + [block.scope.variable].compactMap { $0 }
+        return names.allSatisfy { $0.range(of: variable, options: .regularExpression) != nil }
     }
 
     /// Reads a catalog source from a folder (a checkout of a Git source or a
@@ -408,7 +425,13 @@ public nonisolated struct LoadedCatalog: Sendable {
         for folder in (try? fileManager.contentsOfDirectory(at: blocksURL, includingPropertiesForKeys: nil)) ?? [] {
             let metadataURL = folder.appending(path: "block.json")
             guard fileManager.fileExists(atPath: metadataURL.path) else { continue }
-            if let block = try? decoder.decode(BlockMetadata.self, from: Data(contentsOf: metadataURL)) {
+            // IDs, setting keys and scope variables are written into the
+            // generated configuration and paths, so they must be plain
+            // identifiers; a block whose ID differs from its folder name
+            // would also copy the wrong folder.
+            if let block = try? decoder.decode(BlockMetadata.self, from: Data(contentsOf: metadataURL)),
+               block.id == folder.lastPathComponent,
+               Self.hasSafeIdentifiers(block) {
                 blocks.append(block)
             } else {
                 unreadable.append(folder.lastPathComponent)

@@ -28,7 +28,6 @@ actor GitStoreService {
         case gitUnavailable
         case commandFailed(String, output: String)
         case pushRejected
-        case noRemote
 
         var errorDescription: String? {
             switch self {
@@ -38,8 +37,6 @@ actor GitStoreService {
                 "Git \(command) failed: \(output.prefix(300))"
             case .pushRejected:
                 "The team space moved while this Mac was working. Sync and try again."
-            case .noRemote:
-                "This store has no team space connected."
             }
         }
     }
@@ -162,41 +159,53 @@ actor GitStoreService {
         return files.compactMap { try? JSONFile.load(LockInfo.self, from: $0) }
     }
 
-    /// Acquire = commit the lock file and win the push race.
-    func acquireLock(tenantID: UUID, engineer: String, operation: String) throws -> LockResult {
+    /// This Mac's name as recorded in lock files.
+    private var hostName: String { Host.current().localizedName ?? "this Mac" }
+
+    /// Acquire = commit the lock file and win the push race. Only the lock
+    /// file is committed, so a lost race never touches other work.
+    func acquireLock(tenantID: UUID, engineer: String, operation: String, attempt: Int = 0) throws -> LockResult {
         guard isTeamMode() else { return .acquired }
         try pull()
-        if let existing = currentLock(for: tenantID), existing.host != Host.current().localizedName ?? "" || existing.engineer != engineer {
+        if let existing = currentLock(for: tenantID), existing.host != hostName || existing.engineer != engineer {
             return .heldByOther(existing)
         }
         let info = LockInfo(
             tenantID: tenantID,
             engineer: engineer,
-            host: Host.current().localizedName ?? "this Mac",
+            host: hostName,
             operation: operation,
             acquiredAt: .now
         )
         try JSONFile.save(info, to: lockURL(tenantID))
-        try commitAll(message: "Lock \(tenantID.uuidString.prefix(8)) — \(engineer) (\(operation))")
+        let lockPath = "locks/\(tenantID.uuidString).json"
+        try run("add", "--", lockPath)
+        try run("commit", "-m", "Lock \(tenantID.uuidString.prefix(8)) — \(engineer) (\(operation))", "--", lockPath)
         do {
             try push()
             return .acquired
         } catch GitError.pushRejected {
-            // Lost the race: rewind our lock commit, take theirs.
-            try run("reset", "--hard", "HEAD~1")
+            // Lost the race: undo only the lock commit, then take theirs.
+            try run("reset", "--soft", "HEAD~1")
+            try run("reset", "-q", "--", lockPath)
+            try? FileManager.default.removeItem(at: lockURL(tenantID))
             try pull()
             if let holder = currentLock(for: tenantID) {
                 return .heldByOther(holder)
             }
-            // Rare: the race was about something else — one retry.
-            return try acquireLock(tenantID: tenantID, engineer: engineer, operation: operation)
+            // The race was about something else: retry a couple of times.
+            guard attempt < 2 else { throw GitError.pushRejected }
+            return try acquireLock(tenantID: tenantID, engineer: engineer, operation: operation, attempt: attempt + 1)
         }
     }
 
     /// Release = commit the workspace outcome plus the lock removal, push.
-    func releaseLock(tenantID: UUID, message: String) throws {
+    /// A lock held by someone else is left in place.
+    func releaseLock(tenantID: UUID, engineer: String, message: String) throws {
         guard isTeamMode() else { return }
-        try? FileManager.default.removeItem(at: lockURL(tenantID))
+        if let existing = currentLock(for: tenantID), existing.engineer == engineer, existing.host == hostName {
+            try? FileManager.default.removeItem(at: lockURL(tenantID))
+        }
         try commitAll(message: message)
         do {
             try push()
@@ -238,7 +247,8 @@ actor GitStoreService {
         process.waitUntilExit()
         let text = String(decoding: data, as: UTF8.self)
         guard process.terminationStatus == 0 else {
-            logger.error("git \(arguments.joined(separator: " "), privacy: .public) failed: \(text.prefix(200), privacy: .public)")
+            // Only the subcommand: arguments can hold a remote URL with credentials.
+            logger.error("git \(arguments.first ?? "", privacy: .public) failed: \(text.prefix(200), privacy: .private)")
             throw GitError.commandFailed(arguments.first ?? "", output: text)
         }
         return text

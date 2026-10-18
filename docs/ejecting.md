@@ -12,7 +12,7 @@ continuity: nothing is recreated, the state carries over.
    `~/Library/Application Support/Jamf Deployer/store/tenants/<id>/`
    — team installs: the same path, on a Mac that has run a preview for the
    tenant (`generated/` is rebuilt locally and is not in the repository).
-2. The tenant's **recovery sheet** (saved at first deploy). It holds the
+2. The tenant's **recovery sheet** (saved before the first deploy). It holds the
    passphrase that encrypts the state file. Without it the state is
    unreadable — by anyone, including the app.
 3. The tenant's Jamf API credentials (the app kept them in your Keychain;
@@ -97,6 +97,13 @@ registry once to tidy that up:
 ```sh
 terraform state replace-provider \
   registry.opentofu.org/jamf/jamfplatform registry.terraform.io/jamf/jamfplatform
+```
+
+Tenants with Jamf Protect blocks also run:
+
+```sh
+terraform state replace-provider \
+  registry.opentofu.org/jamf-concepts/jamfprotect registry.terraform.io/jamf-concepts/jamfprotect
 ```
 
 From here it is an ordinary Terraform project: edit the HCL, move the state

@@ -144,6 +144,11 @@ struct OverrideEditorView: View {
                         attributeFields(type.requiredPrimitives, header: "Required")
                         attributeFields(type.optionalPrimitives, header: "Optional")
 
+                        if !type.sensitiveWritables.isEmpty {
+                            Text("Secret values (\(type.sensitiveWritables.map(\.name).joined(separator: ", "))) are left out: this form writes plain configuration files. Set them in Jamf after deploying.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         if !type.complexWritables.isEmpty {
                             Text("Not editable here yet: \(type.complexWritables.map(\.name).joined(separator: ", ")). Capture an export or edit a block for objects needing these.")
                                 .font(.caption)
@@ -203,11 +208,7 @@ struct OverrideEditorView: View {
                     case .stringList:
                         TextField("\(attribute.name) (comma-separated)", text: binding)
                     case .string, .complex:
-                        if attribute.sensitive {
-                            SecureField(attribute.name, text: binding)
-                        } else {
-                            TextField(attribute.name, text: binding)
-                        }
+                        TextField(attribute.name, text: binding)
                     }
                     if !attribute.description.isEmpty {
                         Text(attribute.description)
@@ -255,7 +256,6 @@ struct OverrideEditorView: View {
                 withIntermediateDirectories: true
             )
             try Data(hcl.utf8).write(to: destination)
-            message = "Staged. Preview Changes shows it as a Create."
             dismiss()
         } catch {
             message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

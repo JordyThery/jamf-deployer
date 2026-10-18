@@ -382,18 +382,17 @@ struct BlockDetailSheet: View {
             }
         }
         .confirmationDialog(
-            tenantsUsingBlock.isEmpty
-                ? "Delete “\(block.name)”?"
-                : "Delete “\(block.name)”? It is selected by \(tenantsUsingBlock.joined(separator: ", ")) — their baselines will fail to generate until the block is removed there.",
+            "Delete “\(block.name)”?",
             isPresented: $isConfirmingDelete,
             titleVisibility: .visible
         ) {
             Button("Delete Block", role: .destructive) { deleteBlock() }
         } message: {
-            Text("The block folder is deleted from its catalog source. Objects already deployed in Jamf are not touched.")
+            Text((tenantsUsingBlock.isEmpty ? "" : "Selected by \(tenantsUsingBlock.joined(separator: ", ")); their baselines fail to generate until it is removed there. ")
+                + "The block folder is deleted from its catalog source. Objects already deployed in Jamf are not touched.")
         }
         .alert(
-            "Something went wrong",
+            "Action Failed",
             isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
         ) {
             Button("OK", role: .cancel) {}
@@ -503,7 +502,7 @@ struct BlockDetailSheet: View {
         let newID = "\(block.id)-custom"
         let destination = URL(filePath: source.path).appending(path: "blocks/\(newID)")
         guard !FileManager.default.fileExists(atPath: destination.path) else {
-            actionError = "\(source.name) already contains a block named \(newID)."
+            actionError = "\(source.name) already contains a block with the ID \(newID)."
             return
         }
         do {

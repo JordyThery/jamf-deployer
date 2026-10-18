@@ -3,7 +3,7 @@ import Foundation
 /// One line of the engine's machine-readable output stream
 /// (`tofu plan -json`, `tofu apply -json`).
 ///
-/// Shapes verified against fixtures captured in Phase 0
+/// Shapes verified against captured fixtures
 /// (Fixtures/engine/*.jsonl, OpenTofu 1.13.1, ui 1.2).
 public nonisolated struct EngineStreamEvent: Decodable, Sendable {
     public enum Kind: String, Decodable, Sendable {

@@ -2,7 +2,7 @@ import Foundation
 
 /// The structured plan produced by `tofu show -json plan.bin`.
 ///
-/// Shapes verified against fixtures captured in Phase 0
+/// Shapes verified against captured fixtures
 /// (Fixtures/engine/show-plan-*.json, Fixtures/live/show-plan-*.json).
 public nonisolated struct PlanFile: Decodable, Sendable {
     /// One resource-level change. `actions` maps to the user-facing labels:

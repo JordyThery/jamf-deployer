@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Newest-first table of activity entries, matching Intune Deployer's
-/// activity log window.
+/// Newest-first table of activity entries for the Activity Log window.
 public struct ActivityLogView: View {
     private var log: ActivityLog
     private let emptyDescription: String

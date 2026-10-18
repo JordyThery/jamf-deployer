@@ -13,7 +13,6 @@ final class TeamSecretsService {
 
     /// Engineers who published a public key, by display name.
     private(set) var publishedEngineers: [(name: String, fingerprint: String)] = []
-    private(set) var sharingEnabled = false
     private(set) var lastAbsorbed: Int = 0
 
     init(tenantStore: TenantStore, gitStore: GitStoreService) {
@@ -73,7 +72,6 @@ final class TeamSecretsService {
                 return (file.deletingPathExtension().lastPathComponent, TeamCrypto.fingerprint(publicKey: key))
             }
             .sorted { $0.name < $1.name }
-        sharingEnabled = FileManager.default.fileExists(atPath: secretsURL.path)
     }
 
     private func allPublicKeys() -> [String] {

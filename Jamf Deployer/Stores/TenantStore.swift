@@ -4,9 +4,9 @@ import JamfDeployerCore
 import os
 
 /// Loads and saves tenants from
-/// `~/Library/Application Support/Jamf Deployer/tenants/<id>/`.
-/// Each tenant folder is a full workspace: tenant.json plus the generated/,
-/// state/, history/ and exports/ directories later phases fill in.
+/// `~/Library/Application Support/Jamf Deployer/store/tenants/<id>/`.
+/// Each tenant folder is a full workspace: tenant.json plus its generated
+/// configuration, encrypted state, adopted objects and history.
 @Observable
 final class TenantStore {
     private(set) var tenants: [Tenant] = []
@@ -95,9 +95,6 @@ final class TenantStore {
         tenants = loaded.sorted { $0.createdAt < $1.createdAt }
     }
 
-    /// Tenants deployed before the maintain features existed have no record
-    /// of which block versions they run; seed it from the newest history
-    /// entry once.
     /// Earlier versions prepared a hand-over by replacing the adopted
     /// configuration with removed blocks; mark such tenants as pending so
     /// their hand-over deploy archives them.
@@ -110,6 +107,9 @@ final class TenantStore {
         tenant.handOverPending = true
     }
 
+    /// Tenants deployed before the maintain features existed have no record
+    /// of which block versions they run; seed it from the newest history
+    /// entry once.
     private func migrateDeployedVersionsIfNeeded(_ tenant: inout Tenant, workspace: URL) {
         guard tenant.deployedBlockVersions.isEmpty, tenant.lastDeploy != nil else { return }
         // A tenant managed only through Adopt legitimately has no blocks.

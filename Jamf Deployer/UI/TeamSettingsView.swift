@@ -42,7 +42,7 @@ struct TeamSettingsView: View {
                         shareSecrets()
                     }
                     .disabled(isWorking)
-                    .help("Encrypts each tenant's credentials to every published engineer key and commits only the ciphertext. New engineers get working tenants on their first sync.")
+                    .help("Encrypts each tenant's credentials for every published engineer key; only the ciphertext is committed")
                     if !secrets.publishedEngineers.isEmpty {
                         Text("Keys published: \(secrets.publishedEngineers.map(\.name).joined(separator: ", "))")
                             .font(.caption)
@@ -55,7 +55,7 @@ struct TeamSettingsView: View {
                             .foregroundStyle(.orange)
                     }
                     if secrets.lastAbsorbed > 0 {
-                        Label("Received credentials for \(secrets.lastAbsorbed) tenant(s) on the last sync.", systemImage: "checkmark.seal")
+                        Label("Received credentials for \(secrets.lastAbsorbed) tenant\(secrets.lastAbsorbed == 1 ? "" : "s") on the last sync.", systemImage: "checkmark.seal")
                             .font(.caption)
                             .foregroundStyle(.green)
                     }
@@ -93,8 +93,8 @@ struct TeamSettingsView: View {
             Text("Team")
         } footer: {
             Text(deployService.isTeamMode
-                ? "Tenant records, history and the list of catalog sources sync through the team space. Credentials never sync — each engineer keeps secrets in their own Keychain."
-                : "A team space is a Git repository (GitHub works great) that this Mac's tenants, history and catalog sources sync through. Git authentication uses your existing git/gh/SSH setup. A full backup is made before anything changes.")
+                ? "Tenant records, history and the list of catalog sources sync through the team space. Credentials sync only when shared, encrypted for each engineer; every Mac keeps them in its own Keychain."
+                : "A team space is a Git repository (for example on GitHub) that this Mac's tenants, history and catalog sources sync through. Git authentication uses your existing git/gh/SSH setup. A full backup is made before anything changes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -203,6 +203,14 @@ struct TeamSettingsView: View {
         ditto.arguments = ["-c", "-k", "--sequesterRsrc", store.path, backup.path]
         try ditto.run()
         ditto.waitUntilExit()
+        guard ditto.terminationStatus == 0 else { throw BackupError.failed }
+    }
+
+    nonisolated enum BackupError: LocalizedError {
+        case failed
+        var errorDescription: String? {
+            "The store could not be backed up, so nothing was changed. Check the free disk space and try again."
+        }
     }
 
     /// Clone to a fresh folder, swap stores, import local tenants.
@@ -255,7 +263,7 @@ struct TeamSettingsView: View {
 
         if imported > 0 {
             let joined = GitStoreService()
-            _ = try await joined.commitAll(message: "Import \(imported) tenant(s) from a joining Mac")
+            _ = try await joined.commitAll(message: "Import \(imported) tenant\(imported == 1 ? "" : "s") from a joining Mac")
             try await joined.push()
         }
         return imported
