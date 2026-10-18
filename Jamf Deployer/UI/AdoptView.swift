@@ -30,6 +30,7 @@ struct AdoptView: View {
         "category", "script", "policy", "device_groups", "computer_extension_attribute",
     ]
     @State private var typeFilter = ""
+    @State private var objectFilter = ""
     @State private var exportURL: URL?
     @State private var objects: [ExportedObject] = []
     @State private var selectedObjects: Set<String> = []
@@ -130,8 +131,13 @@ struct AdoptView: View {
                     Text("\(objects.count) object\(objects.count == 1 ? "" : "s") found — choose what the app should manage.")
                         .font(.callout)
                     Spacer()
-                    Button("All") { selectedObjects = Set(objects.map(\.address)) }
-                    Button("None") { selectedObjects = [] }
+                    TextField("Filter objects", text: $objectFilter)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 180)
+                    Button("All") { selectedObjects.formUnion(filteredObjects.map(\.address)) }
+                        .help("Selects every object the filter shows")
+                    Button("None") { selectedObjects.subtract(filteredObjects.map(\.address)) }
+                        .help("Deselects every object the filter shows")
                 }
                 .controlSize(.small)
                 if !secretFindings.isEmpty {
@@ -155,7 +161,7 @@ struct AdoptView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                List(objects) { object in
+                List(filteredObjects) { object in
                     HStack(spacing: 8) {
                         Toggle(isOn: Binding(
                             get: { selectedObjects.contains(object.address) },
@@ -202,6 +208,16 @@ struct AdoptView: View {
                 systemImage: "xmark.octagon",
                 description: Text(message)
             )
+        }
+    }
+
+    /// Objects whose name or type matches the filter; selections outside
+    /// the filter are kept.
+    private var filteredObjects: [ExportedObject] {
+        guard !objectFilter.isEmpty else { return objects }
+        return objects.filter {
+            $0.displayName.localizedCaseInsensitiveContains(objectFilter)
+                || $0.resourceType.localizedCaseInsensitiveContains(objectFilter)
         }
     }
 

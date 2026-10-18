@@ -138,6 +138,8 @@ final class CatalogUITests: DeployerUITestCase {
         tap(app.sheets.buttons["Discover Objects"])
         XCTAssertTrue(anyContaining("found").waitForExistence(timeout: 900), "Discovery did not finish")
         tap(app.sheets.buttons["None"])
+        type("UIC - Adopt", into: app.sheets.textFields.matching(NSPredicate(format: "placeholderValue == 'Filter objects'")).firstMatch)
+        sleep(1)
         let targets = app.sheets.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH 'UIC - Adopt'")).allElementsBoundByIndex
         XCTAssertEqual(targets.count, 6, "Expected the six objects to adopt")
         for target in targets { target.click() }

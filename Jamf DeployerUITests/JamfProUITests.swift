@@ -14,8 +14,8 @@ final class JamfProUITests: DeployerUITestCase {
         try connectJamfPro(name: Self.demo, prefix: "JPDEMO")
         openTenant(Self.sandbox)
         XCTAssertTrue(any("Jamf Pro API").waitForExistence(timeout: 10), "Connection type not shown")
-        XCTAssertTrue(anyContaining("Building blocks need a Jamf Platform API connection").exists,
-                      "Jamf Pro tenants must explain why building blocks are unavailable")
+        XCTAssertTrue(app.buttons["Baseline Updates…"].waitForExistence(timeout: 10),
+                      "Jamf Pro API tenants offer building blocks")
         tap(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Run Preflight'")).firstMatch, timeout: 10)
         XCTAssertTrue(anyContaining("Signed in to the Jamf Pro API").waitForExistence(timeout: 60), "Preflight did not sign in")
     }
