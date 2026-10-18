@@ -11,6 +11,18 @@ struct PreviewDeploySheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let tenantID: UUID
+    /// Shown under the title, e.g. the rollout position.
+    var context: String? = nil
+    /// Set when embedded (in a rollout): called instead of dismissing.
+    var onClose: ((CloseReason) -> Void)? = nil
+
+    enum CloseReason {
+        case deployed(TenantDeployService.DeployOutcome)
+        /// The preview found nothing to change.
+        case nothingToDeploy
+        /// Closed before deploying, or the preview failed.
+        case closedWithoutDeploying
+    }
 
     enum Stage {
         case previewing
@@ -33,7 +45,7 @@ struct PreviewDeploySheet: View {
 
     var body: some View {
         SheetFrame(
-            title: "Preview Changes — \(tenant?.name ?? "")",
+            title: "Preview Changes — \(tenant?.name ?? "")\(context.map { " · \($0)" } ?? "")",
             systemImage: "list.bullet.clipboard",
             isBusy: isBusy
         ) {
@@ -276,7 +288,7 @@ struct PreviewDeploySheet: View {
         case .reviewing(let session):
             summaryText(session)
             Spacer()
-            Button("Close") { dismiss() }
+            Button("Close") { close(session.summary.isEmpty ? .nothingToDeploy : .closedWithoutDeploying) }
                 .keyboardShortcut(.cancelAction)
             Button("Deploy") { startDeploy(session) }
                 .buttonStyle(.borderedProminent)
@@ -288,7 +300,7 @@ struct PreviewDeploySheet: View {
             Label("First deploy: save the recovery sheet for this tenant's record first.", systemImage: "key")
                 .font(.callout)
             Spacer()
-            Button("Close") { dismiss() }
+            Button("Close") { close(.closedWithoutDeploying) }
                 .keyboardShortcut(.cancelAction)
             Button("Save Recovery Sheet…") { isExportingRecovery = true }
                 .buttonStyle(.borderedProminent)
@@ -316,15 +328,15 @@ struct PreviewDeploySheet: View {
                 .foregroundStyle(.secondary)
             Spacer()
 
-        case .finished:
+        case .finished(let outcome):
             Spacer()
-            Button("Done") { dismiss() }
+            Button(onClose == nil ? "Done" : "Continue") { close(.deployed(outcome)) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
 
         case .failed:
             Spacer()
-            Button("Close") { dismiss() }
+            Button("Close") { close(.closedWithoutDeploying) }
                 .keyboardShortcut(.cancelAction)
             Button("Try Again") {
                 stage = .previewing
@@ -341,7 +353,7 @@ struct PreviewDeploySheet: View {
                 if let tenant {
                     deployService.cancel(tenant: tenant)
                 }
-                dismiss()
+                close(.closedWithoutDeploying)
             }
             .keyboardShortcut(.cancelAction)
         }
@@ -365,6 +377,15 @@ struct PreviewDeploySheet: View {
     }
 
     // MARK: Actions
+
+    private func close(_ reason: CloseReason) {
+        // Leaving the view releases an unused preview (onDisappear).
+        if let onClose {
+            onClose(reason)
+        } else {
+            dismiss()
+        }
+    }
 
     private func runPreview() async {
         guard let tenant else { return }

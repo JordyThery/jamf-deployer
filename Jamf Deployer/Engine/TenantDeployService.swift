@@ -351,6 +351,13 @@ final class TenantDeployService {
         !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
     }
 
+    /// Whether a rollout can include the tenant: it has a baseline, adopted or
+    /// staged objects, and is not being handed over.
+    func canRollOut(_ tenant: Tenant) -> Bool {
+        guard !tenant.isHandedOver, !tenant.handOverPending else { return false }
+        return isManaged(tenant) || !tenant.blockSelections.isEmpty || hasAdoptedConfig(for: tenant)
+    }
+
     /// Whether the tenant has adopted objects.
     func hasAdoptedConfig(for tenant: Tenant) -> Bool {
         ExportedObjectInventory.containsResources(directory: adoptedURL(for: tenant))

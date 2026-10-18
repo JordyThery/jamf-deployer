@@ -11,6 +11,7 @@ struct FleetDashboardView: View {
     @Binding var isConnectingTenant: Bool
     @State private var searchText = ""
     @State private var showsOnlyNeedsAttention = false
+    @State private var isRollingOut = false
 
     private var rows: [Tenant] {
         tenantStore.tenants.filter { tenant in
@@ -129,6 +130,16 @@ struct FleetDashboardView: View {
             }
             .disabled(deployService.fleetCheckProgress != nil || !tenantStore.tenants.contains { deployService.isManaged($0) })
             .help("Compare every managed tenant against its record (a few at a time) and flag changes made in Jamf")
+            Button {
+                isRollingOut = true
+            } label: {
+                Label("Roll Out…", systemImage: "square.stack.3d.forward.dottedline")
+            }
+            .disabled(deployService.isBusy || tenantStore.tenants.filter(deployService.canRollOut).count < 2)
+            .help("Deploy to several tenants one at a time, test tenants first, previewing each one")
+        }
+        .sheet(isPresented: $isRollingOut) {
+            RolloutView()
         }
     }
 
