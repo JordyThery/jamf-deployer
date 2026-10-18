@@ -60,9 +60,18 @@ touch "Jamf DeployerUITests/"*.swift
 xcodebuild build -project "Jamf Deployer.xcodeproj" -scheme "Jamf Deployer" -configuration Debug -destination "platform=macOS,arch=arm64" -quiet
 xcodebuild build-for-testing -project "Jamf Deployer.xcodeproj" -scheme "Jamf DeployerUITests" -destination "platform=macOS" -quiet
 
+# Runs one step; a step that produced no result (for example because the
+# previous app instance was still quitting) is retried once.
 run() {
-    xcodebuild test-without-building -project "Jamf Deployer.xcodeproj" -scheme "Jamf DeployerUITests" -destination 'platform=macOS' \
-        -only-testing:"Jamf DeployerUITests/FunctionUITests/$1" 2>&1 | grep -E "error:|Test Case .*(passed|failed)" || true
+    local log="$WORK/$1.log"
+    for attempt in 1 2; do
+        xcodebuild test-without-building -project "Jamf Deployer.xcodeproj" -scheme "Jamf DeployerUITests" -destination 'platform=macOS' \
+            -only-testing:"Jamf DeployerUITests/FunctionUITests/$1" > "$log" 2>&1
+        if grep -qE "Test Case .*(passed|failed)" "$log"; then break; fi
+        echo "  $1 produced no result (attempt $attempt): $(grep -m1 -E "Testing failed|error" "$log")"
+        sleep 5
+    done
+    grep -E "error:|Test Case .*(passed|failed)" "$log" || true
 }
 drift() {
     api "$A" "

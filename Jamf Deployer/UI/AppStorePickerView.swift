@@ -111,7 +111,7 @@ struct AppStorePickerView: View {
                             Text(location.name).tag(location.name)
                         }
                     }
-                    .onChange(of: locationName) { Task { await loadContent() } }
+                    .onChange(of: locationName) { Task { await loadContent(locationNamed: locationName) } }
                 }
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
@@ -263,17 +263,18 @@ struct AppStorePickerView: View {
         defer { isLoading = false }
         do {
             locations = try await client.getDecoded(LocationsPage.self, path: "/pro/v1/volume-purchasing-locations").results
-            if !locations.contains(where: { $0.name == locationName }), let first = locations.first {
-                locationName = first.name
-            }
-            await loadContent()
+            // The binding writes through the tenant store, so read the
+            // choice from a local rather than back from the binding.
+            let chosen = locations.contains(where: { $0.name == locationName }) ? locationName : (locations.first?.name ?? "")
+            if chosen != locationName { locationName = chosen }
+            await loadContent(locationNamed: chosen)
         } catch {
             loadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    private func loadContent() async {
-        guard let location = locations.first(where: { $0.name == locationName }), let client = client() else {
+    private func loadContent(locationNamed name: String) async {
+        guard let location = locations.first(where: { $0.name == name }), let client = client() else {
             content = []
             return
         }

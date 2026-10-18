@@ -27,8 +27,29 @@ final class FunctionUITests: DeployerUITestCase {
         }
     }
 
+    /// Removes every catalog source with this name (Manage Sources rows are
+    /// matched by the row that shows the name, never by position).
+    private func removeCatalogSources(named name: String) {
+        openSidebar("Building Blocks")
+        tap(app.toolbars.buttons["Manage Sources…"], timeout: 10)
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10))
+        for _ in 0..<5 {
+            let label = app.sheets.staticTexts.matching(NSPredicate(format: "value == %@ OR label == %@", name, name)).firstMatch
+            guard label.waitForExistence(timeout: 2) else { break }
+            let row = app.sheets.buttons.matching(NSPredicate(format: "label == 'Remove…'")).allElementsBoundByIndex
+                .min { abs($0.frame.midY - label.frame.midY) < abs($1.frame.midY - label.frame.midY) }
+            guard let remove = row, abs(remove.frame.midY - label.frame.midY) < 30 else { break }
+            remove.click()
+            tap(dialogButton("Remove Source"), timeout: 10)
+            sleep(1)
+        }
+        tap(app.sheets.buttons["Done"].exists ? app.sheets.buttons["Done"] : app.sheets.buttons["Close"], timeout: 5)
+    }
+
     func test02AddGitCatalog() throws {
         let url = try env("UITEST_CATALOG_URL")
+        // Leftovers from an interrupted run would shadow the new source.
+        removeCatalogSources(named: Self.catalogName)
         openSidebar("Building Blocks")
         tap(app.toolbars.buttons["Add Git Catalog…"], timeout: 10)
         type(Self.catalogName, into: field("Shared Blocks"))
@@ -180,8 +201,10 @@ final class FunctionUITests: DeployerUITestCase {
         let block = blockCheckbox("Mac App Store Apps")
         XCTAssertTrue(block.waitForExistence(timeout: 30))
         if (block.value as? Int) != 1 { block.click() }
-        let settings = app.buttons.matching(NSPredicate(format: "label == 'Show Settings'")).firstMatch
-        tap(settings, timeout: 10)
+        // A block without a scope yet opens its settings by itself.
+        if !app.buttons["Hide Settings"].waitForExistence(timeout: 3) {
+            tap(app.buttons.matching(NSPredicate(format: "label == 'Show Settings'")).firstMatch, timeout: 10)
+        }
         tap(app.buttons["Choose Apps…"].firstMatch, timeout: 10)
         let add = app.sheets.buttons["Add"].firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 60), "No licensed apps listed")
@@ -286,10 +309,11 @@ final class FunctionUITests: DeployerUITestCase {
     }
 
     func test19RemoveCatalogSource() throws {
+        removeCatalogSources(named: Self.catalogName)
         openSidebar("Building Blocks")
         tap(app.toolbars.buttons["Manage Sources…"], timeout: 10)
-        tap(app.sheets.buttons["Remove…"].firstMatch, timeout: 10)
-        tap(dialogButton("Remove Source"), timeout: 10)
+        XCTAssertFalse(app.sheets.staticTexts.matching(NSPredicate(format: "value == %@", Self.catalogName)).firstMatch.waitForExistence(timeout: 3),
+                       "The test catalog is still listed")
     }
 
     func test20RemoveTenants() throws {
