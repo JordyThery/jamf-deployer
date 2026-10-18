@@ -91,6 +91,12 @@ public nonisolated enum ErrorTranslation {
             "Remove the Security Cloud blocks from the baseline, or talk to Jamf about the entitlement."
         ),
         (
+            // Captured live: 409 when the location holds no licenses.
+            "not available for device assignment",
+            "The tenant has no Apps and Books licenses for this app.",
+            "Get the app for the tenant's location in Apple Business Manager (free apps too), wait for Jamf to sync the licenses, then preview again."
+        ),
+        (
             "Missing required argument",
             "A building block is missing a required setting.",
             "Open the block's settings and fill in the highlighted fields."

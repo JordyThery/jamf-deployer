@@ -1525,6 +1525,58 @@ struct MobileDeviceTests {
         #expect(again == text)
     }
 
+    @Test func appStoreAppsLicenseThroughTheDestinationsLocation() throws {
+        let source = FileManager.default.temporaryDirectory.appending(path: "vpp-src-\(UUID().uuidString)")
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "vpp-dst-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source); try? FileManager.default.removeItem(at: catalog) }
+        try Data("""
+        resource "jamfplatform_pro_mac_app_store_app" "word" {
+          general = {
+            name = "Microsoft Word"
+          }
+          vpp = {
+            assign_vpp_device_based_licenses = true
+            vpp_admin_account_id             = "3"
+          }
+        }
+
+        resource "jamfplatform_pro_mac_app_store_app" "pages" {
+          general = {
+            name = "Pages"
+          }
+          vpp = {
+            assign_vpp_device_based_licenses = false
+            vpp_admin_account_id             = "-1"
+          }
+        }
+        """.utf8).write(to: source.appending(path: "pro_mac_app_store_app.tf"))
+        try Data("""
+        resource "jamfplatform_pro_volume_purchasing_location" "abm" {
+          name          = "Company Apps"
+          service_token = var.token
+        }
+        """.utf8).write(to: source.appending(path: "pro_volume_purchasing_location.tf"))
+        try Data("""
+        import {
+          to = jamfplatform_pro_volume_purchasing_location.abm
+          id = "3"
+        }
+        """.utf8).write(to: source.appending(path: "pro_volume_purchasing_location_import.tf"))
+
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "apps", name: "Apps", summary: "", namePrefix: "",
+            sourceDirectory: source, catalogRootDirectory: catalog))
+        let apps = try String(contentsOf: result.blockFolderURL.appending(path: "pro_mac_app_store_app.tf"), encoding: .utf8)
+        #expect(apps.contains("data.jamfplatform_pro_volume_purchasing_location.apps_and_books.id"))
+        #expect(apps.contains(#"vpp_admin_account_id             = "-1""#))
+        let lookup = try String(contentsOf: result.blockFolderURL.appending(path: "apps_and_books_location.tf"), encoding: .utf8)
+        #expect(lookup.contains(#"default     = "Company Apps""#))
+        let block = try JSONDecoder().decode(BlockMetadata.self, from: Data(contentsOf: result.blockFolderURL.appending(path: "block.json")))
+        #expect(block.settings.map(\.key) == ["vpp_location_name"])
+        #expect(ErrorTranslation.translate("409 Conflict: App is not available for device assignment").message.contains("Apps and Books"))
+    }
+
     @Test func catalogsSkipBlocksFromNewerVersions() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "future-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

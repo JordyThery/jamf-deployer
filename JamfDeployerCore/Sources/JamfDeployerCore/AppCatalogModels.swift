@@ -80,3 +80,58 @@ public nonisolated struct AppCatalogApp: Codable, Sendable, Identifiable, Hashab
         return String(decoding: data, as: UTF8.self)
     }
 }
+
+/// One App Store app in a Mac or iPad and iPhone App Store block. The Adam
+/// ID identifies the app on every tenant; name and version are looked up
+/// from the App Store when deploying.
+public nonisolated struct AppStoreApp: Codable, Sendable, Identifiable, Hashable {
+    public enum DeploymentType: String, Codable, Sendable, CaseIterable {
+        case installAutomatically = "INSTALL_AUTOMATICALLY"
+        case selfService = "SELF_SERVICE"
+
+        public var label: String {
+            switch self {
+            case .installAutomatically: "Install automatically"
+            case .selfService: "Offer in Self Service"
+            }
+        }
+    }
+
+    public var adamID: String
+    /// Display name at the time it was picked.
+    public var name: String
+    public var deploymentType: DeploymentType
+    /// The app's own Jamf Pro category; nil uses the block's category.
+    public var categoryID: String?
+    public var categoryName: String?
+
+    public var id: String { adamID }
+
+    public init(adamID: String, name: String, deploymentType: DeploymentType = .selfService,
+                categoryID: String? = nil, categoryName: String? = nil) {
+        self.adamID = adamID
+        self.name = name
+        self.deploymentType = deploymentType
+        self.categoryID = categoryID
+        self.categoryName = categoryName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case adamID = "adamId"
+        case name, deploymentType
+        case categoryID = "categoryId"
+        case categoryName
+    }
+
+    public static func decode(settingValue: String) -> [AppStoreApp] {
+        guard !settingValue.isEmpty, let data = settingValue.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([AppStoreApp].self, from: data)) ?? []
+    }
+
+    public static func encode(_ apps: [AppStoreApp]) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(apps.sorted { $0.name < $1.name }) else { return "[]" }
+        return String(decoding: data, as: UTF8.self)
+    }
+}

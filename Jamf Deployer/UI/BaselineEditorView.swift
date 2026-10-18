@@ -493,6 +493,7 @@ struct BlockSettingsForm: View {
     }
 
     @State private var isPickingApps = false
+    @State private var isPickingStoreApps = false
     @State private var groups: [ExistingObjectService.ComputerGroup]?
     @State private var categories: [ExistingObjectRef]?
     @State private var lookupError: String?
@@ -759,6 +760,30 @@ struct BlockSettingsForm: View {
                     get: { AppCatalogApp.decode(settingValue: binding.wrappedValue) },
                     set: { binding.wrappedValue = AppCatalogApp.encode($0) }
                 ))
+            }
+        case .macAppStorePicker, .mobileAppStorePicker:
+            HStack(spacing: 8) {
+                Button("Choose Apps…", systemImage: setting.type == .macAppStorePicker ? "app.badge" : "ipad.and.iphone") {
+                    isPickingStoreApps = true
+                }
+                let count = AppStoreApp.decode(settingValue: binding.wrappedValue).count
+                Text(count == 0 ? "No apps selected yet" : "\(count) app\(count == 1 ? "" : "s") selected")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .sheet(isPresented: $isPickingStoreApps) {
+                AppStorePickerView(
+                    tenant: tenant,
+                    platform: setting.type == .macAppStorePicker ? .mac : .mobile,
+                    apps: Binding(
+                        get: { AppStoreApp.decode(settingValue: binding.wrappedValue) },
+                        set: { binding.wrappedValue = AppStoreApp.encode($0) }
+                    ),
+                    locationName: Binding(
+                        get: { selection.settings["vpp_location_name"] ?? "" },
+                        set: { name in mutateSelection { $0.settings["vpp_location_name"] = name } }
+                    )
+                )
             }
         case .number:
             TextField(setting.title, text: binding, prompt: Text(setting.default))

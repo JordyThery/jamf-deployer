@@ -1,0 +1,50 @@
+{
+  "id": "mobile-app-store",
+  "version": "1.0.0",
+  "requires": [],
+  "conflicts": [],
+  "products": [
+    "jamf-pro"
+  ],
+  "minJamfProVersion": "11.31.0",
+  "permissions": [
+    "applications:create",
+    "applications:read",
+    "applications:update",
+    "applications:delete",
+    "volume-purchasing-locations:read"
+  ],
+  "alwaysOn": false,
+  "acceptsCategory": true,
+  "name": "iPad and iPhone Apps",
+  "category": "Applications",
+  "risk": "medium",
+  "summary": "App Store apps for iPads and iPhones the tenant holds Apps and Books licenses for, assigned to devices as managed apps. Pick apps with the built-in picker.",
+  "scope": {
+    "kind": "jamfProMobileGroup",
+    "variable": "scope_jamf_pro_mobile_group_id"
+  },
+  "settings": [
+    {
+      "key": "apps_json",
+      "title": "Apps",
+      "type": "mobileAppStorePicker",
+      "default": "[]",
+      "required": false,
+      "section": "Apps",
+      "description": "The apps this block deploys. Use “Choose Apps…” to pick from the tenant's licensed iPad and iPhone apps."
+    },
+    {
+      "key": "vpp_location_name",
+      "title": "Apps and Books location",
+      "type": "string",
+      "default": "",
+      "required": true,
+      "section": "Apps and Books",
+      "description": "Name of this tenant's Apps and Books (volume purchasing) location. The picker fills it in; it needs licenses for every chosen app."
+    }
+  ],
+  "objectsCreated": [
+    "1 mobile device app per selected app"
+  ]
+}

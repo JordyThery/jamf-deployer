@@ -198,6 +198,10 @@ public nonisolated enum BlockCapture {
         // instance (name captured as an editable block setting).
         var adeReferenced = false
         var adeAddresses: Set<String> = []
+        // App Store apps license through the tenant's Apps and Books
+        // location; like the ADE instance, it is found by name.
+        var vppReferenced = false
+        var vppLocationName: String?
         var adeInstanceName: String?
 
         // Whether any object scopes computer groups; decides which scope a
@@ -294,6 +298,17 @@ public nonisolated enum BlockCapture {
                     adeInstanceName = table.nameByAddress["jamfplatform_pro_automated_device_enrollment.\(match[1])"]
                 }
                 return "data.jamfplatform_pro_automated_device_enrollment.instance.id"
+            }
+
+            text = replacing(in: text, pattern: #"\bvpp_admin_account_id(\s*)= (?:"(\d+)"|jamfplatform_pro_volume_purchasing_location\.([A-Za-z0-9_-]+)\.id)"#) { match in
+                if !match[2].isEmpty, match[2] == "-1" || match[2] == "0" { return nil }
+                vppReferenced = true
+                if vppLocationName == nil {
+                    vppLocationName = !match[3].isEmpty
+                        ? table.nameByAddress["jamfplatform_pro_volume_purchasing_location.\(match[3])"]
+                        : table.name(type: "jamfplatform_pro_volume_purchasing_location", id: match[2])
+                }
+                return "vpp_admin_account_id\(match[1])= data.jamfplatform_pro_volume_purchasing_location.apps_and_books.id"
             }
 
             // Jamf never exports Recovery Lock passwords; a PreStage that
@@ -765,6 +780,22 @@ public nonisolated enum BlockCapture {
             warnings.append("PreStage enrollments attach to the deploying tenant's Automated Device Enrollment instance — the tenant needs its ADE token uploaded, and the block's \"Automated Device Enrollment instance\" setting must match that instance's name.")
         }
 
+        if vppReferenced {
+            let location = """
+            variable "vpp_location_name" {
+              description = "Name of the tenant's Apps and Books (volume purchasing) location that holds the app licenses."
+              type        = string
+              default     = \(hclStringLiteral(vppLocationName ?? ""))
+            }
+
+            data "jamfplatform_pro_volume_purchasing_location" "apps_and_books" {
+              name = var.vpp_location_name
+            }
+            """
+            try Data(location.utf8).write(to: blockURL.appending(path: "apps_and_books_location.tf"))
+            warnings.append("App Store apps license through the deploying tenant's Apps and Books location — each tenant needs licenses for these apps, and the block's \"Apps and Books location\" setting must match its location name.")
+        }
+
         // Name→ID and name→deployed-name output maps, so other blocks can
         // wire to this one; names come from the resources so prefixing is
         // reflected.
@@ -907,7 +938,7 @@ public nonisolated enum BlockCapture {
             "acceptsCategory": usesCategory,
             "reviewStatus": "needsReview",
             "scope": scope,
-            "settings": adeReferenced ? [[
+            "settings": (adeReferenced ? [[
                 "key": "ade_instance_name",
                 "title": "Automated Device Enrollment instance",
                 "type": "string",
@@ -915,7 +946,15 @@ public nonisolated enum BlockCapture {
                 "required": true,
                 "description": "Name of this tenant's Automated Device Enrollment instance. PreStage enrollments attach to it, so the tenant needs its ADE token uploaded first.",
                 "section": "Enrollment",
-            ]] : [],
+            ]] : []) + (vppReferenced ? [[
+                "key": "vpp_location_name",
+                "title": "Apps and Books location",
+                "type": "string",
+                "default": vppLocationName ?? "",
+                "required": true,
+                "description": "Name of this tenant's Apps and Books (volume purchasing) location. It needs licenses for every app in this block.",
+                "section": "Apps and Books",
+            ]] : []),
             "objectsCreated": typeCounts.sorted { $0.key < $1.key }.map { "\(objectLabel(for: $0.key)) (\($0.value))" },
         ]
         if let origin = request.originTenantScopeID {

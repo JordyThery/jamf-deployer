@@ -20,6 +20,11 @@ public nonisolated struct BlockSetting: Codable, Sendable, Identifiable, Equatab
         case secret
         /// Rendered by the App Catalog picker; stored as a JSON string.
         case appPicker
+        /// Rendered by the App Store picker for Mac apps the tenant holds
+        /// Apps and Books licenses for; stored as a JSON string.
+        case macAppStorePicker
+        /// The same for iPad and iPhone apps.
+        case mobileAppStorePicker
     }
 
     public var key: String

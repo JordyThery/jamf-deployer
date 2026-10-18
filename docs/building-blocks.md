@@ -9,6 +9,8 @@ The app ships the blocks that carry **no configuration opinions of their own** �
 | Built-in block | Creates | Impact |
 | --- | --- | --- |
 | **App Catalog** | Apps from Jamf's App Catalog, installed and kept up to date automatically — no packaging. Pick apps with the built-in picker. | Medium |
+| **Mac App Store Apps** | Mac App Store apps the tenant holds Apps and Books licenses for, assigned to devices — no Apple Account needed. Pick apps with the built-in picker. | Medium |
+| **iPad and iPhone Apps** | App Store apps for iPads and iPhones the tenant holds licenses for, assigned to devices as managed apps. | Medium |
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
 | **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
 
@@ -36,7 +38,7 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Mobile Passcode** | A passcode policy for iPads and iPhones: minimum length, no simple values, automatic lock. | Medium |
 | **Mobile Enrollment** | A mobile PreStage for Automated Device Enrollment: supervised, MDM non-removable, consumer setup panes skipped. | Medium |
 
-The built-in App Catalog block picks its apps with a searchable picker, with per-app delivery, update behavior and category (an app without its own category uses the block's default category):
+The App Store blocks list only apps the tenant holds Apps and Books licenses for — every tenant they deploy to needs licenses for the same apps, free apps included. The built-in App Catalog block picks its apps with a searchable picker, with per-app delivery, update behavior and category (an app without its own category uses the block's default category):
 
 ![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
 

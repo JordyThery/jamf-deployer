@@ -259,7 +259,7 @@ public nonisolated enum WorkspaceGenerator {
                     arguments.append((setting.key, raw == "true" ? "true" : "false"))
                 case .number:
                     arguments.append((setting.key, raw.isEmpty ? "null" : raw))
-                case .string, .enumeration, .appPicker:
+                case .string, .enumeration, .appPicker, .macAppStorePicker, .mobileAppStorePicker:
                     arguments.append((setting.key, hclString(raw)))
                 case .stringList:
                     let items = raw.split(separator: "\n").map { hclString(String($0)) }

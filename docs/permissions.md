@@ -46,6 +46,7 @@ or read/update for tenant-wide settings).
 | Mobile Passcode | `configuration-profiles` (create/read/update/delete) |
 | Mobile Enrollment | `prestage-enrollments` (create/read/update/delete), `device-enrollment-program-instances:read` |
 | App Catalog | `applications` (create/read/update/delete), `smart-computer-groups:read` |
+| Mac App Store Apps, iPad and iPhone Apps | `applications` (create/read/update/delete), `volume-purchasing-locations:read` |
 | Security Cloud | `uem-connections`, `activation-profiles` (create/read/update/delete), `tenant-id:read` |
 | Jamf Protect Baseline | none on the Platform client — see the Protect client below |
 
