@@ -168,7 +168,7 @@ public nonisolated enum WorkspaceGenerator {
             switch block.scope.kind {
             case .none:
                 break
-            case .jamfProGroup, .platformGroup:
+            case .jamfProGroup, .platformGroup, .jamfProMobileGroup:
                 guard let variable = block.scope.variable else { break }
                 if let existing = selection.existingScopeID {
                     arguments.append((variable, hclString(existing)))
@@ -176,14 +176,15 @@ public nonisolated enum WorkspaceGenerator {
                 }
                 if let provided = selection.providedScope {
                     let provider = try Self.provider(of: provided, kind: "device_group", for: block.id, in: input)
-                    let map = block.scope.kind == .jamfProGroup ? "device_group_jamf_pro_ids" : "device_group_ids"
+                    let map = block.scope.kind == .platformGroup ? "device_group_ids" : "device_group_jamf_pro_ids"
                     arguments.append((variable, "module.\(sanitized(provider.id)).\(map)[\(hclString(provided.name))]"))
                     break
                 }
                 if selection.scope.isEmpty {
                     throw WorkspaceGeneratorError.scopeNotChosen(block: block.id)
                 }
-                guard Self.foundationGroups.contains(selection.scope) else {
+                // Foundation only ever provided computer groups.
+                guard block.scope.kind != .jamfProMobileGroup, Self.foundationGroups.contains(selection.scope) else {
                     throw WorkspaceGeneratorError.unknownScope(block: block.id, scope: selection.scope)
                 }
                 let suffix = block.scope.kind == .jamfProGroup ? "jamf_pro_id" : "platform_uuid"

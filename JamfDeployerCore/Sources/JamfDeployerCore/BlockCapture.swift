@@ -74,12 +74,22 @@ public nonisolated enum BlockCapture {
         "jamfplatform_pro_package": "package",
         "jamfplatform_device_group": "device_group",
         "jamfplatform_pro_computer_extension_attribute": "extension_attribute",
+        "jamfplatform_pro_enrollment_customization": "enrollment_customization",
     ]
 
     /// Exported types that can never deploy into another tenant; captured
     /// blocks leave them out with a warning.
+    /// Device groups Jamf creates itself: the All Managed groups in every
+    /// tenant, and the Device Compliance group when that integration is on.
+    /// They are looked up by name instead of captured.
+    static func isBuiltinGroupName(_ name: String) -> Bool {
+        name.hasPrefix("All Managed ") || name == "Jamf Device Compliance Group"
+    }
+
     static let unportableTypes: [String: String] = [
         "jamfplatform_pro_computer_invitation":
+            "enrollment invitations are tenant-specific and expire",
+        "jamfplatform_pro_mobile_device_invitation":
             "enrollment invitations are tenant-specific and expire",
         "jamfplatform_pro_allowed_file_extension":
             "Jamf creates the default allowed file extensions in every tenant",
@@ -107,6 +117,8 @@ public nonisolated enum BlockCapture {
         public var objectCount: Int
         public var usesJamfProScope: Bool
         public var usesPlatformScope: Bool
+        /// The block takes a mobile device group chosen per tenant.
+        public var usesJamfProMobileScope: Bool = false
         /// The block takes a category chosen per tenant.
         public var usesCategory: Bool = false
         public var warnings: [String]
@@ -144,6 +156,7 @@ public nonisolated enum BlockCapture {
         var objectCount = 0
         var usesJamfProScope = false
         var usesPlatformScope = false
+        var usesJamfProMobileScope = false
         var usesCategory = false
         var terraformTypes: Set<String> = []
         var typeCounts: [String: Int] = [:]
@@ -172,7 +185,7 @@ public nonisolated enum BlockCapture {
             let type = String(address.split(separator: ".").first ?? "")
             if Self.unportableTypes.keys.contains(type) { return false }
             if type == "jamfplatform_device_group",
-               table.nameByAddress[address]?.hasPrefix("All Managed ") == true { return false }
+               table.nameByAddress[address].map(Self.isBuiltinGroupName) == true { return false }
             if type == "jamfplatform_pro_computer_extension_attribute",
                let name = table.nameByAddress[address]?.lowercased(),
                name.hasPrefix("jamf patch ") || name.hasPrefix("jamf-patch-") { return false }
@@ -186,6 +199,18 @@ public nonisolated enum BlockCapture {
         var adeReferenced = false
         var adeAddresses: Set<String> = []
         var adeInstanceName: String?
+
+        // Whether any object scopes computer groups; decides which scope a
+        // per-tenant capture collapses when both kinds are present.
+        let exportScopesComputers = ((try? fileManager.contentsOfDirectory(
+            at: request.sourceDirectory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "tf" && !$0.lastPathComponent.hasSuffix("_import.tf") }
+            .contains { file in
+                guard let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
+                return text.range(of: #"(computer_group_ids\s*=\s*\[[^\]]*("\d+"|jamfplatform_device_group\.)|smart_group_id\s*=\s*("\d+"|jamfplatform_device_group\.))"#,
+                                  options: .regularExpression) != nil
+            }
+        var mobileScopeKept = false
 
         // 1. Configuration files, transformed. provider/variables/tfvars and
         //    import blocks stay behind — a block is reusable configuration.
@@ -230,7 +255,8 @@ public nonisolated enum BlockCapture {
                         }
                     }
                     if block.hasPrefix("resource \"jamfplatform_device_group\""),
-                       block.range(of: #"\n\s+name\s+= "All Managed "#, options: .regularExpression) != nil {
+                       let groupName = block.firstMatch(of: /\n\s+name\s+= "([^"]*)"/).map({ String($0.1) }),
+                       Self.isBuiltinGroupName(groupName) {
                         builtinDropped += 1
                         dropAddress()
                         continue
@@ -253,7 +279,7 @@ public nonisolated enum BlockCapture {
                     text = kept.isEmpty ? "" : kept.joined(separator: "\n\n") + "\n"
                 }
                 if builtinDropped > 0 {
-                    warnings.append("Left out \(builtinDropped) built-in device group\(builtinDropped == 1 ? "" : "s"): Jamf creates the All Managed groups in every tenant, so references find them by name.")
+                    warnings.append("Left out \(builtinDropped) built-in device group\(builtinDropped == 1 ? "" : "s"): Jamf creates these groups itself (the All Managed groups in every tenant, the Device Compliance group when that integration is on), so references find them by name.")
                 }
                 if patchDropped > 0 {
                     warnings.append("Left out \(patchDropped) Jamf Patch extension attribute\(patchDropped == 1 ? "" : "s"): patch software titles recreate their own reporting attributes.")
@@ -364,8 +390,12 @@ public nonisolated enum BlockCapture {
                 // numeric form jamformer writes for unresolved references and
                 // the resource-reference form it writes for same-run objects
                 // are covered; everything else keeps its wiring below.
-                enum Rebind { case jamfPro, platform, category }
-                let scopeRewrites: [(pattern: String, replacement: String, kind: Rebind)] = [
+                enum Rebind { case jamfPro, platform, category, jamfProMobile }
+                var scopeRewrites: [(pattern: String, replacement: String, kind: Rebind)] = [
+                    (#"mobile_device_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#,
+                     "mobile_device_group_ids = [var.scope_jamf_pro_mobile_group_id]", .jamfProMobile),
+                    (#"mobile_device_group_ids\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
+                     "mobile_device_group_ids = [var.scope_jamf_pro_mobile_group_id]", .jamfProMobile),
                     (#"computer_group_ids\s*=\s*\[[^\]]*"\d+"[^\]]*\]"#,
                      "computer_group_ids = [var.scope_jamf_pro_group_id]", .jamfPro),
                     (#"computer_group_ids\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
@@ -383,6 +413,15 @@ public nonisolated enum BlockCapture {
                     (#"target_device_groups\s*=\s*\[[^\]]*jamfplatform_device_group\.[^\]]*\]"#,
                      "target_device_groups = [var.scope_platform_group_uuid]", .platform),
                 ]
+                // A block has one per-tenant scope: with computer objects in
+                // the export, mobile scopes keep their captured wiring.
+                if exportScopesComputers {
+                    scopeRewrites.removeAll { $0.kind == .jamfProMobile }
+                    if text.range(of: #"mobile_device_group_ids\s*=\s*\[[^\]]*("\d+"|jamfplatform_device_group\.)"#,
+                                  options: .regularExpression) != nil {
+                        mobileScopeKept = true
+                    }
+                }
                 for rewrite in scopeRewrites where text.range(of: rewrite.pattern, options: .regularExpression) != nil {
                     text = text.replacingOccurrences(
                         of: rewrite.pattern, with: rewrite.replacement, options: .regularExpression)
@@ -390,6 +429,7 @@ public nonisolated enum BlockCapture {
                     case .jamfPro: usesJamfProScope = true
                     case .platform: usesPlatformScope = true
                     case .category: usesCategory = true
+                    case .jamfProMobile: usesJamfProMobileScope = true
                     }
                 }
                 let deviceGroupsPattern = #"(^|\n)(\s*)device_groups\s*=\s*\[[^\]]*("[0-9a-f-]{36}"|jamfplatform_device_group\.)[^\]]*\]"#
@@ -434,7 +474,7 @@ public nonisolated enum BlockCapture {
         )
         let generatedVariables: Set<String> = [
             "name_prefix", "managed_by_tag", "scope_jamf_pro_group_id",
-            "scope_platform_group_uuid", "category_id",
+            "scope_platform_group_uuid", "scope_jamf_pro_mobile_group_id", "category_id",
         ]
         var unfillable: Set<String> = []
         for (_, text) in fileTexts {
@@ -517,6 +557,7 @@ public nonisolated enum BlockCapture {
         // What this block provides to others: name→resource maps per type.
         // (address, objectName) pairs per dependency key.
         var provides: [String: [(address: String, name: String)]] = [:]
+        var mobileGroupNames: Set<String> = []
         for block in ExportedObjectInventory.topLevelBlocks(in: capturedText) {
             guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/),
                   let depKey = Self.dependencyTypes[String(header.1)]
@@ -526,6 +567,9 @@ public nonisolated enum BlockCapture {
                 ?? block.firstMatch(of: /\n\s+name\s+= "([^"]*)"/).map({ String($0.1) })
             else { continue }
             provides[depKey, default: []].append((address, objectName))
+            if depKey == "device_group", block.range(of: #"\n\s*device_type\s*=\s*"mobile""#, options: .regularExpression) != nil {
+                mobileGroupNames.insert(objectName)
+            }
         }
 
         // 2. Support files move after variables are known — see below: only
@@ -550,6 +594,19 @@ public nonisolated enum BlockCapture {
 
             variable "scope_jamf_pro_group_id" {
               description = "Numeric Jamf Pro ID of the computer group this block targets."
+              type        = string
+            }
+            """
+        }
+        if mobileScopeKept {
+            warnings.append("Mobile device objects keep their captured groups: a block chooses one scope per tenant, and this export also scopes computers. Capture mobile and computer objects as separate blocks to choose both.")
+        }
+        if usesJamfProMobileScope {
+            variables += """
+
+
+            variable "scope_jamf_pro_mobile_group_id" {
+              description = "Numeric Jamf Pro ID of the mobile device group this block targets."
               type        = string
             }
             """
@@ -721,7 +778,9 @@ public nonisolated enum BlockCapture {
                 let namePairs = entries
                     .sorted { $0.name < $1.name }
                     .map {
-                        let attribute = $0.address.hasPrefix("jamfplatform_pro_package.") ? "display_name" : "name"
+                        let usesDisplayName = $0.address.hasPrefix("jamfplatform_pro_package.")
+                            || $0.address.hasPrefix("jamfplatform_pro_enrollment_customization.")
+                        let attribute = usesDisplayName ? "display_name" : "name"
                         return "    \(hclStringLiteral($0.name)) = \($0.address).\(attribute)"
                     }
                     .joined(separator: "\n")
@@ -822,6 +881,8 @@ public nonisolated enum BlockCapture {
         let scope: [String: Any]
         if usesJamfProScope {
             scope = ["kind": "jamfProGroup", "variable": "scope_jamf_pro_group_id"]
+        } else if usesJamfProMobileScope {
+            scope = ["kind": "jamfProMobileGroup", "variable": "scope_jamf_pro_mobile_group_id"]
         } else if usesPlatformScope {
             scope = ["kind": "platformGroup", "variable": "scope_platform_group_uuid"]
         } else {
@@ -836,6 +897,7 @@ public nonisolated enum BlockCapture {
             "version": "0.1.0",
             "needs": needs.mapValues { Array($0).sorted() },
             "provides": provides.mapValues { $0.map(\.name).sorted() },
+            "mobileDeviceGroups": mobileGroupNames.sorted(),
             "requires": [],
             "conflicts": [],
             "products": ["jamf-pro", "jamf-platform"],
@@ -889,6 +951,7 @@ public nonisolated enum BlockCapture {
             objectCount: objectCount,
             usesJamfProScope: usesJamfProScope,
             usesPlatformScope: usesPlatformScope,
+            usesJamfProMobileScope: usesJamfProMobileScope,
             usesCategory: usesCategory,
             warnings: warnings
         )
@@ -1020,6 +1083,18 @@ public nonisolated enum BlockCapture {
             return "category_id = \(record("category", name))"
         }
 
+        // PreStages name their enrollment customization by numeric ID ("0"
+        // and "-1" mean none). Without the customization in the export the
+        // origin's ID means nothing elsewhere, so it falls back to none.
+        text = replacing(in: text, pattern: #"enrollment_customization_id\s*= "(\d+)""#) { match in
+            guard match[1] != "0" else { return nil }
+            guard let name = table.name(type: "jamfplatform_pro_enrollment_customization", id: match[1]) else {
+                warnings.append("A PreStage used an enrollment customization that is not part of the export; it deploys without one. Export the customization with it to keep the link.")
+                return "enrollment_customization_id = \"0\""
+            }
+            return "enrollment_customization_id = \(record("enrollment_customization", name))"
+        }
+
         // id = "12" # TODO: … inside scripts/packages containers.
         var container: [String] = []
         var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -1059,7 +1134,7 @@ public nonisolated enum BlockCapture {
                   let name = table.nameByAddress[address]
             else { return nil }
             let type = String(address.split(separator: ".").first ?? "")
-            if let depKey = dependencyTypes[type], !name.hasPrefix("All Managed ") {
+            if let depKey = dependencyTypes[type], !Self.isBuiltinGroupName(name) {
                 needs[depKey, default: []].insert(name)
                 return "var.dep_\(depKey)_names[\(hclStringLiteral(name))]"
             }
@@ -1073,7 +1148,7 @@ public nonisolated enum BlockCapture {
             guard !localAddresses.contains(address),
                   let name = table.nameByAddress[address]
             else { return nil }
-            if name.hasPrefix("All Managed ") {
+            if Self.isBuiltinGroupName(name) {
                 builtinGroupNames.insert(name)
                 return "local.builtin_group_jamf_pro_ids[\(hclStringLiteral(name))]"
             }
@@ -1097,7 +1172,7 @@ public nonisolated enum BlockCapture {
                 guard !localAddresses.contains(address),
                       let name = table.nameByAddress[address]
                 else { return nil }
-                if depKey == "device_group", name.hasPrefix("All Managed ") {
+                if depKey == "device_group", Self.isBuiltinGroupName(name) {
                     return builtinGroupUUIDLookup(name)
                 }
                 return record(depKey, name)
@@ -1114,7 +1189,7 @@ public nonisolated enum BlockCapture {
                 var resolvedAll = true
                 for element in body.matches(of: /"([0-9a-fA-F-]{36})"/) {
                     if let name = table.name(type: "jamfplatform_device_group", id: String(element.1)) {
-                        elements.append(name.hasPrefix("All Managed ")
+                        elements.append(Self.isBuiltinGroupName(name)
                             ? builtinGroupUUIDLookup(name)
                             : record("device_group", name))
                     } else {

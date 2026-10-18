@@ -26,6 +26,14 @@ struct CatalogView: View {
                         if catalogSources.customSources.isEmpty {
                             demoCatalogBanner
                         }
+                        if !catalog.unreadableBlocks.isEmpty {
+                            Label(
+                                "\(catalog.unreadableBlocks.count) block\(catalog.unreadableBlocks.count == 1 ? " needs" : "s need") a newer version of Jamf Deployer and \(catalog.unreadableBlocks.count == 1 ? "is" : "are") not shown: \(catalog.unreadableBlocks.joined(separator: ", ")).",
+                                systemImage: "arrow.up.circle"
+                            )
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        }
                         ForEach(groupedCategories(catalog), id: \.0) { category, blocks in
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(category)

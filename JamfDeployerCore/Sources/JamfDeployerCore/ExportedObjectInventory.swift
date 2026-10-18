@@ -73,7 +73,7 @@ public nonisolated enum ExportedObjectInventory {
             for block in topLevelBlocks(in: text) {
                 guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) else { continue }
                 let address = "\(header.1).\(header.2)"
-                if header.1 == "jamfplatform_pro_computer_invitation" {
+                if header.1 == "jamfplatform_pro_computer_invitation" || header.1 == "jamfplatform_pro_mobile_device_invitation" {
                     result[address] = "enrollment invitations cannot be managed as exported"
                     continue
                 }
@@ -232,6 +232,36 @@ public nonisolated enum ExportedObjectInventory {
             text = text.replacingOccurrences(of: "  provider = jamfplatform\n\n", with: "")
             text = text.replacingOccurrences(of: "  provider = jamfplatform\n", with: "")
             try Data(text.utf8).write(to: file)
+        }
+    }
+
+    /// PreStage sections the exporter can leave out (device naming,
+    /// purchasing, location, account settings, Setup Assistant skips) would
+    /// be cleared by the
+    /// first deploy after adoption. They are ignored instead, so the values
+    /// in Jamf stay as they are.
+    static let omittablePreStageSections: [String: [String]] = [
+        "jamfplatform_pro_computer_prestage_enrollment": ["account_settings", "location_information", "purchasing_information", "skip_setup_items"],
+        "jamfplatform_pro_mobile_device_prestage_enrollment": ["location_information", "names", "purchasing_information", "skip_setup_items"],
+    ]
+
+    public static func protectOmittedSections(directory: URL) throws {
+        for file in try configurationFiles(in: directory) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            guard omittablePreStageSections.keys.contains(where: { text.contains("resource \"\($0)\"") }) else { continue }
+            let blocks = topLevelBlocks(in: text).map { block -> String in
+                guard let header = block.firstMatch(of: /^resource\s+"([a-z0-9_]+)"/),
+                      let sections = omittablePreStageSections[String(header.1)],
+                      !block.contains("\n  lifecycle {")
+                else { return block }
+                let missing = sections.filter {
+                    block.range(of: "\\n  \($0)\\s+=", options: .regularExpression) == nil
+                }
+                guard !missing.isEmpty, let close = block.range(of: "}", options: .backwards) else { return block }
+                return block[..<close.lowerBound]
+                    + "\n  lifecycle {\n    ignore_changes = [\(missing.joined(separator: ", "))]\n  }\n}"
+            }
+            try Data((blocks.joined(separator: "\n\n") + "\n").utf8).write(to: file)
         }
     }
 

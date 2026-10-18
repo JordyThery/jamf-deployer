@@ -67,6 +67,9 @@ public nonisolated struct BlockScope: Codable, Sendable, Equatable {
         case jamfProGroup
         /// Scoped via a Platform group UUID (Blueprints, benchmarks).
         case platformGroup
+        /// Scoped via a numeric Jamf Pro mobile device group ID (mobile
+        /// profiles and apps).
+        case jamfProMobileGroup
     }
 
     public var kind: Kind
@@ -132,6 +135,9 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     /// Category used when the block providing it is selected, as
     /// "<blockID>/<category name>".
     public var defaultCategory: String?
+    /// Which of the device groups in `provides` are mobile device groups;
+    /// the rest are computer groups.
+    public var mobileDeviceGroups: [String]
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -159,6 +165,7 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
         needs = try container.decodeIfPresent([String: [String]].self, forKey: .needs) ?? [:]
         provides = try container.decodeIfPresent([String: [String]].self, forKey: .provides) ?? [:]
         defaultCategory = try container.decodeIfPresent(String.self, forKey: .defaultCategory)
+        mobileDeviceGroups = try container.decodeIfPresent([String].self, forKey: .mobileDeviceGroups) ?? []
     }
 
     /// The setting controlling a drifted field, when one is bound.
@@ -339,6 +346,10 @@ public nonisolated struct LoadedCatalog: Sendable {
     /// preserved when catalogs from several sources merge.
     public var blockRoots: [String: URL] = [:]
     public var sourceNameByBlockID: [String: String] = [:]
+    /// Block folders this version of the app cannot read (typically blocks
+    /// written for a newer version), by folder name. They are left out
+    /// rather than failing the whole catalog.
+    public var unreadableBlocks: [String] = []
 
     public func block(id: String) -> BlockMetadata? {
         blocks.first { $0.id == id }
@@ -367,6 +378,7 @@ public nonisolated struct LoadedCatalog: Sendable {
                 merged.blockRoots[block.id] = catalog.blockFolderURL(id: block.id)
                 merged.sourceNameByBlockID[block.id] = catalog.manifest.name
             }
+            merged.unreadableBlocks += catalog.unreadableBlocks
             merged.presets.append(contentsOf: catalog.presets.filter { preset in
                 !merged.presets.contains { $0.id == preset.id }
             })
@@ -386,11 +398,16 @@ public nonisolated struct LoadedCatalog: Sendable {
 
         let fileManager = FileManager.default
         var blocks: [BlockMetadata] = []
+        var unreadable: [String] = []
         let blocksURL = rootURL.appending(path: "blocks")
         for folder in (try? fileManager.contentsOfDirectory(at: blocksURL, includingPropertiesForKeys: nil)) ?? [] {
             let metadataURL = folder.appending(path: "block.json")
             guard fileManager.fileExists(atPath: metadataURL.path) else { continue }
-            blocks.append(try decoder.decode(BlockMetadata.self, from: Data(contentsOf: metadataURL)))
+            if let block = try? decoder.decode(BlockMetadata.self, from: Data(contentsOf: metadataURL)) {
+                blocks.append(block)
+            } else {
+                unreadable.append(folder.lastPathComponent)
+            }
         }
 
         var presets: [Preset] = []
@@ -406,6 +423,7 @@ public nonisolated struct LoadedCatalog: Sendable {
             presets: presets.sorted { $0.name < $1.name },
             rootURL: rootURL
         )
+        catalog.unreadableBlocks = unreadable.sorted()
         for block in catalog.blocks {
             catalog.blockRoots[block.id] = rootURL.appending(path: "blocks/\(block.id)")
             catalog.sourceNameByBlockID[block.id] = manifest.name

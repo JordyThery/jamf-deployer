@@ -1375,3 +1375,179 @@ struct DriftNoiseTests {
         #expect(!DriftReportBuilder.isComputed("general.name"))
     }
 }
+
+@Suite("Mobile devices")
+struct MobileDeviceTests {
+    /// A minimal export: a mobile profile scoped to a mobile group, the group
+    /// itself, Jamf's Device Compliance group, and a mobile PreStage whose
+    /// enrollment customization is not part of the export.
+    static func writeExport(includingComputerPolicy: Bool = false) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "mobile-src-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let files: [String: String] = [
+            "device_groups.tf": """
+            resource "jamfplatform_device_group" "tagged_ipads_mobile" {
+              device_type = "mobile"
+              group_type  = "smart"
+              name        = "Tagged iPads"
+            }
+
+            resource "jamfplatform_device_group" "jamf_device_compliance_group_computer" {
+              device_type = "computer"
+              group_type  = "smart"
+              name        = "Jamf Device Compliance Group"
+            }
+            """,
+            "pro_mobile_device_configuration_profile.tf": """
+            resource "jamfplatform_pro_mobile_device_configuration_profile" "camera" {
+              general = {
+                category_id = "-1"
+                name        = "Camera"
+                payloads    = "<plist/>"
+              }
+              scope = {
+                targets = {
+                  mobile_device_group_ids = [
+                    jamfplatform_device_group.tagged_ipads_mobile.jamf_pro_id,
+                  ]
+                }
+              }
+            }
+            """,
+            "pro_mobile_device_prestage_enrollment.tf": """
+            resource "jamfplatform_pro_mobile_device_prestage_enrollment" "ipads" {
+              display_name                = "iPads"
+              enrollment_customization_id = "4"
+              timezone                    = "UTC"
+            }
+            """,
+        ]
+        for (name, text) in files {
+            try Data(text.utf8).write(to: directory.appending(path: name))
+        }
+        if includingComputerPolicy {
+            try Data("""
+            resource "jamfplatform_pro_policy" "p" {
+              scope = {
+                computer_group_ids = ["12"]
+              }
+            }
+            """.utf8).write(to: directory.appending(path: "pro_policy.tf"))
+        }
+        return directory
+    }
+
+    @Test func portableCaptureChoosesMobileGroupPerTenant() throws {
+        let source = try Self.writeExport()
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "mobile-dst-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: source); try? FileManager.default.removeItem(at: catalog) }
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "mobile", name: "Mobile", summary: "", namePrefix: "",
+            sourceDirectory: source, catalogRootDirectory: catalog, rebind: .perTenant))
+        #expect(result.usesJamfProMobileScope)
+        let profile = try String(contentsOf: result.blockFolderURL.appending(path: "pro_mobile_device_configuration_profile.tf"), encoding: .utf8)
+        #expect(profile.contains("mobile_device_group_ids = [var.scope_jamf_pro_mobile_group_id]"))
+        let block = try JSONDecoder().decode(BlockMetadata.self, from: Data(contentsOf: result.blockFolderURL.appending(path: "block.json")))
+        #expect(block.scope.kind == .jamfProMobileGroup)
+        #expect(block.mobileDeviceGroups == ["Tagged iPads"])
+        // Jamf's own Device Compliance group is looked up, never recreated.
+        let groups = try String(contentsOf: result.blockFolderURL.appending(path: "device_groups.tf"), encoding: .utf8)
+        #expect(!groups.contains("Jamf Device Compliance Group"))
+        // The origin's enrollment customization ID means nothing elsewhere.
+        let prestage = try String(contentsOf: result.blockFolderURL.appending(path: "pro_mobile_device_prestage_enrollment.tf"), encoding: .utf8)
+        #expect(prestage.contains(#"enrollment_customization_id = "0""#))
+        #expect(result.warnings.contains { $0.contains("enrollment customization") })
+    }
+
+    @Test func computerScopeWinsWhenBothArePresent() throws {
+        let source = try Self.writeExport(includingComputerPolicy: true)
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "mobile-dst-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: source); try? FileManager.default.removeItem(at: catalog) }
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "mixed", name: "Mixed", summary: "", namePrefix: "",
+            sourceDirectory: source, catalogRootDirectory: catalog, rebind: .perTenant))
+        #expect(result.usesJamfProScope)
+        #expect(!result.usesJamfProMobileScope)
+        #expect(result.warnings.contains { $0.contains("Mobile device objects keep their captured groups") })
+    }
+
+    @Test func generatorWiresMobileScope() throws {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        var block = try #require(catalog.block(id: "app-catalog"))
+        block.id = "mobile-profile"
+        block.acceptsCategory = false
+        block.scope = BlockScope(kind: .jamfProMobileGroup, variable: "scope_jamf_pro_mobile_group_id", default: nil)
+        var groups = try #require(catalog.block(id: "protect-baseline"))
+        groups.id = "mobile-groups"
+        groups.provides = ["device_group": ["Supervised iPads"]]
+
+        let existing = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "",
+            selections: [GeneratedSelection(block: block, settings: [:], scope: "", existingScopeID: "2")], providerVersion: "1.5.0"))
+        #expect(existing.mainTF.contains(/scope_jamf_pro_mobile_group_id\s*=\s*"2"/))
+
+        let provided = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "",
+            selections: [
+                GeneratedSelection(block: groups, settings: [:], scope: ""),
+                GeneratedSelection(block: block, settings: [:], scope: "",
+                                   providedScope: ProvidedObject(blockID: "mobile-groups", name: "Supervised iPads")),
+            ], providerVersion: "1.5.0"))
+        #expect(provided.mainTF.contains(#"module.mobile_groups.device_group_jamf_pro_ids["Supervised iPads"]"#))
+
+        // Foundation never provided mobile groups.
+        #expect(throws: WorkspaceGeneratorError.self) {
+            try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "",
+            selections: [GeneratedSelection(block: catalog.block(id: "foundation")!, settings: [:], scope: ""),
+                             GeneratedSelection(block: block, settings: [:], scope: "all_macs")], providerVersion: "1.5.0"))
+        }
+    }
+
+    @Test func adoptionProtectsPreStageSectionsTheExportLeavesOut() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "prestage-adopt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+        resource "jamfplatform_pro_mobile_device_prestage_enrollment" "ipads" {
+          display_name = "iPads"
+          names = {
+            manage_names = true
+          }
+        }
+        """.utf8).write(to: directory.appending(path: "pro_mobile_device_prestage_enrollment.tf"))
+        try ExportedObjectInventory.protectOmittedSections(directory: directory)
+        let text = try String(contentsOf: directory.appending(path: "pro_mobile_device_prestage_enrollment.tf"), encoding: .utf8)
+        #expect(text.contains("ignore_changes = [location_information, purchasing_information, skip_setup_items]"))
+        // Running it again changes nothing.
+        try ExportedObjectInventory.protectOmittedSections(directory: directory)
+        let again = try String(contentsOf: directory.appending(path: "pro_mobile_device_prestage_enrollment.tf"), encoding: .utf8)
+        #expect(again == text)
+    }
+
+    @Test func catalogsSkipBlocksFromNewerVersions() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "future-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for (id, scope) in [("today", "jamfProGroup"), ("future", "someFutureKind")] {
+            let folder = root.appending(path: "blocks/\(id)")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(#"{"id":"\#(id)","scope":{"kind":"\#(scope)"}}"#.utf8).write(to: folder.appending(path: "block.json"))
+        }
+        try Data(#"{"id":"c","name":"C","schemaVersion":1}"#.utf8).write(to: root.appending(path: "catalog.json"))
+        let catalog = try LoadedCatalog.load(from: root)
+        #expect(catalog.blocks.map(\.id) == ["today"])
+        #expect(catalog.unreadableBlocks == ["future"])
+    }
+
+    @Test func mobileInvitationsAreNotAdopted() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "invite-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+        resource "jamfplatform_pro_mobile_device_invitation" "i1" {
+          invitation_type = "DEFAULT"
+        }
+        """.utf8).write(to: directory.appending(path: "pro_mobile_device_invitation.tf"))
+        #expect(ExportedObjectInventory.unmanageable(directory: directory)["jamfplatform_pro_mobile_device_invitation.i1"] != nil)
+    }
+}

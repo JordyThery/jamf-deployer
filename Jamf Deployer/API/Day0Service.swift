@@ -95,7 +95,7 @@ final class Day0Service {
                     .done(detail: "“\(instance.name)” connected\(instance.tokenExpirationDate.map { ", token expires \($0)" } ?? "")."))
             } else {
                 add("ade", "Automated Device Enrollment",
-                    .pending(detail: "Connect Apple Business Manager so new Macs enroll automatically: download the public key, create the MDM server in ABM, upload its token here."))
+                    .pending(detail: "Connect Apple Business Manager so new devices enroll automatically: download the public key, create the MDM server in ABM, upload its token here."))
             }
         } else {
             add("ade", "Automated Device Enrollment", .unknown(detail: "Could not check."))

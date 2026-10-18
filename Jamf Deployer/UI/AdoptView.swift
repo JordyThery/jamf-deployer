@@ -295,6 +295,7 @@ struct AdoptView: View {
             try ExportedObjectInventory.prune(directory: exportURL, keeping: kept)
             try ExportedObjectInventory.normalizeImportBlocks(directory: exportURL)
             try ExportedObjectInventory.inlineVariables(directory: exportURL)
+            try ExportedObjectInventory.protectOmittedSections(directory: exportURL)
 
             // Strip provider wiring; the workspace supplies its own.
             let fileManager = FileManager.default

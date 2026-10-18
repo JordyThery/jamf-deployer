@@ -32,6 +32,9 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Self Service App** | Installs Self Service on every Mac; landing page and notifications. Tenant-wide setting. | Low |
 | **Self Service Maintenance** | "Update inventory" and "Flush DNS cache" items users run when support asks. | Low |
 | **macOS Version Groups** | Smart groups for Macs on the current macOS and Macs below your supported minimum. | Low |
+| **Mobile Device Groups** | Smart groups for supervised iPads and supervised iPhones — what the mobile blocks scope to. | Low |
+| **Mobile Passcode** | A passcode policy for iPads and iPhones: minimum length, no simple values, automatic lock. | Medium |
+| **Mobile Enrollment** | A mobile PreStage for Automated Device Enrollment: supervised, MDM non-removable, consumer setup panes skipped. | Medium |
 
 The built-in App Catalog block picks its apps with a searchable picker, with per-app delivery, update behavior and category (an app without its own category uses the block's default category):
 
@@ -43,7 +46,7 @@ The built-in App Catalog block picks its apps with a searchable picker, with per
 
 Every block exposes a small set of plain-language settings — toggles, choices, numbers — defined by the block, not by the underlying provider schema. Secret-typed settings (API keys and similar) are stored in your Keychain, never in the tenant record.
 
-Every block is optional, and blocks connect by reference. A block that applies to devices lets you pick its scope per tenant: a group another selected block creates (for example **Device Groups** from the demo catalog), or a group that already exists in the tenant. Platform-scoped blocks (Software Updates, CIS Level 1) currently offer only groups created by another selected block. Blocks that file objects under a category pick it the same way, or use no category. A block starts on its declared default when the block creating it is selected too — FileVault on Pilot and Security, Rosetta 2 on Apple Silicon Macs — and otherwise asks you to choose, so nothing is created just to satisfy a dependency. Blocks that only support smart groups (App Catalog apps) list only smart groups from the tenant; of the groups another block creates, pick a smart one. Captured blocks that keep their original wiring carry their own scope instead.
+Every block is optional, and blocks connect by reference. A block that applies to devices lets you pick its scope per tenant: a group another selected block creates (for example **Device Groups** from the demo catalog), or a group that already exists in the tenant. Mobile-scoped blocks (iPad and iPhone profiles and apps) pick a mobile device group the same way. Platform-scoped blocks (Software Updates, CIS Level 1) currently offer only groups created by another selected block. Blocks that file objects under a category pick it the same way, or use no category. A block starts on its declared default when the block creating it is selected too — FileVault on Pilot and Security, Rosetta 2 on Apple Silicon Macs — and otherwise asks you to choose, so nothing is created just to satisfy a dependency. Blocks that only support smart groups (App Catalog apps) list only smart groups from the tenant; of the groups another block creates, pick a smart one. Captured blocks that keep their original wiring carry their own scope instead.
 
 In a block's `block.json`, defaults read `"scope": { …, "default": "device-groups/Pilot" }` and `"defaultCategory": "categories/Security"` — the providing block's ID and the object's name from its `provides` list. Presets use the same form in their `scopes` and `categories` maps.
 
@@ -59,7 +62,8 @@ Presets come from the catalogs you follow. The demo catalog ships three:
 
 - **Standard** — device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1 (monitor), Rosetta 2.
 - **Minimal** — device groups, categories and software updates; a starting point to grow from.
-- **Complete** — everything in the demo catalog: Standard plus the tenant settings, Self Service maintenance and macOS version groups.
+- **Mobile** — categories, mobile device groups, a passcode policy and a mobile PreStage.
+- **Complete** — everything in the demo catalog: Standard plus the tenant settings, Self Service maintenance, macOS version groups and the mobile blocks.
 
 A preset is just a starting selection. Everything stays editable afterwards.
 
@@ -82,7 +86,9 @@ Three ways:
    - PreStage enrollments attach to the deploying tenant's Automated Device Enrollment instance through an editable block setting (the instance name), so the tenant only needs its own ADE token uploaded. PreStages that enable Recovery Lock have it turned off, because Jamf never exports the password.
    - Objects that cannot move between tenants are left out automatically, each with a warning that says why: Self Service icons, enrollment invitations, Jamf's built-in All Managed groups, default allowed file extensions, the cloud distribution point, Jamf Patch reporting attributes, compliance benchmarks, values Jamf does not export (activation code, GSX and volume purchasing tokens) and a login page without disclaimer text.
    - Settings-style types (check-in, re-enrollment, Self Service and the like) can be exported on their own or together with anything else.
-   - **Choose scope and category per tenant (portable block)** replaces the captured groups and categories with a scope and category you pick on each tenant; scripts, packages and extension attributes stay wired between blocks either way.
+   - **Choose scope and category per tenant (portable block)** replaces the captured groups and categories with a scope and category you pick on each tenant; scripts, packages and extension attributes stay wired between blocks either way. For iPad and iPhone objects the scope becomes a mobile device group; an export that scopes both computers and mobile devices keeps the mobile groups as captured (capture them as a separate block to choose both).
+   - PreStages keep their enrollment customization when it is part of the export; otherwise they deploy without one, with a warning. Jamf's own Device Compliance group is looked up by name like the All Managed groups.
+   - Catalogs can contain blocks written for a newer version of the app; those are listed as unavailable instead of preventing the rest of the catalog from loading.
 
 2. **Duplicate a built-in.** Built-in blocks are read-only — they ship inside the app and update with it. **Duplicate to My Blocks…** in a block's detail view copies it into one of your sources under a new ID, where everything is editable.
 3. **Author by hand.** A block is a folder with a `block.json` manifest (identity, settings, scope options, drift bindings) and the OpenTofu module that implements it. The built-in catalog in [`Catalog/blocks`](../Catalog/blocks) is the reference for the format.

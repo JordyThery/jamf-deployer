@@ -26,7 +26,7 @@ First visit to **Building Blocks**: the app ships only the configuration-free bl
 
 Then compose the baseline in the tenant's **Overview** tab, under **Add from the catalog**:
 
-- Start from a preset offered by your catalog — the demo catalog ships **Standard** (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1 monitoring, Rosetta 2), **Minimal** and **Complete** — or pick blocks individually.
+- Start from a preset offered by your catalog — the demo catalog ships **Standard** (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1 monitoring, Rosetta 2), **Minimal**, **Mobile** (iPads and iPhones) and **Complete** — or pick blocks individually.
 - Each block has plain-language settings and, where it applies to devices, a scope: a group another selected block creates (the demo catalog's **Device Groups**: Pilot, All Managed Macs, Laptops, Desktops, Apple Silicon Macs) or a group already in the tenant. Blocks that file objects under a category pick one the same way. A block starts on its declared default when the block creating it is selected — FileVault on Pilot, for example — and otherwise asks you to choose.
 - Blocks marked high impact (compliance, endpoint security) start in monitor or report-only mode.
 

@@ -41,6 +41,21 @@ nonisolated enum ExistingObjectService {
             .sorted { $0.ref.name.localizedStandardCompare($1.ref.name) == .orderedAscending }
     }
 
+    private struct MobileGroupItem: Decodable, Sendable {
+        let id: Int
+        let name: String
+        let isSmartGroup: Bool
+    }
+
+    /// Smart and static mobile device groups, by Jamf Pro ID.
+    static func mobileDeviceGroups(tenant: Tenant, activityLog: ActivityLog?) async throws -> [ComputerGroup] {
+        let client = try client(for: tenant, activityLog: activityLog)
+        let items = try await client.getDecoded([MobileGroupItem].self, path: "/pro/v1/mobile-device-groups")
+        return items
+            .map { ComputerGroup(ref: ExistingObjectRef(id: String($0.id), name: $0.name), isSmart: $0.isSmartGroup) }
+            .sorted { $0.ref.name.localizedStandardCompare($1.ref.name) == .orderedAscending }
+    }
+
     /// Jamf Pro categories.
     static func categories(tenant: Tenant, activityLog: ActivityLog?) async throws -> [ExistingObjectRef] {
         let client = try client(for: tenant, activityLog: activityLog)

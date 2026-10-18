@@ -357,7 +357,7 @@ struct BaselineEditorView: View {
         if block.scope.kind != .none {
             if let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)) {
                 if selectedIDs.contains(provided.blockID) { selection.providedScope = provided }
-            } else if withFoundation {
+            } else if withFoundation, block.scope.kind != .jamfProMobileGroup {
                 selection.scope = block.scope.default ?? Self.foundationFallbackScope(for: block)
             }
         }
@@ -408,7 +408,9 @@ struct BaselineEditorView: View {
                 let groups = block.provides["device_group"] ?? []
                 let categories = block.provides["category"] ?? []
                 guard !groups.isEmpty || !categories.isEmpty else { return nil }
-                return BlockSettingsForm.Provider(blockID: block.id, blockName: block.name, groups: groups, categories: categories)
+                return BlockSettingsForm.Provider(
+                    blockID: block.id, blockName: block.name, groups: groups,
+                    mobileGroups: block.mobileDeviceGroups, categories: categories)
             }
     }
 
@@ -443,7 +445,7 @@ struct BaselineEditorView: View {
                 if let provided = ProvidedObject(reference: scope) {
                     selection.providedScope = provided
                     selection.scope = ""
-                } else if presetIDs.contains("foundation") {
+                } else if presetIDs.contains("foundation"), block.scope.kind != .jamfProMobileGroup {
                     selection.providedScope = nil
                     selection.scope = block.scope.smartOnly && scope == "pilot"
                         ? Self.foundationFallbackScope(for: block) : scope
@@ -478,7 +480,16 @@ struct BlockSettingsForm: View {
         var blockID: String
         var blockName: String
         var groups: [String]
+        /// The subset of `groups` that are mobile device groups.
+        var mobileGroups: [String] = []
         var categories: [String]
+
+        /// The groups that can scope a block of the given kind.
+        func groups(for kind: BlockScope.Kind) -> [String] {
+            kind == .jamfProMobileGroup
+                ? groups.filter(mobileGroups.contains)
+                : groups.filter { !mobileGroups.contains($0) }
+        }
     }
 
     @State private var isPickingApps = false
@@ -531,7 +542,11 @@ struct BlockSettingsForm: View {
     /// Existing groups are listed by Jamf Pro ID; Platform-scoped blocks
     /// offer groups other selected blocks create.
     private var offersExistingGroups: Bool {
-        block.scope.kind == .jamfProGroup
+        block.scope.kind == .jamfProGroup || block.scope.kind == .jamfProMobileGroup
+    }
+
+    private var isMobileScope: Bool {
+        block.scope.kind == .jamfProMobileGroup
     }
 
     private var foundationScopeChoices: [(key: String, label: String)] {
@@ -555,22 +570,22 @@ struct BlockSettingsForm: View {
             if selection.existingScope == nil, selection.providedScope == nil, selection.scope.isEmpty {
                 Text("Choose a group…").tag("")
             }
-            if foundationSelected || Self.scopeChoices.contains(where: { $0.key == selection.scope }) && selection.existingScope == nil && selection.providedScope == nil {
+            if !isMobileScope, foundationSelected || Self.scopeChoices.contains(where: { $0.key == selection.scope }) && selection.existingScope == nil && selection.providedScope == nil {
                 Section("Created by Foundation") {
                     ForEach(foundationScopeChoices, id: \.key) { choice in
                         Text(choice.label).tag("foundation:\(choice.key)")
                     }
                 }
             }
-            ForEach(providers.filter { !$0.groups.isEmpty }, id: \.blockID) { provider in
+            ForEach(providers.filter { !$0.groups(for: block.scope.kind).isEmpty }, id: \.blockID) { provider in
                 Section("Created by \(provider.blockName)") {
-                    ForEach(provider.groups, id: \.self) { name in
+                    ForEach(provider.groups(for: block.scope.kind), id: \.self) { name in
                         Text(name).tag("provided:\(provider.blockID)/\(name)")
                     }
                 }
             }
             if let provided = selection.providedScope,
-               !providers.contains(where: { $0.blockID == provided.blockID && $0.groups.contains(provided.name) }) {
+               !providers.contains(where: { $0.blockID == provided.blockID && $0.groups(for: block.scope.kind).contains(provided.name) }) {
                 Text("\(provided.name) (block not selected)").tag("provided:\(provided.reference)")
             }
             if offersExistingGroups {
@@ -582,7 +597,9 @@ struct BlockSettingsForm: View {
             }
         }
         .frame(maxWidth: 420)
-        .help(block.scope.smartOnly
+        .help(isMobileScope
+            ? "The mobile device group this block applies to: one another selected block creates, or one already in the tenant."
+            : block.scope.smartOnly
             ? "The smart group this block applies to: one another selected block creates, or one already in the tenant. App Installers need a smart group."
             : "The group this block applies to: one another selected block creates, or one already in the tenant.")
     }
@@ -678,7 +695,9 @@ struct BlockSettingsForm: View {
         guard offersExistingGroups || block.acceptsCategory else { return }
         do {
             if offersExistingGroups {
-                groups = try await ExistingObjectService.computerGroups(tenant: tenant, activityLog: activityLog)
+                groups = isMobileScope
+                    ? try await ExistingObjectService.mobileDeviceGroups(tenant: tenant, activityLog: activityLog)
+                    : try await ExistingObjectService.computerGroups(tenant: tenant, activityLog: activityLog)
             }
             if block.acceptsCategory {
                 categories = try await ExistingObjectService.categories(tenant: tenant, activityLog: activityLog)
@@ -813,7 +832,7 @@ struct SavePresetSheet: View {
     var body: some View {
         SheetFrame(title: "Save as Preset", systemImage: "square.stack.3d.up") {
             Form {
-                TextField("Name", text: $name, prompt: Text("Office Macs"))
+                TextField("Name", text: $name, prompt: Text("Office devices"))
                 TextField("Summary", text: $summary, prompt: Text("What this baseline is for"), axis: .vertical)
                     .lineLimit(2...4)
                 if folderSources.isEmpty {

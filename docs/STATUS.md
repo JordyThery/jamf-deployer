@@ -30,13 +30,14 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 
 ## Packaging and release
 - 1.0 shipped signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
-- No app-target unit tests (needs a test target added in Xcode); JamfDeployerCore carries 69 tests, DeployerKit 4.
+- No app-target unit tests (needs a test target added in Xcode); JamfDeployerCore carries 75 tests, DeployerKit 4.
 - App Sandbox is off by design (child-process engine); Developer ID + notarisation is the distribution model.
 
 ## Adopting an existing tenant
 - Live-verified on a content-rich tenant: all 99 exporter types discovered (494 objects), 487 adopted with an import-only preview (no creates or deletes), deployed, converged to "No changes", and a change made directly in Jamf was detected and restored.
 - Adopt leaves out what the app cannot manage, with a note: objects whose secret values Jamf never exports (activation code, ADE server token, GSX credentials) and enrollment invitations. References from adopted objects to anything left out are pointed at the object's existing Jamf ID, and values the export supplies are written into the adopted configuration.
-- Importing PreStages clears their empty account-settings and location sections, which the exporter omits; the values involved are defaults.
+- The exporter can leave PreStage sections out (device naming, purchasing, location, account settings, Setup Assistant skips). Adopt marks the missing ones as ignored, so the first deploy keeps the values in Jamf instead of clearing them; those sections are not drift-checked.
+- Mobile devices: profiles, apps, extension attributes, groups and PreStages adopt, capture and clone like their macOS counterparts (live-verified Sandbox → Demo, both capture modes). Blueprints capture and adopt as well (live-verified).
 - Objects an adopted object references by Jamf Pro ID or name (for example a scope group) are adopted with it: only `.id` references can be pointed at an existing ID.
 - **Adopt More…** lists only objects not yet adopted and adds them to the record; already adopted objects are left untouched.
 - **Hand over** is prepared, previewed and deployed like any change, and can be cancelled until it deploys; the adopted configuration is archived next to the record once it has.

@@ -42,12 +42,16 @@ or read/update for tenant-wide settings).
 | Self Service App | `self-service` (read/update) |
 | Self Service Maintenance | `scripts`, `policies` (create/read/update/delete) |
 | macOS Version Groups | `device-groups` (create/read/update/delete) |
+| Mobile Device Groups | `device-groups` (create/read/update/delete) |
+| Mobile Passcode | `configuration-profiles` (create/read/update/delete) |
+| Mobile Enrollment | `prestage-enrollments` (create/read/update/delete), `device-enrollment-program-instances:read` |
 | App Catalog | `applications` (create/read/update/delete), `smart-computer-groups:read` |
 | Security Cloud | `uem-connections`, `activation-profiles` (create/read/update/delete), `tenant-id:read` |
 | Jamf Protect Baseline | none on the Platform client — see the Protect client below |
 
 Picking an existing group or category in a block's settings lists them
-with `computer-groups:read` and `categories:read`.
+with `computer-groups:read` and `categories:read`; mobile-scoped blocks
+list mobile device groups with the mobile device group read privilege.
 
 ### Per feature
 
