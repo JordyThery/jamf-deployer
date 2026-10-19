@@ -47,7 +47,7 @@ or read/update for tenant-wide settings).
 | Mobile Enrollment | `prestage-enrollments` (create/read/update/delete), `device-enrollment-program-instances:read` |
 | App Catalog | `applications` (create/read/update/delete), `smart-computer-groups:read` |
 | Mac App Store Apps, iPad and iPhone Apps | `applications` (create/read/update/delete), `volume-purchasing-locations:read` |
-| Security Cloud | `uem-connections`, `activation-profiles` (create/read/update/delete), `tenant-id:read` |
+| Security Cloud | `uem-connections`, `activation-profiles` (create/read/update/delete), `tenant-id:read`; `uem-connections:read` is enough with *Use the existing connection* |
 | Jamf Protect Baseline | none on the Platform client — see the Protect client below |
 
 Picking an existing group or category in a block's settings lists them
@@ -132,6 +132,6 @@ Protect deployment sync, under the Platform client above.
 - The app talks only to your Jamf tenants, your Git remotes (Team Mode and
   Git catalog sources), GitHub's public API (release and component-update
   checks) and HashiCorp's release server when you agree to the Terraform
-  download for exports and adoption.
+  download for capturing blocks and adoption.
 - No admin rights, no configuration profiles, no system extensions — it is
   an ordinary signed and notarized app.

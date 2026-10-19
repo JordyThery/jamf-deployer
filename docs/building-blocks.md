@@ -12,7 +12,7 @@ The app ships the blocks that carry **no configuration opinions of their own** â
 | **Mac App Store Apps** | Mac App Store apps the tenant holds Apps and Books licenses for, assigned to devices â€” no Apple Account needed on the Mac. Pick apps with the built-in picker. | Medium |
 | **iPad and iPhone Apps** | App Store apps for iPads and iPhones the tenant holds Apps and Books licenses for, assigned to devices as managed apps. Pick apps with the built-in picker. | Medium |
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
-| **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect) and creates a Mac activation profile. Needs a Security Cloud entitlement. | Medium |
+| **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect), or uses the connection it already has, and creates a Mac activation profile. Security Cloud holds one UEM Connect per tenant: when it is already linked to Jamf Pro, set **UEM Connect** to *Use the existing connection*. Needs a Security Cloud entitlement. | Medium |
 
 Every block deploys through the Jamf Platform API. App Catalog and Jamf Protect Baseline also deploy to tenants connected through the Jamf Pro API; the App Store blocks and Security Cloud need the Platform API.
 

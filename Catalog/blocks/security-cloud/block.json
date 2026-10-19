@@ -1,17 +1,48 @@
 {
   "id": "security-cloud",
   "name": "Security Cloud",
-  "summary": "Connects Jamf Security Cloud to this Jamf Pro tenant (UEM Connect) and creates a Mac activation profile — Security Cloud then syncs devices and can push the enrollment profile into Jamf Pro.",
+  "summary": "Connects Jamf Security Cloud to this Jamf Pro tenant (UEM Connect), or uses the connection it already has, and creates a Mac activation profile. Security Cloud then syncs devices and can push the enrollment profile into Jamf Pro.",
   "category": "Security",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "requires": [],
   "conflicts": [],
-  "products": ["security-cloud"],
-  "permissions": ["uem-connections:create", "uem-connections:read", "uem-connections:update", "uem-connections:delete", "activation-profiles:create", "activation-profiles:read", "activation-profiles:update", "activation-profiles:delete", "tenant-id:read"],
+  "products": [
+    "security-cloud"
+  ],
+  "permissions": [
+    "uem-connections:create",
+    "uem-connections:read",
+    "uem-connections:update",
+    "uem-connections:delete",
+    "activation-profiles:create",
+    "activation-profiles:read",
+    "activation-profiles:update",
+    "activation-profiles:delete",
+    "tenant-id:read"
+  ],
   "risk": "medium",
   "alwaysOn": false,
-  "scope": { "kind": "none" },
+  "scope": {
+    "kind": "none"
+  },
   "settings": [
+    {
+      "key": "uem_connect",
+      "title": "UEM Connect",
+      "type": "enum",
+      "default": "create",
+      "required": true,
+      "enumValues": [
+        "create",
+        "existing"
+      ],
+      "enumLabels": [
+        "Connect this Jamf Pro tenant",
+        "Use the existing connection"
+      ],
+      "description": "Security Cloud holds one UEM Connect integration per tenant. Use the existing connection when Security Cloud is already linked to Jamf Pro; it is then left as it is, and never removed by this block.",
+      "section": "UEM Connect"
+    },
     {
       "key": "profile_name",
       "title": "Activation profile name",
@@ -45,7 +76,7 @@
       "type": "bool",
       "default": "true",
       "required": false,
-      "description": "Device risk levels flow back into Jamf Pro (extension attributes), usable in smart groups.",
+      "description": "Device risk levels flow back into Jamf Pro (extension attributes), usable in smart groups. Applies when this block makes the connection.",
       "section": "UEM Connect"
     },
     {
@@ -54,12 +85,12 @@
       "type": "number",
       "default": "60",
       "required": false,
-      "description": "How often Security Cloud syncs devices from Jamf Pro. Security Cloud only accepts the intervals its own admin UI offers (60 is always valid).",
+      "description": "How often Security Cloud syncs devices from Jamf Pro. Security Cloud only accepts the intervals its own admin UI offers (60 is always valid). Applies when this block makes the connection.",
       "section": "UEM Connect"
     }
   ],
   "objectsCreated": [
-    "1 UEM Connect integration (Security Cloud ↔ this Jamf Pro tenant)",
+    "1 UEM Connect integration (Security Cloud ↔ this Jamf Pro tenant), unless the existing one is used",
     "1 activation profile (macOS)"
   ],
   "entitlementNote": "Needs a Jamf Security Cloud entitlement on the environment. Without it, the deploy stops with a clear message and nothing else is affected."

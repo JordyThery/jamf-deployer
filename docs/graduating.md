@@ -20,7 +20,7 @@ objects, and the engine's record of them, carry over as they are.
 | Deploy | `terraform apply` of the plan you approved |
 | Check for Changes | `terraform plan`, run on a schedule, reporting changes made in Jamf |
 | Restore Baseline | `terraform apply` |
-| Keep this change | Changing the code, so the next plan agrees with Jamf |
+| Keep This Change | Changing the code, so the next plan agrees with Jamf |
 | Team Mode locks | **State locking** in the state backend |
 | History | Git history and pull requests |
 
@@ -41,9 +41,8 @@ tenants/<tenant>/         main.tf, variables.tf, tenant.auto.tfvars, terraform.t
 README.md                 how the repository works and how to set it up
 ```
 
-The layout follows Jamf's own multi-tenant reference project
-(`ref-jamfprotect-msp` in
-[Jamf-Concepts/terraform-jamf-platform](https://github.com/Jamf-Concepts/terraform-jamf-platform)):
+The layout follows Jamf's own multi-tenant Jamf Protect reference in
+[Jamf-Concepts/terraform-jamf-platform](https://github.com/Jamf-Concepts/terraform-jamf-platform):
 one shared module per capability, one thin folder per tenant, one state file
 per tenant, and credentials kept per tenant in GitHub Environments.
 
@@ -56,9 +55,10 @@ Then choose what happens to the tenants:
   `terraform-state` branch of an empty private repository, publishes the
   export as its first commit, and stops managing the tenants in the app (they
   are archived there, and every object stays in Jamf). From then on the
-  repository manages them. Each tenant must have nothing left to deploy, so
-  the repository's first plan shows no changes; in Team Mode the app syncs
-  first and waits for teammates to finish.
+  repository manages them. Each tenant must have nothing left to deploy and
+  no changes made in Jamf, so the repository's first plan shows no changes;
+  in Team Mode the app syncs first and refuses tenants a teammate is working
+  on.
 
 ## After moving
 

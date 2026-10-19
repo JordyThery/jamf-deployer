@@ -6,7 +6,7 @@ This guide takes a tenant out of the app and into a plain **HashiCorp
 Terraform** or **OpenTofu** workflow — command line or CI — with full
 continuity: nothing is recreated, the state carries over.
 
-**Export as Terraform** on the dashboard does all of this for you, for one
+**Export as Terraform…** on the dashboard does all of this for you, for one
 tenant or the whole fleet, and adds GitHub workflows: see
 [Graduating to Terraform](graduating.md). This guide is the same move by
 hand.
