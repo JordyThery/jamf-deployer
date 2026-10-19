@@ -67,25 +67,44 @@ public nonisolated enum StandaloneExport {
         return candidate
     }
 
-    /// The modules/ folder name for each block version in the fleet: the
-    /// block ID, or ID plus version when tenants use different versions.
+    /// The modules/ folder name for each block in the fleet, keyed by
+    /// `folderKey`: the block ID, or ID plus version when tenants use
+    /// different copies of a block (other versions, or other sources).
     public static func moduleFolders(for tenants: [Tenant]) -> [String: String] {
-        var versions: [String: Set<String>] = [:]
+        var copies: [String: Set<String>] = [:]          // block ID → folder keys
+        var versions: [String: String] = [:]             // folder key → version
         for tenant in tenants {
             for selection in tenant.input.selections {
-                versions[selection.block.id, default: []].insert(selection.block.version)
+                let key = folderKey(selection.block, source: tenant.blockFolders[selection.block.id])
+                copies[selection.block.id, default: []].insert(key)
+                versions[key] = selection.block.version
             }
         }
         var folders: [String: String] = [:]
-        for (id, set) in versions {
-            for version in set {
-                folders[folderKey(id, version)] = set.count == 1 ? id : "\(id)-v\(version)"
+        for (id, keys) in copies {
+            guard keys.count > 1 else {
+                folders[keys.first!] = id
+                continue
+            }
+            var taken: Set<String> = []
+            for key in keys.sorted() {
+                var name = "\(id)-v\(versions[key] ?? "")"
+                var number = 2
+                while taken.contains(name) {
+                    name = "\(id)-v\(versions[key] ?? "")-\(number)"
+                    number += 1
+                }
+                taken.insert(name)
+                folders[key] = name
             }
         }
         return folders
     }
 
-    static func folderKey(_ id: String, _ version: String) -> String { "\(id)@\(version)" }
+    /// One copy of a block: its ID, version and the folder it comes from.
+    static func folderKey(_ block: BlockMetadata, source: URL?) -> String {
+        "\(block.id)@\(block.version)@\(source?.standardizedFileURL.path ?? "")"
+    }
 
     // MARK: Tenant files
 
@@ -93,13 +112,21 @@ public nonisolated enum StandaloneExport {
     public static func tenantFiles(_ tenant: Tenant, moduleFolders: [String: String]) throws -> [String: String] {
         let input = tenant.input
         guard input.removals.isEmpty else { throw ExportError.pendingRemovals(tenant: tenant.slug) }
-        let (calls, secrets) = try WorkspaceGenerator.moduleCalls(input)
-        let versions = Dictionary(uniqueKeysWithValues: input.selections.map { ($0.block.id, $0.block.version) })
-        let names = Dictionary(uniqueKeysWithValues: input.selections.map { ($0.block.id, $0.block.name) })
+        let (calls, generatorSecrets) = try WorkspaceGenerator.moduleCalls(input)
+        let blocks = Dictionary(input.selections.map { ($0.block.id, $0.block) }, uniquingKeysWith: { first, _ in first })
+        let names = blocks.mapValues(\.name)
+        // GitHub stores secret names in upper case and the pipeline lowers
+        // them back, so secret variables are lower case here.
+        let secrets = generatorSecrets.map { secret in
+            var lowered = secret
+            lowered.name = secret.name.lowercased()
+            return lowered
+        }
 
         // main.tf: the module calls and the wiring between them.
         let modules = calls.map { call in
-            let folder = moduleFolders[folderKey(call.blockID, versions[call.blockID] ?? "")] ?? call.blockID
+            let folder = blocks[call.blockID]
+                .flatMap { moduleFolders[folderKey($0, source: tenant.blockFolders[call.blockID])] } ?? call.blockID
             var pairs: [(String, String)] = [
                 ("source", WorkspaceGenerator.hclString("../../modules/\(folder)" + (call.modulePath.isEmpty ? "" : "/\(call.modulePath)"))),
                 ("name_prefix", "var.name_prefix"),
@@ -108,7 +135,7 @@ public nonisolated enum StandaloneExport {
                 switch argument.value {
                 case .setting: pairs.append((argument.key, "var.\(call.name).\(argument.key)"))
                 case .reference(let expression): pairs.append((argument.key, expression))
-                case .secret(let variable): pairs.append((argument.key, "var.\(variable)"))
+                case .secret(let variable): pairs.append((argument.key, "var.\(variable.lowercased())"))
                 }
             }
             return "module \"\(call.name)\" {\n\(WorkspaceGenerator.aligned(pairs))\n}\n"
@@ -276,7 +303,7 @@ public nonisolated enum StandaloneExport {
         var written: Set<String> = []
         for tenant in tenants {
             for selection in tenant.input.selections {
-                let folder = folders[folderKey(selection.block.id, selection.block.version)] ?? selection.block.id
+                let folder = folders[folderKey(selection.block, source: tenant.blockFolders[selection.block.id])] ?? selection.block.id
                 guard !written.contains(folder), let source = tenant.blockFolders[selection.block.id] else { continue }
                 written.insert(folder)
                 let target = modulesURL.appending(path: folder)
@@ -297,11 +324,22 @@ public nonisolated enum StandaloneExport {
         }
     }
 
-    /// State as the engine wrote it, ready for plain Terraform: provider
-    /// addresses move from OpenTofu's registry to Terraform's, the same as
-    /// `terraform state replace-provider`.
-    public static func stateForTerraform(_ state: Data) -> Data {
-        let text = String(decoding: state, as: UTF8.self)
-        return Data(text.replacingOccurrences(of: "registry.opentofu.org/", with: "registry.terraform.io/").utf8)
+    /// State as the engine wrote it, ready for plain Terraform: each
+    /// resource's provider address moves from OpenTofu's registry to
+    /// Terraform's, the same as `terraform state replace-provider`. Nothing
+    /// else in the state is touched.
+    public static func stateForTerraform(_ state: Data) throws -> Data {
+        guard var root = try JSONSerialization.jsonObject(with: state) as? [String: Any] else { return state }
+        if let resources = root["resources"] as? [[String: Any]] {
+            root["resources"] = resources.map { resource in
+                var moved = resource
+                if let provider = resource["provider"] as? String {
+                    moved["provider"] = provider.replacingOccurrences(
+                        of: "registry.opentofu.org/", with: "registry.terraform.io/")
+                }
+                return moved
+            }
+        }
+        return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
     }
 }

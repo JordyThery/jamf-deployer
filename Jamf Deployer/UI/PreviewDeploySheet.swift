@@ -316,17 +316,15 @@ struct PreviewDeploySheet: View {
             }
             if let workspace = session.workspaceURL {
                 DisclosureGroup("Generated configuration") {
-                    ForEach(["main.tf", "providers.tf"], id: \.self) { file in
-                        if let text = try? String(contentsOf: workspace.appending(path: file), encoding: .utf8) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(file).font(.caption.bold())
-                                Text(text)
-                                    .font(.caption.monospaced())
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.vertical, 4)
+                    ForEach(session.generatedFiles, id: \.self) { file in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(file.name).font(.caption.bold())
+                            Text(file.text)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
                 Button("Show Workspace in Finder") {

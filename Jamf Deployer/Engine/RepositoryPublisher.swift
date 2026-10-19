@@ -9,9 +9,13 @@ nonisolated enum RepositoryPublisher {
 
     enum PublishError: LocalizedError {
         case git(String, output: String)
+        case notEmpty
 
         var errorDescription: String? {
             switch self {
+            case .notEmpty:
+                return "The repository already has a main or \(stateBranch) branch. Choose an empty repository."
+
             case .git(let step, let output):
                 let detail = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 return "Git could not \(step)\(detail.isEmpty ? "." : ": \(detail.prefix(300))")"
@@ -19,9 +23,19 @@ nonisolated enum RepositoryPublisher {
         }
     }
 
-    /// Commits `directory` and pushes it as main of the empty `remote`, then
-    /// creates the state branch there.
-    static func publish(_ directory: URL, to remote: String) async throws {
+    /// Whether a repository URL carries credentials (`https://user:token@…`).
+    /// SSH's `git@host:` user is not one.
+    static func hasCredentials(_ remote: String) -> Bool {
+        guard let components = URLComponents(string: remote),
+              let scheme = components.scheme?.lowercased(), scheme == "https" || scheme == "http"
+        else { return false }
+        return components.user != nil || components.password != nil
+    }
+
+    /// Commits `directory` as the repository's first commit, checks that
+    /// `remote` has no main or state branch yet, and creates the empty state branch there. Main is
+    /// pushed by `publishMain` once the state is in place.
+    static func prepare(_ directory: URL, remote: String) async throws {
         try await Task.detached {
             try git(directory, "create the repository", "init", "--initial-branch", "main")
             if ((try? git(directory, "read the identity", "config", "user.email")) ?? "").isEmpty {
@@ -29,12 +43,23 @@ nonisolated enum RepositoryPublisher {
                 try git(directory, "set an identity", "config", "user.email", "jamf-deployer@localhost")
             }
             try git(directory, "stage the files", "add", "-A")
-            try git(directory, "commit", "commit", "-q", "-m", "Export from Jamf Deployer")
+            // The state is moved already; the first push has nothing to apply.
+            try git(directory, "commit", "commit", "-q", "-m", "Export from Jamf Deployer [skip ci]")
             try git(directory, "add the remote", "remote", "add", "origin", remote)
-            try git(directory, "push to the repository (it must be empty and yours to push to)", "push", "-q", "-u", "origin", "main")
+            // Other branches may exist; main and the state branch must not.
+            let branches = try git(directory, "reach the repository (it must exist and be yours to push to)",
+                                   "ls-remote", "--heads", "origin", "main", stateBranch)
+            guard branches.isEmpty else { throw PublishError.notEmpty }
             let tree = try git(directory, "create the state branch", "mktree", input: "")
             let commit = try git(directory, "create the state branch", "commit-tree", tree, "-m", "Create the state branch")
             try git(directory, "push the state branch", "push", "-q", "origin", "\(commit):refs/heads/\(stateBranch)")
+        }.value
+    }
+
+    /// Pushes the first commit as main.
+    static func publishMain(_ directory: URL) async throws {
+        try await Task.detached {
+            try git(directory, "push to the repository", "push", "-q", "-u", "origin", "main")
         }.value
     }
 

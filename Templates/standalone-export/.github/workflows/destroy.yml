@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   destroy:
-    if: inputs.tenant == inputs.confirm
+    if: github.ref == 'refs/heads/main' && inputs.tenant == inputs.confirm
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.tenant }}
@@ -33,6 +33,7 @@ jobs:
       # The set a tenant does not use stays empty.
       JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
       JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
       JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
       JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
       JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
@@ -54,7 +55,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check the tenant exists
-        run: '[ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }'
+        shell: bash
+        run: '[[ "$TENANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }'
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}

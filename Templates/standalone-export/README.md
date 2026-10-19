@@ -1,7 +1,7 @@
 # Jamf tenants as code
 
 This repository manages Jamf tenants with Terraform (or OpenTofu). It was
-exported from Jamf Deployer: every tenant the app managed is here, with the
+exported from Jamf Deployer: the tenants chosen in the app are here, with the
 same objects and the same state, so nothing is recreated.
 
 ```
@@ -64,21 +64,38 @@ Each tenant's state is one object with its own lock.
   secret (`TF_ENCRYPTION`); swap `hashicorp/setup-terraform` for
   `opentofu/setup-opentofu` and `terraform` for `tofu`.
 
-### 3. Create one GitHub Environment per tenant
+### 3. Create two GitHub Environments per tenant
 
-The Environment's name is the tenant's directory name. Each workflow job runs
-in the tenant's Environment, so it can only read that tenant's credentials.
+Each workflow job runs in one of the tenant's Environments, so it can only
+read that tenant's credentials:
+
+- **`<tenant>`**, named after the tenant's directory, holds the credentials
+  that change Jamf. Apply, Restore, Destroy and Check for Changes use it, and
+  its deployment branch policy allows only `main`.
+- **`<tenant>-plan`** holds the credentials pull request plans use. Any branch
+  can use it, so anyone who can push a branch can read these credentials:
+  give it a read-only API client where you can.
+
+`create-environments.sh` in the export folder sets both up. By hand:
 
 ```bash
-gh api -X PUT repos/OWNER/REPO/environments/<tenant>
-gh variable set JAMFPLATFORM_BASE_URL       --env <tenant> --body "https://us.api.jamfcloud.com"
-gh variable set JAMFPLATFORM_ENVIRONMENT_ID --env <tenant> --body "<environment UUID>"
-gh secret   set JAMFPLATFORM_CLIENT_ID      --env <tenant>
-gh secret   set JAMFPLATFORM_CLIENT_SECRET  --env <tenant>
+gh api -X PUT repos/OWNER/REPO/environments/<tenant> --input - <<'JSON'
+{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+gh api -X POST repos/OWNER/REPO/environments/<tenant>/deployment-branch-policies -f name=main
+gh api -X PUT repos/OWNER/REPO/environments/<tenant>-plan
+
+# For each of the two Environments:
+gh variable set JAMFPLATFORM_BASE_URL       --env <environment> --body "https://us.api.jamfcloud.com"
+gh variable set JAMFPLATFORM_ENVIRONMENT_ID --env <environment> --body "<environment UUID>"
+gh secret   set JAMFPLATFORM_CLIENT_ID      --env <environment>
+gh secret   set JAMFPLATFORM_CLIENT_SECRET  --env <environment>
 ```
 
 `gh secret set` without `--body` reads the value from standard input, so it
-never appears in your shell history.
+never appears in your shell history. Older API clients scoped to a tenant
+rather than an environment set `JAMFPLATFORM_TENANT_ID` instead of
+`JAMFPLATFORM_ENVIRONMENT_ID`.
 
 Tenants connected through the **Jamf Pro API** use these instead. The Jamf Pro
 API plugin needs one operation at a time, which `PARALLELISM` sets:
@@ -92,15 +109,19 @@ gh secret   set JAMFPRO_CLIENT_SECRET --env <tenant>   # basic: JAMFPRO_BASIC_PA
 ```
 
 The workflows read both sets; the one a tenant does not use stays empty.
-Secret block settings arrive as `TF_VAR_<name>` secrets, added to the
-workflows' `env:` blocks.
+Tenants with Jamf Protect blocks also set `JAMFPROTECT_URL` and the
+`JAMFPROTECT_CLIENT_ID` and `JAMFPROTECT_CLIENT_SECRET` secrets. Secret block
+settings are `TF_VAR_<name>` secrets; every workflow hands them to Terraform
+(`.github/actions/secret-settings`).
 
 ### 4. Protect `main`
 
 In the repository settings, require a pull request with at least one approving
 review, and require the **Plan result** status check. Without branch
 protection, anyone with write access can push straight to `main` and the review
-step is optional.
+step is optional. Branch protection guards what reaches `main`; the
+Environments' branch policy is what keeps the credentials that change Jamf
+away from other branches.
 
 ### 5. Optional settings
 
@@ -111,7 +132,7 @@ step is optional.
 ## Adding a tenant
 
 Copy an existing tenant directory, change `tenant.auto.tfvars`, create the
-tenant's Environment, and open a pull request. The plan shows everything the
+tenant's two Environments, and open a pull request. The plan shows everything the
 new tenant gets before anything is created.
 
 ## Stopping managing a tenant

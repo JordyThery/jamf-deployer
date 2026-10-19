@@ -26,7 +26,15 @@ struct RepositoryExportSheet: View {
     private func blocker(for tenant: Tenant) -> String? {
         if tenant.handOverPending { return "A hand-over is in progress." }
         if !tenant.pendingRemovals.isEmpty { return "Removals are waiting to be deployed." }
+        if let lock = deployService.lock(for: tenant.id) { return "\(lock.engineer) is working on this tenant." }
         return nil
+    }
+
+    /// Baseline edits that were never deployed are exported as they are; a
+    /// move refuses them (the repository must start with nothing to apply).
+    private func hasUndeployedBlocks(_ tenant: Tenant) -> Bool {
+        tenant.blockSelections.contains { tenant.deployedBlockVersions[$0.blockID] == nil }
+            || tenant.deployedBlockVersions.keys.contains { id in !tenant.blockSelections.contains { $0.blockID == id } }
     }
 
     private var canExport: Bool {
@@ -84,7 +92,9 @@ struct RepositoryExportSheet: View {
                     )) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(tenant.name)
-                            Text(reason ?? tenant.connectionLabel)
+                            Text(reason ?? (hasUndeployedBlocks(tenant)
+                                    ? "\(tenant.connectionLabel) · has blocks that are not deployed"
+                                    : tenant.connectionLabel))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -119,7 +129,7 @@ struct RepositoryExportSheet: View {
                 if movesTenants {
                     TextField("Repository URL", text: $remoteURL, prompt: Text("https://github.com/org/jamf-tenants.git"))
                         .font(.callout.monospaced())
-                    Text("An empty private repository you can push to. The export becomes its first commit, and each tenant's state moves to its terraform-state branch. Terraform stores state unencrypted, so keep the repository private.")
+                    Text("An empty private repository you can push to. Each tenant's state moves to its terraform-state branch, and the export becomes its first commit. Tenants must have nothing left to deploy. Terraform stores state unencrypted, so keep the repository private.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -159,7 +169,7 @@ struct RepositoryExportSheet: View {
             }
             Section("Next steps") {
                 if result.moved {
-                    Text("1. Create each tenant's GitHub Environment: in the folder, run ./create-environments.sh with the repository's OWNER/NAME. It asks for every secret and never stores them.")
+                    Text("1. Create each tenant's GitHub Environments: in the folder, run ./create-environments.sh with the repository's OWNER/NAME. It asks for each secret with typing hidden and sends it straight to GitHub; plans can use a read-only client.")
                     Text("2. Protect main: require a pull request, an approving review and the Plan result check (README.md, Setting up).")
                     Text("3. Make the next change with a pull request. Its plan should show only that change.")
                 } else {

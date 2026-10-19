@@ -52,17 +52,23 @@ Then choose what happens to the tenants:
 - **Keep managing here** writes the configuration only. Read it, run
   `terraform validate`, show it to a colleague. The tenants and their state
   stay in the app.
-- **Move to a repository** also publishes the export to an empty private
-  repository, moves each tenant's state to the repository's `terraform-state`
-  branch, and stops managing the tenants in the app (they are archived there,
-  and every object stays in Jamf). From then on the repository manages them.
+- **Move to a repository** also moves each tenant's state to the
+  `terraform-state` branch of an empty private repository, publishes the
+  export as its first commit, and stops managing the tenants in the app (they
+  are archived there, and every object stays in Jamf). From then on the
+  repository manages them. Each tenant must have nothing left to deploy, so
+  the repository's first plan shows no changes; in Team Mode the app syncs
+  first and waits for teammates to finish.
 
 ## After moving
 
-1. **Create each tenant's GitHub Environment.** In the export folder, run
-   `./create-environments.sh OWNER/REPOSITORY`. It creates one Environment
-   per tenant with its identifiers and asks for each secret (typing is
-   hidden). The script holds no secrets and is not committed.
+1. **Create each tenant's GitHub Environments.** In the export folder, run
+   `./create-environments.sh OWNER/REPOSITORY`. Each tenant gets two:
+   `<tenant>`, which only `main` may use, with the credentials that change
+   Jamf, and `<tenant>-plan` for pull request plans. Any branch can use the
+   plan Environment, so give it a read-only API client where you can. The
+   script asks for each secret (typing is hidden), holds none itself, and is
+   not committed.
 2. **Protect `main`**: require a pull request, one approving review, and the
    **Plan result** check.
 3. **Make the next change with a pull request.** The Plan workflow comments
@@ -81,7 +87,9 @@ Then choose what happens to the tenants:
   plugin by Deployment Theory and one operation at a time (`PARALLELISM = 1`
   in their Environment, which the setup script sets).
 - **Blocks waiting to be removed**, or a hand-over in progress, have to be
-  deployed or cancelled first, so the export matches what is in Jamf.
+  deployed or cancelled first, so the export matches what is in Jamf. An
+  export to review includes baseline edits that are not deployed yet; the
+  tenant list marks those tenants.
 - **Learning more:** the
   [Terraform tutorials](https://developer.hashicorp.com/terraform/tutorials),
   Deployment Theory's
@@ -90,3 +98,16 @@ Then choose what happens to the tenants:
   the [MacAdmins Slack](https://macadmins.org/slack).
 - **By hand:** [Switching to plain Terraform](ejecting.md) describes the same
   move step by step, for a single tenant without GitHub.
+
+## Credits
+
+The export, its layout and its pipeline follow what these JNUC 2026 sessions
+shared from running Jamf as code in production (recordings to follow):
+
+- **Managing the Jamf Platform at Scale With IaC**, by Kyle and Neil Martin
+  (Jamf), and its reference project
+  [Jamf-Concepts/terraform-jamf-platform](https://github.com/Jamf-Concepts/terraform-jamf-platform).
+- **From ClickOps to GitOps: Migrating Jamf Pro at Enterprise Scale to
+  Terraform**, by Joseph, Gordon and Dafydd (Lloyds Banking Group).
+- **From Zero to GitOps: Training a Mac Team to Work Like DevOps Engineers**,
+  by Joseph, Gordon and Dafydd (Lloyds Banking Group).

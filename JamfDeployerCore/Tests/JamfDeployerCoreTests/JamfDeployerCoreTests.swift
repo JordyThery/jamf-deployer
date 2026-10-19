@@ -1993,6 +1993,7 @@ struct StandaloneExportTests {
         }
         """))
         #expect(files["variables.tf"]!.contains("TF_VAR_<name>"))
+        #expect(files["main.tf"]!.contains("token          = var.file_vault_token"))
         #expect(!files["tenant.auto.tfvars"]!.contains("token"))
     }
 
@@ -2019,9 +2020,18 @@ struct StandaloneExportTests {
                 providerVersion: "1.5.0"), blockFolders: [:])
         }
         let folders = StandaloneExport.moduleFolders(for: [tenant([v1, other]), tenant([v2, other])])
-        #expect(folders["cats@1.0.0"] == "cats-v1.0.0")
-        #expect(folders["cats@2.0.0"] == "cats-v2.0.0")
-        #expect(folders["eas@1.0.0"] == "eas")
+        #expect(folders[StandaloneExport.folderKey(v1, source: nil)] == "cats-v1.0.0")
+        #expect(folders[StandaloneExport.folderKey(v2, source: nil)] == "cats-v2.0.0")
+        #expect(folders[StandaloneExport.folderKey(other, source: nil)] == "eas")
+
+        // The same block and version from two sources are two copies.
+        func sourced(_ path: String) -> StandaloneExport.Tenant {
+            StandaloneExport.Tenant(slug: "s", input: WorkspaceInput(
+                namePrefix: "", selections: [GeneratedSelection(block: v1, settings: [:])],
+                providerVersion: "1.5.0"), blockFolders: ["cats": URL(filePath: path)])
+        }
+        let two = StandaloneExport.moduleFolders(for: [sourced("/a/cats"), sourced("/b/cats")])
+        #expect(Set(two.values) == ["cats-v1.0.0", "cats-v1.0.0-2"])
     }
 
     @Test func tenantNamesBecomeUniqueDirectoryNames() {
@@ -2037,11 +2047,12 @@ struct StandaloneExportTests {
         #expect(throws: StandaloneExport.ExportError.self) { try Self.files(input) }
     }
 
-    @Test func stateMovesToTerraformsRegistry() {
-        let state = Data(#"{"resources":[{"provider":"provider[\"registry.opentofu.org/jamf/jamfplatform\"]"}]}"#.utf8)
-        let moved = String(decoding: StandaloneExport.stateForTerraform(state), as: UTF8.self)
-        #expect(moved.contains("registry.terraform.io/jamf/jamfplatform"))
-        #expect(!moved.contains("opentofu"))
+    @Test func stateMovesToTerraformsRegistry() throws {
+        let state = Data(#"{"resources":[{"provider":"provider[\"registry.opentofu.org/jamf/jamfplatform\"]","instances":[{"attributes":{"notes":"see registry.opentofu.org/"}}]}]}"#.utf8)
+        let moved = String(decoding: try StandaloneExport.stateForTerraform(state), as: UTF8.self)
+        #expect(moved.contains("registry.terraform.io\\/jamf\\/jamfplatform") || moved.contains("registry.terraform.io/jamf/jamfplatform"))
+        // Attribute values are not rewritten.
+        #expect(moved.contains("see registry.opentofu.org"))
     }
 
     @Test func writesTheRepositoryAndRefusesAFullFolder() throws {

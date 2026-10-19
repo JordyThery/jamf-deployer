@@ -42,11 +42,13 @@ jobs:
       group: tenant-${{ matrix.tenant }}
       cancel-in-progress: false
     env:
+      TENANT: ${{ matrix.tenant }}
       # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
       # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
       # The set a tenant does not use stays empty.
       JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
       JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
       JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
       JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
       JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
@@ -75,17 +77,17 @@ jobs:
           terraform_wrapper: false
       - uses: ./.github/actions/state-backend
         with:
-          tenant: ${{ matrix.tenant }}
+          tenant: ${{ env.TENANT }}
       - uses: ./.github/actions/secret-settings
         with:
           secrets: ${{ toJSON(secrets) }}
       - name: Init
-        run: terraform -chdir="tenants/${{ matrix.tenant }}" init -input=false
+        run: terraform -chdir="tenants/$TENANT" init -input=false
       - name: Plan
         id: plan
         run: |
           set +e
-          terraform -chdir="tenants/${{ matrix.tenant }}" plan -input=false -no-color -detailed-exitcode -lock-timeout=120s \
+          terraform -chdir="tenants/$TENANT" plan -input=false -no-color -detailed-exitcode -lock-timeout=120s \
             > "$RUNNER_TEMP/plan.txt" 2>&1
           code=$?
           cat "$RUNNER_TEMP/plan.txt"
@@ -98,7 +100,7 @@ jobs:
           gh label create drift --color D93F0B --description "Changed in Jamf, outside the code" 2>/dev/null || true
           gh label create restore-baseline --color 0E8A16 --description "Put the baseline back" 2>/dev/null || true
           {
-            echo "A check found changes made directly in Jamf for \`${{ matrix.tenant }}\`."
+            echo "A check found changes made directly in Jamf for \`$TENANT\`."
             echo
             echo "- **Keep them:** put the change in code with a pull request."
             echo "- **Undo them:** add the \`restore-baseline\` label to this issue."

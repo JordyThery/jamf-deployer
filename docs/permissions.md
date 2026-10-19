@@ -121,7 +121,9 @@ Protect deployment sync, under the Platform client above.
   Mode. The export creates the repository's `main` and `terraform-state`
   branches.
 - The exported workflows use the same Jamf API privileges as the app: each
-  tenant's GitHub Environment holds its own API client.
+  tenant's GitHub Environment holds its own API client, and only `main` may
+  use it. Pull request plans use the tenant's `<tenant>-plan` Environment,
+  which any branch can reach; a read-only API client is enough there.
 
 ## On the Mac
 

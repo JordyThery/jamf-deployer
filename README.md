@@ -61,6 +61,8 @@ Open the project in Xcode 27 or later, run `Vendor/fetch.sh` once to download th
 
 Jamf Deployer stands on [OpenTofu](https://opentofu.org) (MPL-2.0), the [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) providers (MPL-2.0), the [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) provider by Deployment Theory (MPL-2.0), [terraform-backend-git](https://github.com/plumber-cd/terraform-backend-git) by plumber-cd (Apache-2.0), and [jamformer](https://github.com/Jamf-Concepts/jamformer). Their licenses accompany the bundled copies.
 
+Export as Terraform owes its layout and pipeline to three JNUC 2026 sessions: *Managing the Jamf Platform at Scale With IaC* by Kyle and Neil Martin (Jamf), and *From ClickOps to GitOps: Migrating Jamf Pro at Enterprise Scale to Terraform* and *From Zero to GitOps: Training a Mac Team to Work Like DevOps Engineers* by Joseph, Gordon and Dafydd (Lloyds Banking Group). See [Graduating to Terraform](docs/graduating.md#credits).
+
 This is an independent project, not affiliated with or endorsed by Jamf.
 
 ## Support

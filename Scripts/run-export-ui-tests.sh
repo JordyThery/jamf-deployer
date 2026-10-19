@@ -55,6 +55,7 @@ for c in cats:
 for e in eas:
     call('DELETE', '/api/v1/computer-extension-attributes/' + e['id']); print('  deleted', e['name'])"
     gh api -X DELETE "repos/$REPO/environments/$TENANT" > /dev/null 2>&1
+    gh api -X DELETE "repos/$REPO/environments/$TENANT-plan" > /dev/null 2>&1
     parked="$(gh api "repos/$REPO/git/refs/heads/uitest-parking" --jq .object.sha 2> /dev/null)"
     if [[ -n "$parked" ]]; then
         gh api -X PATCH "repos/$REPO" -f default_branch=uitest-parking > /dev/null 2>&1
@@ -159,9 +160,12 @@ gh api "repos/$REPO/contents/tenants/$TENANT/terraform.tfstate?ref=terraform-sta
 gh api -X PATCH "repos/$REPO" -f default_branch=main > /dev/null
 
 echo "Creating the Environment with the exported script"
-(cd "$MOVE" && { kc $A client-id; kc $A client-secret; } | ./create-environments.sh "$REPO" > /dev/null)
+# Each secret is asked twice: for the tenant, then for its plans (Return: the same).
+(cd "$MOVE" && { kc $A client-id; echo; kc $A client-secret; echo; } | ./create-environments.sh "$REPO" > /dev/null)
 echo "  variables: $(gh variable list --repo "$REPO" --env "$TENANT" --json name --jq '[.[].name] | join(", ")')"
 echo "  secrets: $(gh secret list --repo "$REPO" --env "$TENANT" --json name --jq '[.[].name] | join(", ")')"
+echo "  plan secrets: $(gh secret list --repo "$REPO" --env "$TENANT-plan" --json name --jq '[.[].name] | join(", ")')"
+echo "  branch policy: $(gh api "repos/$REPO/environments/$TENANT/deployment-branch-policies" --jq '[.branch_policies[].name] | join(", ")')"
 
 echo "The repository's change check (must find no changes)"
 gh workflow run drift.yml --repo "$REPO" --ref main > /dev/null; wait_run drift.yml

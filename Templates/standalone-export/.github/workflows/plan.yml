@@ -4,9 +4,12 @@ name: Plan
 # plan each affected tenant and post the plan on the pull request, so the
 # reviewer approves a diff rather than a description of one.
 #
-# Each plan job runs in the tenant's GitHub Environment, so it can only read
-# that tenant's credentials. Require the "Plan result" check in branch
-# protection (not the per-tenant jobs, whose names change with the tenants).
+# Each plan job runs in the tenant's plan Environment (<tenant>-plan), so it
+# can only read that tenant's plan credentials. Pull request branches can use
+# those, so give them a read-only API client where you can; the credentials
+# that change Jamf are in the tenant's own Environment, which only main may
+# use. Require the "Plan result" check in branch protection (not the
+# per-tenant jobs, whose names change with the tenants).
 
 on:
   pull_request:
@@ -61,13 +64,15 @@ jobs:
       matrix:
         tenant: ${{ fromJson(needs.detect.outputs.tenants) }}
     environment:
-      name: ${{ matrix.tenant }}
+      name: ${{ matrix.tenant }}-plan
     env:
+      TENANT: ${{ matrix.tenant }}
       # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
       # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
       # The set a tenant does not use stays empty.
       JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
       JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
       JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
       JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
       JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
@@ -94,22 +99,21 @@ jobs:
           terraform_wrapper: false
       - uses: ./.github/actions/state-backend
         with:
-          tenant: ${{ matrix.tenant }}
+          tenant: ${{ env.TENANT }}
       - uses: ./.github/actions/secret-settings
         with:
           secrets: ${{ toJSON(secrets) }}
       - name: Init
-        run: terraform -chdir="tenants/${{ matrix.tenant }}" init -input=false
+        run: terraform -chdir="tenants/$TENANT" init -input=false
       - name: Plan
         run: |
           set -o pipefail
-          terraform -chdir="tenants/${{ matrix.tenant }}" plan -input=false -no-color -lock-timeout=120s \
+          terraform -chdir="tenants/$TENANT" plan -input=false -no-color -lock-timeout=120s \
             | tee "$RUNNER_TEMP/plan.txt"
       - name: Comment the plan on the pull request
         # One comment per tenant, updated on every push rather than added again.
         env:
           GH_TOKEN: ${{ github.token }}
-          TENANT: ${{ matrix.tenant }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |

@@ -2,7 +2,8 @@ name: Apply
 
 # A merge into main applies the tenants it changed. The pull request review is
 # the approval: nothing reaches main without a reviewed plan. One job per
-# tenant, in that tenant's GitHub Environment; one run per tenant at a time.
+# tenant, in that tenant's GitHub Environment, which only main may use; one run
+# per tenant at a time.
 
 on:
   push:
@@ -30,8 +31,9 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           TENANT: ${{ inputs.tenant }}
+        shell: bash
         run: |
-          [ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }
+          [[ "$TENANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }
           echo "tenants=$(jq -c -n --arg t "$TENANT" '[$t]')" >> "$GITHUB_OUTPUT"
       - id: detect
         if: github.event_name == 'push'
@@ -41,7 +43,7 @@ jobs:
 
   apply:
     needs: detect
-    if: needs.detect.outputs.tenants != '[]'
+    if: github.ref == 'refs/heads/main' && needs.detect.outputs.tenants != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -53,11 +55,13 @@ jobs:
       group: tenant-${{ matrix.tenant }}
       cancel-in-progress: false
     env:
+      TENANT: ${{ matrix.tenant }}
       # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
       # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
       # The set a tenant does not use stays empty.
       JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
       JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
       JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
       JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
       JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
@@ -84,11 +88,11 @@ jobs:
           terraform_wrapper: false
       - uses: ./.github/actions/state-backend
         with:
-          tenant: ${{ matrix.tenant }}
+          tenant: ${{ env.TENANT }}
       - uses: ./.github/actions/secret-settings
         with:
           secrets: ${{ toJSON(secrets) }}
       - name: Init
-        run: terraform -chdir="tenants/${{ matrix.tenant }}" init -input=false
+        run: terraform -chdir="tenants/$TENANT" init -input=false
       - name: Apply
-        run: terraform -chdir="tenants/${{ matrix.tenant }}" apply -input=false -no-color -auto-approve -lock-timeout=120s
+        run: terraform -chdir="tenants/$TENANT" apply -input=false -no-color -auto-approve -lock-timeout=120s

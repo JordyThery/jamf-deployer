@@ -81,7 +81,13 @@ final class ExportUITests: DeployerUITestCase {
         scrollIntoView(accept)
         accept.click()
         tap(app.sheets.buttons["Export and Move"])
-        XCTAssertTrue(anyContaining("Moved 1 tenant").waitForExistence(timeout: 600), "The move did not finish")
+        // Ends with the outcome, or with the sheet's error (shown in the failure).
+        let moved = anyContaining("Moved 1 tenant")
+        let failure = app.sheets.staticTexts.matching(NSPredicate(
+            format: "value CONTAINS[c] 'could not' OR value CONTAINS[c] 'has changes' OR value CONTAINS[c] 'already has'")).firstMatch
+        let deadline = Date.now.addingTimeInterval(600)
+        while !moved.exists, !failure.exists, Date.now < deadline { sleep(2) }
+        XCTAssertTrue(moved.exists, "The move did not finish: \(failure.exists ? (failure.value as? String ?? failure.label) : "timed out")")
         tap(app.sheets.buttons["Done"])
         openTenant(Self.tenant)
         XCTAssertTrue(anyContaining("moved to the Terraform repository").waitForExistence(timeout: 10),

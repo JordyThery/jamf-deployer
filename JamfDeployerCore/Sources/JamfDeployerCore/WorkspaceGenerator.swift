@@ -347,7 +347,7 @@ public nonisolated enum WorkspaceGenerator {
             }
             return "module \"\(call.name)\" {\n\(aligned(pairs))\n}"
         }
-        let secretVariables = Dictionary(uniqueKeysWithValues: secrets.map { ($0.key, $0.name) })
+        let secretVariables = Dictionary(secrets.map { ($0.key, $0.name) }, uniquingKeysWith: { _, last in last })
 
         // Blocks for Jamf Protect bring in the second provider; its
         // credentials come from JAMFPROTECT_* environment variables.
