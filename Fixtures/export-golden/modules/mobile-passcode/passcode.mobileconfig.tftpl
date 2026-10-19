@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key><string>com.apple.mobiledevice.passwordpolicy</string>
+      <key>PayloadIdentifier</key><string>com.jamfdeployer.mobile-passcode.policy</string>
+      <key>PayloadUUID</key><string>${upper(uuidv5("dns", "${name}.policy"))}</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadDisplayName</key><string>Passcode</string>
+      <key>forcePIN</key><true/>
+      <key>allowSimple</key><false/>
+      <key>minLength</key><integer>${minimum_length}</integer>
+      <key>maxInactivity</key><integer>${max_inactivity}</integer>
+    </dict>
+  </array>
+  <key>PayloadDisplayName</key><string>${name}</string>
+  <key>PayloadIdentifier</key><string>com.jamfdeployer.mobile-passcode</string>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadUUID</key><string>${upper(uuidv5("dns", name))}</string>
+  <key>PayloadVersion</key><integer>1</integer>
+</dict>
+</plist>
