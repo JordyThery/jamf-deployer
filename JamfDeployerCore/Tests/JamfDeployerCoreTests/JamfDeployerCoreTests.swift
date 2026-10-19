@@ -1233,6 +1233,14 @@ struct ErrorTranslationTests {
         #expect(translated.message.contains("Security Cloud"))
     }
 
+    @Test func translatesExistingUEMConnect() {
+        // Captured live on a tenant already linked to Jamf Pro.
+        let raw = "Error: A UEM Connect integration already exists for this tenant ... A connector already exists for the customer with an incompatible UEM vendor."
+        let translated = ErrorTranslation.translate(raw)
+        #expect(translated.message.contains("already connected"))
+        #expect(translated.hint?.contains("Use the existing connection") == true)
+    }
+
     @Test func fallsBackGracefully() {
         let translated = ErrorTranslation.translate("some entirely novel failure")
         #expect(!translated.message.isEmpty)

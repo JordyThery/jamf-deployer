@@ -8,6 +8,17 @@ variable "managed_by_tag" {
   type        = string
 }
 
+variable "uem_connect" {
+  description = "\"create\" connects this Jamf Pro tenant; \"existing\" uses the UEM Connect integration Security Cloud already has."
+  type        = string
+  default     = "create"
+
+  validation {
+    condition     = contains(["create", "existing"], var.uem_connect)
+    error_message = "uem_connect is \"create\" or \"existing\"."
+  }
+}
+
 variable "profile_name" {
   description = "Activation profile name (prefix added automatically)."
   type        = string

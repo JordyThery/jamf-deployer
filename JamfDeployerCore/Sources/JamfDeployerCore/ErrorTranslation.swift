@@ -80,6 +80,12 @@ public nonisolated enum ErrorTranslation {
             "Another building block, an adopted object or something created by hand already uses the name. If these objects were captured from this tenant, use Adopt instead of re-deploying the captured block — or set a different name prefix."
         ),
         (
+            // Captured live: jamfplatform 1.5.0 creating UEM Connect where one exists.
+            "A UEM Connect integration already exists",
+            "Jamf Security Cloud is already connected to Jamf Pro, and it holds one UEM Connect integration per tenant.",
+            "In the Security Cloud block's settings, set UEM Connect to \u{201C}Use the existing connection\u{201D}. The block then creates only the activation profile and leaves the connection as it is."
+        ),
+        (
             // Captured live: [TENANT_NOT_FOUND] No tenant found for environment '…'
             "TENANT_NOT_FOUND",
             "This environment does not include Jamf Security Cloud.",

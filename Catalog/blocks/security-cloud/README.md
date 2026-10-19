@@ -11,6 +11,11 @@ The complete Security Cloud ↔ Jamf Pro chain:
    devices get. With UEM Connect established, Security Cloud can push the
    enrollment configuration profile down to Jamf Pro.
 
+Security Cloud holds **one UEM Connect integration per tenant**. When
+Security Cloud is already linked to Jamf Pro, set **UEM Connect** to *Use the
+existing connection*: the block then reads that integration, creates only
+the activation profile, and never changes or removes the connection.
+
 **Entitlement required**: the Platform environment must include Jamf
 Security Cloud. Without it, deploying stops with a clear message and
 nothing else in the baseline is affected.

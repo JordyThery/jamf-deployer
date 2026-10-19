@@ -1,5 +1,8 @@
 output "uem_connect_id" {
-  value = jamfplatform_security_cloud_uem_connect.jamf_pro.id
+  value = one(concat(
+    jamfplatform_security_cloud_uem_connect.jamf_pro[*].id,
+    data.jamfplatform_security_cloud_uem_connect.existing[*].id,
+  ))
 }
 
 output "activation_profile_id" {

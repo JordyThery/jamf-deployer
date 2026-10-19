@@ -1,15 +1,14 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-10-19 (1.0). Consolidates the open items from every phase report.
+As of 2026-10-19 (1.0.1). Consolidates the open items from every phase report.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
-- **protect-baseline block** — no non-production Jamf Protect tenant exists to apply it to. The provider wiring itself *is* live-verified read-only (auth + all four data sources against production).
-- **security-cloud block** (UEM Connect + activation profile) — no Security Cloud-entitled environment available. The not-entitled failure path *is* live-verified and translated.
+- **security-cloud block, making a new UEM Connect** — the only entitled test environment is already linked to Jamf Pro, and Security Cloud holds one integration per tenant. Using the existing connection is live-verified (see below), and so is the error when a block tries to make a second one.
 - ADE `.p7m` / VPP `.vpptoken` uploads and Protect registration in Day 0 — wired and spec-verified, needing real Apple/Protect artifacts to fire for the first time.
 - Jamf Pro below 11.31 — no such tenant to test the degradation path.
 
 ## Known behavioral gaps
-- **"Keep this change"** adopts the drifted value into the block's setting when the block declares a drift binding for that field; fields without a binding fall back to acknowledgment (a later deploy reverts them, and the UI says so).
+- **"Keep This Change"** adopts the drifted value into the block's setting when the block declares a drift binding for that field; fields without a binding fall back to acknowledgment (a later deploy reverts them, and the UI says so).
 - **Create-500-but-created quirk** (Jamf, seen on policies, profiles, patch titles and App Installer deployments, as 500 and 504): under parallel load Jamf sometimes reports a server error after creating the object. Deploys run four operations at a time (measured: roughly half the failures of the engine default of ten, ~20% slower). After a deploy, each failed create is looked up by its planned name; objects Jamf did create — and that the state does not already track — become import blocks, so the next preview adopts them instead of hitting a duplicate. Ambiguous duplicate names are left for review rather than guessed. Live-verified: recovered objects adopted, the rest created, no duplicates left in Jamf.
 - **Baseline updates are per-block for Git-tag catalog sources** (tenants pin tags; blocks can opt into newer tags individually). Local-folder sources are always "latest", so updates there remain all-or-nothing.
 - **CIS benchmark ODVs** use baseline-recommended values; per-rule overrides aren't editable yet.
@@ -19,6 +18,9 @@ As of 2026-10-19 (1.0). Consolidates the open items from every phase report.
 - Drift noise classification is a curated attribute list — new computed attributes would initially show as actionable.
 - **Fleet rollouts** run one tenant at a time in up to three rings (production tenants start in ring 2) and need at least two tenants with something to deploy. Catalog-release mode lists Git catalog sources only. A deploy with failures ends the rollout; a tenant closed without deploying gets its previous selections and release pin back. Live-verified with a local two-tag catalog (Sandbox deployed v1.0.1, Demo skipped and stayed on v1.0.0).
 
+## Jamf Protect and Security Cloud
+- **Jamf Protect Baseline** and **Security Cloud** are live-verified on a test environment entitled for both (Scripts/run-export-ui-tests.sh with EXPORT_EXTRAS=1): deploy, no changes afterwards, export and move, the repository's checks finding no changes, destroy. Security Cloud ran with **UEM Connect: Use the existing connection**; the existing integration was unchanged afterwards.
+
 ## Jamf Pro API connections
 - A tenant connects through the Jamf Platform API or the Jamf Pro API (community jamfpro plugin 0.42.0 by Deployment Theory), chosen in the Connect wizard and fixed per tenant. Jamf Pro API tenants sign in with an API client or a user account.
 - Jamf Pro API tenants deploy building blocks through each block's `jamfpro/` module, and adopt, check for changes, keep or restore, add custom objects, roll out, export snapshots and documentation, run Day 0 and hand over. Software Updates, CIS Level 1, Security Cloud and the App Store blocks need the Platform API, and so do capturing blocks and cloning. Moving to the Platform API is Hand Over → connect again → Adopt.
@@ -26,7 +28,7 @@ As of 2026-10-19 (1.0). Consolidates the open items from every phase report.
 - Every demo catalog block plus the App Catalog was live-verified through both connections on both test instances (Scripts/run-catalog-ui-tests.sh): deploy, every object checked in Jamf, no changes afterwards, one change per object type detected (17 of 17), restore, removal checked in Jamf, tenant-wide settings restored. The same runs adopt six existing objects of different types (category, script, smart and static group, extension attribute, and a policy that uses them), confirm no changes, detect edits to the adopted policy and script, and restore them.
 - Two jamfpro plugin quirks are handled in the modules: FileVault's policy ignores a remediation key type the plugin fills in, and the disk encryption configuration ignores the empty recovery-key section Jamf Pro reports. An unknown ADE instance name makes the plugin retry for several minutes before failing.
 - Live-verified on both test instances with a user account: connect and preflight, custom object deploy, drift restore and keep, adoption, snapshot, a rollout, Day 0 and hand-over. API-client (OAuth) sign-in is live-verified too: connect, deploy, check for changes and discovery.
-- Ejecting a Jamf Pro API tenant (`JAMFPRO_*` variables, `deploymenttheory/jamfpro`) is documented but not live-verified.
+- Ejecting a Jamf Pro API tenant by hand (`JAMFPRO_*` variables, `deploymenttheory/jamfpro`) is documented but not live-verified; Export as Terraform for such tenants is (Scripts/run-export-ui-tests.sh with EXPORT_CONNECTION=jamfpro).
 - Failed creates are not looked up and adopted after a deploy for Jamf Pro API tenants (the recovery lookups cover Platform types).
 
 ## Team mode caveats
@@ -42,7 +44,7 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 
 ## Packaging and release
 - Releases are signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
-- No app-target unit tests; JamfDeployerCore carries 99 tests, DeployerKit 4. The Jamf DeployerUITests target runs live against two test tenants: a fleet rollout (Scripts/run-rollout-ui-tests.sh), a walk through every main function — connect, catalog sources, deploys, drift, removals, adoption, App Store picker, hand-over, Day 0, export, clone, snapshot, history and settings (Scripts/run-function-ui-tests.sh) — the Jamf Pro API connection (Scripts/run-jamfpro-ui-tests.sh), every catalog block through either connection (Scripts/run-catalog-ui-tests.sh), custom scripts and extension attributes through both connections (Scripts/run-custom-object-ui-tests.sh), a Mac App Store app deploy (Scripts/run-app-store-ui-tests.sh) Team Mode against a private test repository (Scripts/run-team-ui-tests.sh), and Export as Terraform end to end — export, move (state on the state branch before main, the first commit skipping the workflows), both GitHub Environments from the exported setup script, the repository's own change check and a pull request plan in the plan Environment finding no changes, destroy (Scripts/run-export-ui-tests.sh; through the Jamf Platform API, the Jamf Pro API with EXPORT_CONNECTION=jamfpro, and with Jamf Protect and a secret setting with EXPORT_EXTRAS=1). All scripts clean up after themselves.
+- No app-target unit tests; JamfDeployerCore carries 100 tests, DeployerKit 4. The Jamf DeployerUITests target runs live against two test tenants: a fleet rollout (Scripts/run-rollout-ui-tests.sh), a walk through every main function — connect, catalog sources, deploys, drift, removals, adoption, App Store picker, hand-over, Day 0, export, clone, snapshot, history and settings (Scripts/run-function-ui-tests.sh) — the Jamf Pro API connection (Scripts/run-jamfpro-ui-tests.sh), every catalog block through either connection (Scripts/run-catalog-ui-tests.sh), custom scripts and extension attributes through both connections (Scripts/run-custom-object-ui-tests.sh), a Mac App Store app deploy (Scripts/run-app-store-ui-tests.sh), Team Mode against a private test repository (Scripts/run-team-ui-tests.sh), and Export as Terraform end to end — export, move (state on the state branch before main, the first commit skipping the workflows), both GitHub Environments from the exported setup script, the repository's own change check and a pull request plan in the plan Environment finding no changes, destroy (Scripts/run-export-ui-tests.sh; through the Jamf Platform API, the Jamf Pro API with EXPORT_CONNECTION=jamfpro, and with Jamf Protect, Security Cloud and a secret setting with EXPORT_EXTRAS=1). All scripts clean up after themselves.
 - App Sandbox is off by design (child-process engine); Developer ID + notarisation is the distribution model.
 
 ## Adopting an existing tenant

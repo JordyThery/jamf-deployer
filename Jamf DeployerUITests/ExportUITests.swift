@@ -41,35 +41,32 @@ final class ExportUITests: DeployerUITestCase {
         openTenant(Self.tenant)
         // Matched by the demo blocks' own descriptions: other catalogs on
         // this Mac may have blocks with the same names.
-        // EXPORT_EXTRAS=1 adds the Jamf Protect baseline and the test
-        // catalog's block with a secret setting (EXPORT_SECRET).
+        // EXPORT_EXTRAS=1 adds the Jamf Protect baseline, Security Cloud
+        // (using the tenant's existing UEM Connect) and the test catalog's
+        // block with a secret setting (EXPORT_SECRET).
         let extras = ProcessInfo.processInfo.environment["EXPORT_EXTRAS"] == "1"
         var blocks = ["Categories, Applications, Enrollment", "Extension Attributes, A Baseline Marker"]
-        if extras { blocks += ["Jamf Protect Baseline, Endpoint security", "UIT Secret Marker, "] }
+        if extras {
+            blocks += ["Jamf Protect Baseline, Endpoint security", "Security Cloud, Connects Jamf Security Cloud", "UIT Secret Marker, "]
+        }
         for block in blocks {
             let checkbox = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", block)).firstMatch
             XCTAssertTrue(checkbox.waitForExistence(timeout: 90), "\(block) is not in the library")
             if (checkbox.value as? Int) != 1 { checkbox.click() }
         }
         if extras {
-            // Settings open one block at a time; open each until the token shows.
+            let uemConnect = app.popUpButtons.matching(NSPredicate(format: "value == 'Connect this Jamf Pro tenant'")).firstMatch
+            openSettings(until: uemConnect)
+            uemConnect.click()
+            tap(app.menuItems["Use the existing connection"])
             let token = app.secureTextFields["Test token"]
-            // Each selected block's row has one Show/Hide Settings button.
-            let toggles = app.buttons.matching(NSPredicate(format: "label IN {'Show Settings', 'Hide Settings'}"))
-            for index in 0..<toggles.count where !token.exists {
-                let toggle = toggles.element(boundBy: index)
-                if toggle.label == "Show Settings" {
-                    toggle.click()
-                    sleep(1)
-                }
-            }
-            XCTAssertTrue(token.waitForExistence(timeout: 5), "The secret setting is not shown")
+            openSettings(until: token)
             paste(try env("EXPORT_SECRET"), into: token)
             app.typeKey(.tab, modifierFlags: [])
         }
         stageCustomCategory(on: Self.tenant, objectName: "export_custom", name: "UIT EX - Custom", priority: "5")
         previewAndDeploy()
-        XCTAssertTrue(anyContaining(extras ? "12 succeeded" : "7 succeeded").waitForExistence(timeout: 15),
+        XCTAssertTrue(anyContaining(extras ? "13 succeeded" : "7 succeeded").waitForExistence(timeout: 15),
                       "The baseline did not deploy")
     }
 
@@ -129,6 +126,20 @@ final class ExportUITests: DeployerUITestCase {
     }
 
     // MARK: Helpers
+
+    /// Settings open one block at a time: opens each selected block's
+    /// settings until `element` shows.
+    private func openSettings(until element: XCUIElement) {
+        let toggles = app.buttons.matching(NSPredicate(format: "label IN {'Show Settings', 'Hide Settings'}"))
+        for index in 0..<toggles.count where !element.exists {
+            let toggle = toggles.element(boundBy: index)
+            if toggle.label == "Show Settings" {
+                toggle.click()
+                sleep(1)
+            }
+        }
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "\(element) is not in any block's settings")
+    }
 
     /// The sheet's form scrolls under its footer; controls further down are
     /// scrolled up before use.

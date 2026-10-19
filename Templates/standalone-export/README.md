@@ -14,7 +14,7 @@ tenants/<tenant>/         one directory per tenant
   terraform.tf            versions and the state backend
   providers.tf            provider settings (credentials come from the environment)
 .github/workflows/        plan, apply, check for changes, restore, destroy
-.github/actions/          the state backend and tenant detection the workflows share
+.github/actions/          the state backend, tenant detection and secret settings the workflows share
 ```
 
 ## How changes flow
@@ -25,7 +25,7 @@ tenants/<tenant>/         one directory per tenant
 2. **Review and merge.** The review is the approval: the Apply workflow applies
    the merged change to each tenant it touched. A change to a shared module
    plans and applies every tenant.
-3. **Changes made in Jamf are caught weekly.** The Check for Changes workflow
+3. **Changes made in Jamf are caught weekly.** The Check for changes workflow
    plans every tenant on Monday morning (or on demand). When something was
    changed directly in Jamf, it opens an issue named `Changed in Jamf: <tenant>`
    with the plan. Keep the change by putting it in code with a pull request, or
@@ -101,16 +101,18 @@ Tenants connected through the **Jamf Pro API** use these instead. The Jamf Pro
 API plugin needs one operation at a time, which `PARALLELISM` sets:
 
 ```bash
-gh variable set JAMFPRO_INSTANCE_FQDN --env <tenant> --body "https://yourorg.jamfcloud.com"
-gh variable set JAMFPRO_AUTH_METHOD   --env <tenant> --body "oauth2"   # or "basic"
-gh variable set PARALLELISM           --env <tenant> --body "1"
-gh secret   set JAMFPRO_CLIENT_ID     --env <tenant>   # basic: JAMFPRO_BASIC_USERNAME
-gh secret   set JAMFPRO_CLIENT_SECRET --env <tenant>   # basic: JAMFPRO_BASIC_PASSWORD
+# For each of the two Environments:
+gh variable set JAMFPRO_INSTANCE_FQDN --env <environment> --body "https://yourorg.jamfcloud.com"
+gh variable set JAMFPRO_AUTH_METHOD   --env <environment> --body "oauth2"   # or "basic"
+gh variable set PARALLELISM           --env <environment> --body "1"
+gh secret   set JAMFPRO_CLIENT_ID     --env <environment>   # basic: JAMFPRO_BASIC_USERNAME
+gh secret   set JAMFPRO_CLIENT_SECRET --env <environment>   # basic: JAMFPRO_BASIC_PASSWORD
 ```
 
 The workflows read both sets; the one a tenant does not use stays empty.
 Tenants with Jamf Protect blocks also set `JAMFPROTECT_URL` and the
-`JAMFPROTECT_CLIENT_ID` and `JAMFPROTECT_CLIENT_SECRET` secrets. Secret block
+`JAMFPROTECT_CLIENT_ID` and `JAMFPROTECT_CLIENT_SECRET` secrets, in both
+Environments. Secret block
 settings are `TF_VAR_<name>` secrets; every workflow hands them to Terraform
 (`.github/actions/secret-settings`).
 
