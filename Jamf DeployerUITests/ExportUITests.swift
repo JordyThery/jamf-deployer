@@ -55,10 +55,13 @@ final class ExportUITests: DeployerUITestCase {
             if (checkbox.value as? Int) != 1 { checkbox.click() }
         }
         if extras {
-            let uemConnect = app.popUpButtons.matching(NSPredicate(format: "value == 'Connect this Jamf Pro tenant'")).firstMatch
-            openSettings(until: uemConnect)
-            uemConnect.click()
-            tap(app.menuItems["Use the existing connection"])
+            // EXPORT_UEM_CONNECT=create lets the block make the connection.
+            if ProcessInfo.processInfo.environment["EXPORT_UEM_CONNECT"] != "create" {
+                let uemConnect = app.popUpButtons.matching(NSPredicate(format: "value == 'Connect this Jamf Pro tenant'")).firstMatch
+                openSettings(until: uemConnect)
+                uemConnect.click()
+                tap(app.menuItems["Use the existing connection"])
+            }
             let token = app.secureTextFields["Test token"]
             openSettings(until: token)
             paste(try env("EXPORT_SECRET"), into: token)
@@ -66,7 +69,8 @@ final class ExportUITests: DeployerUITestCase {
         }
         stageCustomCategory(on: Self.tenant, objectName: "export_custom", name: "UIT EX - Custom", priority: "5")
         previewAndDeploy()
-        XCTAssertTrue(anyContaining(extras ? "13 succeeded" : "7 succeeded").waitForExistence(timeout: 15),
+        let created = ProcessInfo.processInfo.environment["EXPORT_UEM_CONNECT"] == "create"
+        XCTAssertTrue(anyContaining(extras ? (created ? "14 succeeded" : "13 succeeded") : "7 succeeded").waitForExistence(timeout: 15),
                       "The baseline did not deploy")
     }
 

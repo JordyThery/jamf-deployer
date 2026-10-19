@@ -125,6 +125,9 @@ else
 fi
 EXTRAS="${EXPORT_EXTRAS:-0}"
 export TEST_RUNNER_EXPORT_EXTRAS="$EXTRAS"
+# EXPORT_UEM_CONNECT=create: Security Cloud makes the UEM Connect itself (the
+# tenant must have none); otherwise it uses the existing one.
+export TEST_RUNNER_EXPORT_UEM_CONNECT="${EXPORT_UEM_CONNECT:-existing}"
 if [[ "$EXTRAS" == 1 ]]; then
     export TEST_RUNNER_SBX_PROTECT_URL="$(kc $A protect-url)"
     export TEST_RUNNER_SBX_PROTECT_CLIENT_ID="$(kc $A protect-client-id)"
@@ -242,7 +245,10 @@ FOREIGN=$(gh api "repos/$REPO/contents/tenants/$TENANT/terraform.tfstate?ref=ter
     | /usr/bin/python3 -c "
 import json, sys
 s = json.load(sys.stdin)
-names = [i['attributes'].get('name', '') for r in s['resources'] if r['mode'] == 'managed' for i in r['instances']]
+# A UEM Connect has no name; it is the test's own when the test made it.
+own_uem = '$TEST_RUNNER_EXPORT_UEM_CONNECT' == 'create'
+names = [i['attributes'].get('name', '') for r in s['resources'] if r['mode'] == 'managed'
+         if not (own_uem and r['type'] == 'jamfplatform_security_cloud_uem_connect') for i in r['instances']]
 print(sum(not n.startswith('UIT EX - ') for n in names) if names else 1)")
 if [[ "$FOREIGN" == "0" ]]; then
     gh workflow run destroy.yml --repo "$REPO" --ref main -f tenant=$TENANT -f confirm=$TENANT > /dev/null; wait_run destroy.yml

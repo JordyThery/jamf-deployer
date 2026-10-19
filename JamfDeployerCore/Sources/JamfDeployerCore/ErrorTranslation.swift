@@ -86,6 +86,12 @@ public nonisolated enum ErrorTranslation {
             "In the Security Cloud block's settings, set UEM Connect to \u{201C}Use the existing connection\u{201D}. The block then creates only the activation profile and leaves the connection as it is."
         ),
         (
+            // Captured live: the Security Cloud block reading a connection that is not there.
+            "No UEM Connect integration on this tenant",
+            "Jamf Security Cloud is not connected to Jamf Pro yet.",
+            "In the Security Cloud block's settings, set UEM Connect to \u{201C}Connect this Jamf Pro tenant\u{201D}, so the block makes the connection."
+        ),
+        (
             // Captured live: [TENANT_NOT_FOUND] No tenant found for environment '…'
             "TENANT_NOT_FOUND",
             "This environment does not include Jamf Security Cloud.",
