@@ -3,7 +3,6 @@
 As of 2026-10-19 (1.0.1). Consolidates the open items from every phase report.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
-- **security-cloud block, making a new UEM Connect** — the only entitled test environment is already linked to Jamf Pro, and Security Cloud holds one integration per tenant. Using the existing connection is live-verified (see below), and so is the error when a block tries to make a second one.
 - ADE `.p7m` / VPP `.vpptoken` uploads and Protect registration in Day 0 — wired and spec-verified, needing real Apple/Protect artifacts to fire for the first time.
 - Jamf Pro below 11.31 — no such tenant to test the degradation path.
 
@@ -19,7 +18,7 @@ As of 2026-10-19 (1.0.1). Consolidates the open items from every phase report.
 - **Fleet rollouts** run one tenant at a time in up to three rings (production tenants start in ring 2) and need at least two tenants with something to deploy. Catalog-release mode lists Git catalog sources only. A deploy with failures ends the rollout; a tenant closed without deploying gets its previous selections and release pin back. Live-verified with a local two-tag catalog (Sandbox deployed v1.0.1, Demo skipped and stayed on v1.0.0).
 
 ## Jamf Protect and Security Cloud
-- **Jamf Protect Baseline** and **Security Cloud** are live-verified on a test environment entitled for both (Scripts/run-export-ui-tests.sh with EXPORT_EXTRAS=1): deploy, no changes afterwards, export and move, the repository's checks finding no changes, destroy. Security Cloud ran with **UEM Connect: Use the existing connection**; the existing integration was unchanged afterwards.
+- **Jamf Protect Baseline** and **Security Cloud** are live-verified on a test environment entitled for both (Scripts/run-export-ui-tests.sh with EXPORT_EXTRAS=1): deploy, no changes afterwards, export and move, the repository's checks finding no changes, destroy. Security Cloud ran both ways: with **UEM Connect: Use the existing connection** (the integration unchanged afterwards), and, on the same environment with its integration removed first, making the connection itself (EXPORT_UEM_CONNECT=create). Both errors are live-captured and translated: a second integration where one exists, and *Use the existing connection* where there is none.
 
 ## Jamf Pro API connections
 - A tenant connects through the Jamf Platform API or the Jamf Pro API (community jamfpro plugin 0.42.0 by Deployment Theory), chosen in the Connect wizard and fixed per tenant. Jamf Pro API tenants sign in with an API client or a user account.

@@ -1241,6 +1241,12 @@ struct ErrorTranslationTests {
         #expect(translated.hint?.contains("Use the existing connection") == true)
     }
 
+    @Test func translatesMissingUEMConnect() {
+        let translated = ErrorTranslation.translate("Error: No UEM Connect integration on this tenant")
+        #expect(translated.message.contains("not connected"))
+        #expect(translated.hint?.contains("Connect this Jamf Pro tenant") == true)
+    }
+
     @Test func fallsBackGracefully() {
         let translated = ErrorTranslation.translate("some entirely novel failure")
         #expect(!translated.message.isEmpty)
