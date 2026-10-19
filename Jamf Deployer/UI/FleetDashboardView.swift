@@ -12,6 +12,7 @@ struct FleetDashboardView: View {
     @State private var searchText = ""
     @State private var showsOnlyNeedsAttention = false
     @State private var isRollingOut = false
+    @State private var isExporting = false
     @State private var isSyncing = false
 
     private var rows: [Tenant] {
@@ -146,9 +147,19 @@ struct FleetDashboardView: View {
             }
             .disabled(deployService.isBusy || tenantStore.tenants.filter(deployService.canRollOut).count < 2)
             .help("Deploy to several tenants one at a time, test tenants first, previewing each one")
+            Button {
+                isExporting = true
+            } label: {
+                Label("Export as Terraform…", systemImage: "shippingbox")
+            }
+            .disabled(deployService.isBusy || !tenantStore.tenants.contains { !$0.isHandedOver })
+            .help("Write tenants as a plain Terraform repository with GitHub workflows, to review or to move them there")
         }
         .sheet(isPresented: $isRollingOut) {
             RolloutView()
+        }
+        .sheet(isPresented: $isExporting) {
+            RepositoryExportSheet()
         }
     }
 

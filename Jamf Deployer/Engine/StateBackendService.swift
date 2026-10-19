@@ -125,6 +125,28 @@ final class StateBackendService {
         try await send("UNLOCK", address, body: unlock)
     }
 
+    /// Writes `state` to `path` on branch `ref` of `remote` (Export as
+    /// Terraform): lock, write, unlock, like the engine does.
+    func pushState(_ state: Data, remote: String, ref: String, path: String) async throws {
+        try await ensureRunning(remote: remote)
+        let address = Self.address(port: port, remote: remote, ref: ref, path: path)
+        let lockID = UUID().uuidString.lowercased()
+        let info: [String: String] = [
+            "ID": lockID, "Operation": "OperationTypeApply",
+            "Who": "\(NSUserName())@\(ProcessInfo.processInfo.hostName)",
+            "Version": "", "Created": Date.now.formatted(.iso8601), "Path": "", "Info": "Export from Jamf Deployer",
+        ]
+        let unlock = try JSONSerialization.data(withJSONObject: ["ID": lockID])
+        try await send("LOCK", address, body: try JSONSerialization.data(withJSONObject: info))
+        do {
+            try await send("POST", address + "&ID=\(lockID)", body: state)
+        } catch {
+            try? await send("UNLOCK", address, body: unlock)
+            throw error
+        }
+        try await send("UNLOCK", address, body: unlock)
+    }
+
     func stop() {
         process?.terminate()
         process = nil
@@ -134,6 +156,11 @@ final class StateBackendService {
     // MARK: Plumbing
 
     private func stateAddress(tenantID: UUID, remote: String) -> String {
+        Self.address(port: port, remote: remote, ref: Self.stateBranch,
+                     path: "tenants/\(tenantID.uuidString)/terraform.tfstate")
+    }
+
+    private static func address(port: Int, remote: String, ref: String, path: String) -> String {
         var components = URLComponents()
         components.scheme = "http"
         components.host = "127.0.0.1"
@@ -142,8 +169,8 @@ final class StateBackendService {
         components.queryItems = [
             URLQueryItem(name: "type", value: "git"),
             URLQueryItem(name: "repository", value: remote),
-            URLQueryItem(name: "ref", value: Self.stateBranch),
-            URLQueryItem(name: "state", value: "tenants/\(tenantID.uuidString)/terraform.tfstate"),
+            URLQueryItem(name: "ref", value: ref),
+            URLQueryItem(name: "state", value: path),
         ]
         return components.url?.absoluteString ?? ""
     }

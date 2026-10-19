@@ -58,6 +58,9 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
     var tenantID: String?
     var isProduction: Bool
     var mode: Mode
+    /// The Terraform repository a handed-over tenant moved to (Export as
+    /// Terraform), if that is how it left the app.
+    var exportedTo: String?
 
     /// Optional Jamf Protect connection (console URL; client ID only —
     /// its secret is in the Keychain).

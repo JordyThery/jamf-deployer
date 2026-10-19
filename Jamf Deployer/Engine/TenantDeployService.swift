@@ -199,6 +199,171 @@ final class TenantDeployService {
         }
     }
 
+    // MARK: Export as Terraform
+
+    struct RepositoryExportResult {
+        var folder: URL
+        var tenantFolders: [String]
+        /// Published, state moved, tenants archived here.
+        var moved: Bool
+    }
+
+    /// Writes `tenants` as a plain Terraform repository in `folder`. With
+    /// `remote` (an empty repository), also publishes it, moves each
+    /// tenant's state to the repository's state branch, and stops managing
+    /// the tenants in this app: the repository manages them from then on.
+    func exportRepository(_ tenants: [Tenant], to folder: URL, remote: String?) async throws -> RepositoryExportResult {
+        try guardNoEngineWork()
+        for tenant in tenants where tenant.isHandedOver || tenant.handOverPending || !tenant.pendingRemovals.isEmpty {
+            throw StandaloneExport.ExportError.pendingRemovals(tenant: tenant.name)
+        }
+        for tenant in tenants { busyTenants.insert(tenant.id) }
+        defer { for tenant in tenants { busyTenants.remove(tenant.id) } }
+
+        var exports: [StandaloneExport.Tenant] = []
+        var folders: [UUID: String] = [:]
+        for tenant in tenants {
+            let catalog = try loadCatalog(for: tenant)
+            // Regenerating the workspace also lays out its adopted files.
+            try generateWorkspace(for: tenant, catalog: catalog)
+            let selections = try WorkspaceGenerator.resolveModules(
+                generatedSelections(for: tenant, catalog: catalog), catalog: catalog, connection: tenant.connection)
+            let slug = StandaloneExport.slug(for: tenant.name, taken: Set(folders.values))
+            folders[tenant.id] = slug
+            let generated = generatedURL(for: tenant)
+            let adopted = ((try? FileManager.default.contentsOfDirectory(at: generated, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.lastPathComponent.hasPrefix("adopted-") || $0.lastPathComponent == "support_files" }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            exports.append(StandaloneExport.Tenant(
+                slug: slug,
+                input: WorkspaceInput(
+                    namePrefix: tenant.namePrefix,
+                    selections: selections,
+                    providerVersion: EngineInfo.jamfPlatformProviderVersion,
+                    protectProviderVersion: EngineInfo.jamfProtectProviderVersion,
+                    connection: tenant.connection,
+                    jamfProProviderVersion: EngineInfo.jamfProProviderVersion,
+                    stateBackend: .http),
+                blockFolders: Dictionary(uniqueKeysWithValues: selections.map {
+                    ($0.block.id, $0.folderURL ?? catalog.blockFolderURL(id: $0.block.id))
+                }),
+                adoptedFiles: adopted))
+        }
+        try StandaloneExport.write(exports, templatesURL: EngineLocator.exportTemplatesURL, to: folder)
+        try writeEnvironmentScript(for: tenants, exports: exports, folders: folders, in: folder)
+        // Adopted files come from the exporter and the object editor in
+        // their own layout; the repository's pipeline checks the canonical
+        // one, so everything is formatted the way terraform fmt formats it.
+        try await Self.formatConfiguration(in: folder)
+
+        let result = RepositoryExportResult(
+            folder: folder, tenantFolders: tenants.compactMap { folders[$0.id] }, moved: remote != nil)
+        guard let remote else { return result }
+
+        try await RepositoryPublisher.publish(folder, to: remote)
+        do {
+            for tenant in tenants where tenant.lastDeploy != nil {
+                let runner = try await makeRunner(for: tenant)
+                try await runEngine(runner, ["init", "-input=false"])
+                let state = try await runner.checkedOutput(arguments: ["state", "pull"])
+                guard !state.isEmpty, let slug = folders[tenant.id] else { continue }
+                try await stateBackend.pushState(
+                    StandaloneExport.stateForTerraform(state),
+                    remote: remote, ref: RepositoryPublisher.stateBranch,
+                    path: "tenants/\(slug)/terraform.tfstate")
+            }
+        } catch {
+            throw DeployError.exportStateNotMoved(Self.describe(error))
+        }
+
+        // The repository manages these tenants now; here they are archived.
+        for tenant in tenants {
+            var updated = tenantStore.tenant(id: tenant.id) ?? tenant
+            archiveAdoptedConfig(for: tenant)
+            updated.mode = .handedOver
+            updated.exportedTo = remote
+            tenantStore.update(updated)
+        }
+        retireLocalState(of: tenants)
+        await recordInStore("Move \(tenants.map(\.name).joined(separator: ", ")) to \(remote) — \(engineerName)")
+        return result
+    }
+
+    /// A one-time setup script for the exported repository: one GitHub
+    /// Environment per tenant with its identifiers, and a hidden prompt for
+    /// every secret. It holds no secrets, and the repository ignores it.
+    private func writeEnvironmentScript(
+        for tenants: [Tenant], exports: [StandaloneExport.Tenant], folders: [UUID: String], in folder: URL
+    ) throws {
+        func quoted(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        var lines = [
+            "#!/bin/sh",
+            "# Creates one GitHub Environment per tenant in the exported repository,",
+            "# sets its identifiers, and asks for each secret (typing is hidden; gh",
+            "# reads the value from standard input). Run once, after publishing:",
+            "#   ./create-environments.sh OWNER/REPOSITORY",
+            "set -eu",
+            "REPO=\"${1:?usage: $0 OWNER/REPOSITORY}\"",
+            "environment() { gh api -X PUT \"repos/$REPO/environments/$1\" --silent; }",
+            "variable() { gh variable set \"$2\" --repo \"$REPO\" --env \"$1\" --body \"$3\"; }",
+            "secret() {",
+            "  printf '%s for %s: ' \"$2\" \"$1\"; stty -echo 2> /dev/null || true",
+            "  read -r value; stty echo 2> /dev/null || true; printf '\\n'",
+            "  printf '%s' \"$value\" | gh secret set \"$2\" --repo \"$REPO\" --env \"$1\"",
+            "}",
+        ]
+        for (tenant, export) in zip(tenants, exports) {
+            guard let slug = folders[tenant.id] else { continue }
+            let env = quoted(slug)
+            lines.append("")
+            lines.append("# \(tenant.name)")
+            lines.append("environment \(env)")
+            if tenant.isJamfPro {
+                lines.append("variable \(env) JAMFPRO_INSTANCE_FQDN \(quoted(tenant.jamfProURL ?? ""))")
+                let basic = tenant.jamfProAuth == .userAccount
+                lines.append("variable \(env) JAMFPRO_AUTH_METHOD \(basic ? "basic" : "oauth2")")
+                lines.append("variable \(env) PARALLELISM 1")
+                lines.append("secret \(env) \(basic ? "JAMFPRO_BASIC_USERNAME" : "JAMFPRO_CLIENT_ID")")
+                lines.append("secret \(env) \(basic ? "JAMFPRO_BASIC_PASSWORD" : "JAMFPRO_CLIENT_SECRET")")
+            } else {
+                lines.append("variable \(env) JAMFPLATFORM_BASE_URL \(quoted(tenant.region.gatewayURL.absoluteString))")
+                if let environmentID = tenant.environmentID {
+                    lines.append("variable \(env) JAMFPLATFORM_ENVIRONMENT_ID \(quoted(environmentID))")
+                }
+                lines.append("secret \(env) JAMFPLATFORM_CLIENT_ID")
+                lines.append("secret \(env) JAMFPLATFORM_CLIENT_SECRET")
+            }
+            if let protectURL = tenant.protectURL {
+                lines.append("variable \(env) JAMFPROTECT_URL \(quoted(protectURL))")
+                lines.append("secret \(env) JAMFPROTECT_CLIENT_ID")
+                lines.append("secret \(env) JAMFPROTECT_CLIENT_SECRET")
+            }
+            for secret in (try? WorkspaceGenerator.moduleCalls(export.input).secrets) ?? [] {
+                lines.append("secret \(env) TF_VAR_\(secret.name.uppercased())")
+            }
+        }
+        let url = folder.appending(path: "create-environments.sh")
+        try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+
+    private static func formatConfiguration(in folder: URL) async throws {
+        try await Task.detached {
+            let process = Process()
+            process.executableURL = EngineLocator.tofuURL
+            process.arguments = ["fmt", "-recursive", "-list=false", folder.path]
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+        }.value
+    }
+
+    private static func describe(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
     /// Whether the team passphrase on this Mac opens the team space's
     /// deployment state, read from the first deployed tenant. True when no
     /// tenant has state yet; throws when the check itself could not run.
@@ -1349,6 +1514,7 @@ final class TenantDeployService {
         case tenantBusy
         case missingStatePassphrase
         case engineWorkInProgress
+        case exportStateNotMoved(String)
 
         var errorDescription: String? {
             switch self {
@@ -1374,6 +1540,8 @@ final class TenantDeployService {
                 "A preview is open for this tenant. Finish or close it before checking for changes."
             case .missingStatePassphrase:
                 "This tenant's deployment state is encrypted with a passphrase this Mac does not have. Enter the passphrase from the tenant's recovery sheet with Update Client Secret… on the tenant page."
+            case .exportStateNotMoved(let detail):
+                "The repository was published, but the tenants' state could not be moved to it: \(detail) The tenants are still managed in this app. Empty the repository (delete it and create it again) before exporting again."
             case .engineWorkInProgress:
                 "A preview, check or deploy is still running. Wait for it to finish, then try again."
             case .tenantBusy:

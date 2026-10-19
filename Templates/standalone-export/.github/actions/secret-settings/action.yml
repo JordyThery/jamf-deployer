@@ -1,0 +1,27 @@
+name: Secret settings
+description: >-
+  Hands every TF_VAR_* secret of the tenant's GitHub Environment to Terraform.
+  GitHub stores secret names in upper case; Terraform variable names here are
+  lower case, so the part after TF_VAR_ is lowered.
+
+inputs:
+  secrets:
+    description: The job's secrets, as toJSON(secrets)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SECRETS: ${{ inputs.secrets }}
+      run: |
+        python3 - <<'PY'
+        import json, os, uuid
+        secrets = json.loads(os.environ["SECRETS"])
+        with open(os.environ["GITHUB_ENV"], "a") as env:
+            for key, value in secrets.items():
+                if key.startswith("TF_VAR_"):
+                    delimiter = f"EOF_{uuid.uuid4().hex}"
+                    env.write(f"TF_VAR_{key[7:].lower()}<<{delimiter}\n{value}\n{delimiter}\n")
+        PY

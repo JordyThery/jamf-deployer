@@ -32,10 +32,12 @@ cp -f "${SRC}/Vendor/terraform-backend-git/LICENSE" "${RESOURCES}/Vendor/terrafo
 # Provider mirror: the app is arm64-only, so only darwin_arm64 archives are
 # bundled. SHA256SUMS files describe the original archives and are dropped —
 # the mirror's hashes are re-derived by the engine at init.
-rm -rf "${RESOURCES}/Vendor/providers" "${RESOURCES}/Catalog"
+rm -rf "${RESOURCES}/Vendor/providers" "${RESOURCES}/Catalog" "${RESOURCES}/Templates"
 (cd "${SRC}/Vendor" && find providers -name "*_darwin_arm64.zip" -print0 | \
   xargs -0 -I{} sh -c 'mkdir -p "$0/$(dirname "$1")" && cp -f "$1" "$0/$1"' "${RESOURCES}/Vendor" {})
 cp -R "${SRC}/Catalog" "${RESOURCES}/Catalog"
+# The pipeline files a standalone Terraform export ships with.
+cp -R "${SRC}/Templates" "${RESOURCES}/Templates"
 
 # Debug builds sign ad hoc and skip the notarization-grade signing below.
 if [ "${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}" = "" ] || [ "${EXPANDED_CODE_SIGN_IDENTITY_NAME}" = "-" ]; then

@@ -1,0 +1,307 @@
+import Foundation
+
+/// Turns tenant workspaces into a plain Terraform repository:
+///
+///     modules/<block>/          each block whole, as the catalog ships it
+///     tenants/<tenant>/         main.tf, variables.tf, tenant.auto.tfvars,
+///                               terraform.tf, providers.tf, adopted-*.tf
+///
+/// Module names match the app's workspace, so a tenant's state carries over
+/// unchanged. Setting values move to tenant.auto.tfvars; wiring between
+/// blocks stays in main.tf; secret settings become sensitive variables the
+/// pipeline supplies as TF_VAR_*.
+public nonisolated enum StandaloneExport {
+    /// One tenant to export.
+    public struct Tenant: Sendable {
+        /// Directory name under tenants/.
+        public var slug: String
+        public var input: WorkspaceInput
+        /// Where each selection's block folder comes from, keyed by block ID.
+        public var blockFolders: [String: URL]
+        /// Adopted configuration files, copied into the tenant directory.
+        public var adoptedFiles: [URL]
+
+        public init(slug: String, input: WorkspaceInput, blockFolders: [String: URL], adoptedFiles: [URL] = []) {
+            self.slug = slug
+            self.input = input
+            self.blockFolders = blockFolders
+            self.adoptedFiles = adoptedFiles
+        }
+    }
+
+    public enum ExportError: LocalizedError {
+        case pendingRemovals(tenant: String)
+        case destinationNotEmpty
+
+        public var errorDescription: String? {
+            switch self {
+            case .pendingRemovals(let tenant):
+                "\(tenant) has blocks waiting to be removed or a hand-over in progress. Deploy or cancel those changes first, so the export matches what is in Jamf."
+            case .destinationNotEmpty:
+                "Choose an empty folder for the exported repository."
+            }
+        }
+    }
+
+    // MARK: Names
+
+    /// A directory name for a tenant: lowercase letters, digits and dashes,
+    /// unique among `taken`.
+    public static func slug(for name: String, taken: Set<String>) -> String {
+        var base = ""
+        for scalar in name.lowercased().unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) && scalar.isASCII {
+                base.unicodeScalars.append(scalar)
+            } else if !base.hasSuffix("-") {
+                base += "-"
+            }
+        }
+        base = base.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if base.isEmpty || base == "_template" { base = "tenant" }
+        var candidate = base
+        var number = 2
+        while taken.contains(candidate) {
+            candidate = "\(base)-\(number)"
+            number += 1
+        }
+        return candidate
+    }
+
+    /// The modules/ folder name for each block version in the fleet: the
+    /// block ID, or ID plus version when tenants use different versions.
+    public static func moduleFolders(for tenants: [Tenant]) -> [String: String] {
+        var versions: [String: Set<String>] = [:]
+        for tenant in tenants {
+            for selection in tenant.input.selections {
+                versions[selection.block.id, default: []].insert(selection.block.version)
+            }
+        }
+        var folders: [String: String] = [:]
+        for (id, set) in versions {
+            for version in set {
+                folders[folderKey(id, version)] = set.count == 1 ? id : "\(id)-v\(version)"
+            }
+        }
+        return folders
+    }
+
+    static func folderKey(_ id: String, _ version: String) -> String { "\(id)@\(version)" }
+
+    // MARK: Tenant files
+
+    /// The files of one tenant directory, keyed by file name.
+    public static func tenantFiles(_ tenant: Tenant, moduleFolders: [String: String]) throws -> [String: String] {
+        let input = tenant.input
+        guard input.removals.isEmpty else { throw ExportError.pendingRemovals(tenant: tenant.slug) }
+        let (calls, secrets) = try WorkspaceGenerator.moduleCalls(input)
+        let versions = Dictionary(uniqueKeysWithValues: input.selections.map { ($0.block.id, $0.block.version) })
+        let names = Dictionary(uniqueKeysWithValues: input.selections.map { ($0.block.id, $0.block.name) })
+
+        // main.tf: the module calls and the wiring between them.
+        let modules = calls.map { call in
+            let folder = moduleFolders[folderKey(call.blockID, versions[call.blockID] ?? "")] ?? call.blockID
+            var pairs: [(String, String)] = [
+                ("source", WorkspaceGenerator.hclString("../../modules/\(folder)" + (call.modulePath.isEmpty ? "" : "/\(call.modulePath)"))),
+                ("name_prefix", "var.name_prefix"),
+            ]
+            for argument in call.arguments {
+                switch argument.value {
+                case .setting: pairs.append((argument.key, "var.\(call.name).\(argument.key)"))
+                case .reference(let expression): pairs.append((argument.key, expression))
+                case .secret(let variable): pairs.append((argument.key, "var.\(variable)"))
+                }
+            }
+            return "module \"\(call.name)\" {\n\(WorkspaceGenerator.aligned(pairs))\n}\n"
+        }
+        let mainTF = """
+        # This tenant's baseline: one module call per building block, and how
+        # the blocks connect. Setting values live in tenant.auto.tfvars.
+
+
+        """ + modules.joined(separator: "\n")
+
+        // variables.tf: typed inputs, one object per block.
+        var variables = [
+            """
+            variable "name_prefix" {
+              description = "Prefix applied to every object name."
+              type        = string
+            }
+
+            """,
+        ]
+        var values = ["name_prefix = \(WorkspaceGenerator.hclString(input.namePrefix))\n"]
+        for call in calls {
+            let settings = call.arguments.compactMap { argument -> (String, String, String)? in
+                guard case .setting(let literal, let type) = argument.value else { return nil }
+                return (argument.key, type, literal)
+            }
+            guard !settings.isEmpty else { continue }
+            let description = WorkspaceGenerator.hclString("Settings for the \(names[call.blockID] ?? call.blockID) block.")
+            variables.append("""
+            variable "\(call.name)" {
+              description = \(description)
+              type = object({
+            \(WorkspaceGenerator.aligned(settings.map { ($0.0, $0.1) }, indent: "    "))
+              })
+            }
+
+            """)
+            values.append("\(call.name) = {\n\(WorkspaceGenerator.aligned(settings.map { ($0.0, $0.2) }))\n}\n")
+        }
+        for secret in secrets {
+            variables.append("""
+            variable "\(secret.name)" {
+              description = \(WorkspaceGenerator.hclString(secret.description))
+              type        = string
+              sensitive   = true
+            }
+
+            """)
+        }
+        let secretNote = secrets.isEmpty ? "" : """
+        #
+        # Secret settings are not here: they arrive as TF_VAR_<name> secrets
+        # in the tenant's GitHub Environment (\(secrets.map(\.name).joined(separator: ", "))).
+        """
+        let variablesTF = "# Inputs for this tenant. Values live in tenant.auto.tfvars.\(secretNote)\n\n"
+            + variables.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n"
+        let tfvars = """
+        # The only file that differs in substance between tenants. No secrets:
+        # credentials arrive as environment variables at run time.
+
+
+        """ + values.joined(separator: "\n")
+
+        return [
+            "main.tf": mainTF,
+            "variables.tf": variablesTF,
+            "tenant.auto.tfvars": tfvars,
+            "terraform.tf": terraformTF(input),
+            "providers.tf": providersTF(input),
+        ]
+    }
+
+    static func terraformTF(_ input: WorkspaceInput) -> String {
+        let main = input.connection == .jamfPro
+            ? ("jamfpro", "deploymenttheory/jamfpro", input.jamfProProviderVersion)
+            : ("jamfplatform", "jamf/jamfplatform", input.providerVersion)
+        var providers = [main]
+        if needsProtect(input) {
+            providers.append(("jamfprotect", "Jamf-Concepts/jamfprotect", input.protectProviderVersion))
+        }
+        let requirements = providers.map { name, source, version in
+            """
+                \(name) = {
+                  source  = "\(source)"
+                  version = "\(version)"
+                }
+            """
+        }.joined(separator: "\n")
+        return """
+        terraform {
+          required_version = ">= 1.11.0"
+
+          required_providers {
+        \(requirements)
+          }
+
+          # State lives on this repository's terraform-state branch, written by the
+          # state backend the workflows start (.github/actions/state-backend). The
+          # address and credentials arrive as TF_HTTP_* environment variables.
+          # To use another backend, see the README.
+          backend "http" {}
+        }
+
+        """
+    }
+
+    static func providersTF(_ input: WorkspaceInput) -> String {
+        var text = input.connection == .jamfPro
+            ? """
+            # The instance URL and credentials come from JAMFPRO_* environment
+            # variables at run time.
+            provider "jamfpro" {
+            }
+
+            """
+            : """
+            # Credentials come from JAMFPLATFORM_* environment variables at run time.
+            provider "jamfplatform" {
+              impact_alerts = true
+            }
+
+            """
+        if needsProtect(input) {
+            text += """
+
+            # Jamf Protect credentials come from JAMFPROTECT_* environment variables.
+            provider "jamfprotect" {
+            }
+
+            """
+        }
+        return text
+    }
+
+    static func needsProtect(_ input: WorkspaceInput) -> Bool {
+        input.selections.contains { $0.block.products.contains("jamf-protect") }
+    }
+
+    // MARK: Writing
+
+    /// Writes the repository: modules/, tenants/ and the pipeline templates
+    /// (the contents of `templatesURL`, copied as they are).
+    public static func write(_ tenants: [Tenant], templatesURL: URL?, to destination: URL) throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: destination.path),
+           !((try? fileManager.contentsOfDirectory(atPath: destination.path)) ?? []).filter({ $0 != ".DS_Store" }).isEmpty {
+            throw ExportError.destinationNotEmpty
+        }
+        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+        let folders = moduleFolders(for: tenants)
+
+        // Render everything first, so a tenant that cannot export leaves no
+        // half-written repository behind.
+        let rendered = try tenants.map { ($0, try tenantFiles($0, moduleFolders: folders)) }
+
+        if let templatesURL {
+            for item in try fileManager.contentsOfDirectory(atPath: templatesURL.path) where item != ".DS_Store" {
+                try fileManager.copyItem(at: templatesURL.appending(path: item), to: destination.appending(path: item))
+            }
+        }
+
+        let modulesURL = destination.appending(path: "modules")
+        try fileManager.createDirectory(at: modulesURL, withIntermediateDirectories: true)
+        var written: Set<String> = []
+        for tenant in tenants {
+            for selection in tenant.input.selections {
+                let folder = folders[folderKey(selection.block.id, selection.block.version)] ?? selection.block.id
+                guard !written.contains(folder), let source = tenant.blockFolders[selection.block.id] else { continue }
+                written.insert(folder)
+                let target = modulesURL.appending(path: folder)
+                try fileManager.copyItem(at: source, to: target)
+                try? fileManager.removeItem(at: target.appending(path: "block.json"))
+            }
+        }
+
+        for (tenant, files) in rendered {
+            let directory = destination.appending(path: "tenants/\(tenant.slug)")
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            for (name, contents) in files {
+                try Data(contents.utf8).write(to: directory.appending(path: name), options: .atomic)
+            }
+            for file in tenant.adoptedFiles {
+                try fileManager.copyItem(at: file, to: directory.appending(path: file.lastPathComponent))
+            }
+        }
+    }
+
+    /// State as the engine wrote it, ready for plain Terraform: provider
+    /// addresses move from OpenTofu's registry to Terraform's, the same as
+    /// `terraform state replace-provider`.
+    public static func stateForTerraform(_ state: Data) -> Data {
+        let text = String(decoding: state, as: UTF8.self)
+        return Data(text.replacingOccurrences(of: "registry.opentofu.org/", with: "registry.terraform.io/").utf8)
+    }
+}

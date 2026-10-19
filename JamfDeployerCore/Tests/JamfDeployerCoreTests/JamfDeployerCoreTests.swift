@@ -1906,3 +1906,174 @@ struct JamfProConnectionTests {
     }
 }
 
+
+@Suite("Standalone export")
+struct StandaloneExportTests {
+    static func metadata(_ json: String) throws -> BlockMetadata {
+        try JSONDecoder().decode(BlockMetadata.self, from: Data(json.utf8))
+    }
+
+    /// A category provider and a block using every setting type.
+    static func input(connection: ConnectionKind = .platform) throws -> WorkspaceInput {
+        let categories = try metadata(#"{"id": "cats", "name": "Categories", "version": "1.0.0", "provides": {"category": ["Security"]}}"#)
+        let filevault = try metadata(#"""
+        {"id": "file-vault", "name": "FileVault", "version": "1.2.0", "acceptsCategory": true,
+         "settings": [
+           {"key": "label", "title": "Label", "type": "string", "default": "Encrypt \"now\""},
+           {"key": "restart", "title": "Restart", "type": "bool", "default": "true"},
+           {"key": "days", "title": "Days", "type": "number", "default": "7"},
+           {"key": "users", "title": "Users", "type": "list", "default": "a\nb"},
+           {"key": "token", "title": "Token", "type": "secret"}
+         ]}
+        """#)
+        return WorkspaceInput(
+            namePrefix: "JD - ",
+            selections: [
+                GeneratedSelection(block: categories, settings: [:]),
+                GeneratedSelection(block: filevault, settings: ["days": "14"],
+                                   providedCategory: ProvidedObject(blockID: "cats", name: "Security"),
+                                   modulePath: connection == .jamfPro ? "jamfpro" : ""),
+            ],
+            providerVersion: "1.5.0",
+            connection: connection)
+    }
+
+    static func files(_ input: WorkspaceInput) throws -> [String: String] {
+        let tenant = StandaloneExport.Tenant(slug: "acme", input: input, blockFolders: [:])
+        return try StandaloneExport.tenantFiles(tenant, moduleFolders: StandaloneExport.moduleFolders(for: [tenant]))
+    }
+
+    @Test func settingsBecomeDataAndWiringStaysInCode() throws {
+        let files = try Self.files(Self.input())
+        #expect(files["main.tf"]!.contains("""
+        module "file_vault" {
+          source         = "../../modules/file-vault"
+          name_prefix    = var.name_prefix
+          managed_by_tag = var.file_vault.managed_by_tag
+          category_id    = module.cats.category_ids["Security"]
+          label          = var.file_vault.label
+          restart        = var.file_vault.restart
+          days           = var.file_vault.days
+          users          = var.file_vault.users
+          token          = var.file_vault_token
+        }
+        """))
+        #expect(files["variables.tf"]!.contains("""
+        variable "file_vault" {
+          description = "Settings for the FileVault block."
+          type = object({
+            managed_by_tag = string
+            label          = string
+            restart        = bool
+            days           = number
+            users          = list(string)
+          })
+        }
+        """))
+        let tfvars = files["tenant.auto.tfvars"]!
+        #expect(tfvars.contains("""
+        file_vault = {
+          managed_by_tag = "Managed by Jamf Deployer · file-vault@1.2.0"
+          label          = "Encrypt \\"now\\""
+          restart        = true
+          days           = 14
+          users          = ["a", "b"]
+        }
+        """))
+        #expect(tfvars.hasPrefix("# The only file") && tfvars.contains("name_prefix = \"JD - \""))
+    }
+
+    @Test func secretSettingsAreSensitiveVariablesNeverValues() throws {
+        let files = try Self.files(Self.input())
+        #expect(files["variables.tf"]!.contains("""
+        variable "file_vault_token" {
+          description = "FileVault: Token"
+          type        = string
+          sensitive   = true
+        }
+        """))
+        #expect(files["variables.tf"]!.contains("TF_VAR_<name>"))
+        #expect(!files["tenant.auto.tfvars"]!.contains("token"))
+    }
+
+    @Test func connectionsPickModuleVariantAndProvider() throws {
+        let platform = try Self.files(Self.input())
+        #expect(platform["terraform.tf"]!.contains("source  = \"jamf/jamfplatform\""))
+        #expect(platform["terraform.tf"]!.contains("backend \"http\" {}"))
+        #expect(platform["providers.tf"]!.contains("impact_alerts = true"))
+
+        let jamfPro = try Self.files(Self.input(connection: .jamfPro))
+        #expect(jamfPro["main.tf"]!.contains("source         = \"../../modules/file-vault/jamfpro\""))
+        #expect(jamfPro["terraform.tf"]!.contains("source  = \"deploymenttheory/jamfpro\""))
+        #expect(jamfPro["providers.tf"]!.contains("provider \"jamfpro\""))
+        #expect(!jamfPro["terraform.tf"]!.contains("jamfplatform"))
+    }
+
+    @Test func blocksAtDifferentVersionsGetSeparateFolders() throws {
+        let v1 = try Self.metadata(#"{"id": "cats", "name": "Categories", "version": "1.0.0"}"#)
+        let v2 = try Self.metadata(#"{"id": "cats", "name": "Categories", "version": "2.0.0"}"#)
+        let other = try Self.metadata(#"{"id": "eas", "name": "Attributes", "version": "1.0.0"}"#)
+        func tenant(_ blocks: [BlockMetadata]) -> StandaloneExport.Tenant {
+            StandaloneExport.Tenant(slug: "t", input: WorkspaceInput(
+                namePrefix: "", selections: blocks.map { GeneratedSelection(block: $0, settings: [:]) },
+                providerVersion: "1.5.0"), blockFolders: [:])
+        }
+        let folders = StandaloneExport.moduleFolders(for: [tenant([v1, other]), tenant([v2, other])])
+        #expect(folders["cats@1.0.0"] == "cats-v1.0.0")
+        #expect(folders["cats@2.0.0"] == "cats-v2.0.0")
+        #expect(folders["eas@1.0.0"] == "eas")
+    }
+
+    @Test func tenantNamesBecomeUniqueDirectoryNames() {
+        #expect(StandaloneExport.slug(for: "Acme Corp (EU)", taken: []) == "acme-corp-eu")
+        #expect(StandaloneExport.slug(for: "Acme Corp (EU)", taken: ["acme-corp-eu"]) == "acme-corp-eu-2")
+        #expect(StandaloneExport.slug(for: "—", taken: []) == "tenant")
+        #expect(StandaloneExport.slug(for: "Zürich", taken: []) == "z-rich")
+    }
+
+    @Test func pendingRemovalsBlockTheExport() throws {
+        var input = try Self.input()
+        input.removals = [BlockRemoval(blockID: "cats", keepInJamf: true)]
+        #expect(throws: StandaloneExport.ExportError.self) { try Self.files(input) }
+    }
+
+    @Test func stateMovesToTerraformsRegistry() {
+        let state = Data(#"{"resources":[{"provider":"provider[\"registry.opentofu.org/jamf/jamfplatform\"]"}]}"#.utf8)
+        let moved = String(decoding: StandaloneExport.stateForTerraform(state), as: UTF8.self)
+        #expect(moved.contains("registry.terraform.io/jamf/jamfplatform"))
+        #expect(!moved.contains("opentofu"))
+    }
+
+    @Test func writesTheRepositoryAndRefusesAFullFolder() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "export-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let block = root.appending(path: "catalog/cats")
+        try FileManager.default.createDirectory(at: block.appending(path: "jamfpro"), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: block.appending(path: "block.json"))
+        try Data("# module\n".utf8).write(to: block.appending(path: "main.tf"))
+        let templates = root.appending(path: "templates")
+        try FileManager.default.createDirectory(at: templates.appending(path: ".github"), withIntermediateDirectories: true)
+        try Data("# readme\n".utf8).write(to: templates.appending(path: "README.md"))
+
+        let cats = try Self.metadata(#"{"id": "cats", "name": "Categories", "version": "1.0.0"}"#)
+        let tenant = StandaloneExport.Tenant(
+            slug: "acme",
+            input: WorkspaceInput(namePrefix: "JD - ", selections: [GeneratedSelection(block: cats, settings: [:])], providerVersion: "1.5.0"),
+            blockFolders: ["cats": block])
+        let out = root.appending(path: "repo")
+        try StandaloneExport.write([tenant], templatesURL: templates, to: out)
+
+        let fm = FileManager.default
+        #expect(fm.fileExists(atPath: out.appending(path: "modules/cats/main.tf").path))
+        #expect(fm.fileExists(atPath: out.appending(path: "modules/cats/jamfpro").path))
+        #expect(!fm.fileExists(atPath: out.appending(path: "modules/cats/block.json").path))
+        for file in ["main.tf", "variables.tf", "tenant.auto.tfvars", "terraform.tf", "providers.tf"] {
+            #expect(fm.fileExists(atPath: out.appending(path: "tenants/acme/\(file)").path))
+        }
+        #expect(fm.fileExists(atPath: out.appending(path: "README.md").path))
+        #expect(fm.fileExists(atPath: out.appending(path: ".github").path))
+        #expect(throws: StandaloneExport.ExportError.self) {
+            try StandaloneExport.write([tenant], templatesURL: templates, to: out)
+        }
+    }
+}
