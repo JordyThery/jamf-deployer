@@ -85,11 +85,44 @@ removal and settings restore.
   module; one module per block rather than one baseline module; the
   reference's out-of-band workflow needs Terraform 1.14 or later.
 
+## CI templates (2026-10-19)
+
+`Templates/standalone-export/` holds the workflows the export ships with,
+modelled on `ref-jamfprotect-msp`, plus a setup README:
+
+| Workflow | Trigger | Does |
+| --- | --- | --- |
+| `plan.yml` | pull request into main | fmt and validate, plan each affected tenant, one updated comment per tenant, a single "Plan result" check |
+| `apply.yml` | push to main (or manual, one tenant) | apply the tenants the merge changed, one job per tenant |
+| `drift.yml` | Mondays 06:00 UTC, manual | plan every tenant; open, update or close a `Changed in Jamf: <tenant>` issue |
+| `restore.yml` | `restore-baseline` label on that issue | permission check, apply, close the issue |
+| `destroy.yml` | manual, tenant name typed twice | destroy one tenant |
+
+Shared actions: `state-backend` (terraform-backend-git on the runner, state on
+a `terraform-state` branch, created on first use) and `detect-tenants`
+(changed tenants, every tenant when a module changed or there is no base).
+Every job runs in the tenant's GitHub Environment and holds a per-tenant
+concurrency group.
+
+Live-tested in the private repository `jamf-deployer-export-test` against the
+Sandbox (categories and extension attributes, prefix `UIT CI - `): plan comment
+on the pull request, apply on merge (6 created and verified in Jamf), a clean
+check with no issue, two console changes caught in one issue, a repeat check
+commenting on the same issue, the label restoring both values and closing it,
+an issue closing itself after a manual revert, the destroy guard skipping on a
+mismatched name, and destroy removing all 6. Found and fixed during the test:
+detection on a first push (no base commit), one plan comment per tenant instead
+of one per push, and the comment naming the pushed commit rather than the merge
+ref. The test Environment (and its credentials) was deleted afterwards.
+
+Finding for the guide: Terraform keeps state unencrypted, so with the Git
+backend the repository must stay private; S3 with encryption or OpenTofu with
+client-side encryption are the alternatives, both described in the README.
+
 ## Next steps
 
-1. CI templates modelled on `ref-jamfprotect-msp`: plan on pull request with the
-   plan as a comment, apply on merge as a per-tenant matrix with GitHub
-   Environments, weekly drift with an issue. Live-test in a private repository
-   against the Sandbox.
-2. "Graduating to Terraform" guide built on the mapping table above.
-3. The generator in JamfDeployerCore, tested against `Fixtures/export-golden/`.
+1. "Graduating to Terraform" guide built on the mapping table above.
+2. The generator in JamfDeployerCore, tested against `Fixtures/export-golden/`,
+   writing the templates alongside each export.
+3. Jamf Pro API variant of the workflows (`JAMFPRO_*`, `-parallelism=1`), tested
+   the same way.

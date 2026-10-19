@@ -1,0 +1,123 @@
+name: Plan
+
+# Every pull request into main: format and validate the whole repository, then
+# plan each affected tenant and post the plan on the pull request, so the
+# reviewer approves a diff rather than a description of one.
+#
+# Each plan job runs in the tenant's GitHub Environment, so it can only read
+# that tenant's credentials. Require the "Plan result" check in branch
+# protection (not the per-tenant jobs, whose names change with the tenants).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write        # the state backend writes lock branches
+  pull-requests: write   # plan comments
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      tenants: ${{ steps.detect.outputs.tenants }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        uses: ./.github/actions/detect-tenants
+        with:
+          base: origin/${{ github.base_ref }}
+
+  check:
+    needs: detect
+    if: needs.detect.outputs.tenants != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - name: Format
+        run: terraform fmt -check -recursive
+      - name: Validate
+        env:
+          TENANTS: ${{ needs.detect.outputs.tenants }}
+        run: |
+          for tenant in $(echo "$TENANTS" | jq -r '.[]'); do
+            echo "==> tenants/$tenant"
+            terraform -chdir="tenants/$tenant" init -backend=false -input=false > /dev/null
+            terraform -chdir="tenants/$tenant" validate
+          done
+
+  plan:
+    needs: [detect, check]
+    if: needs.detect.outputs.tenants != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tenant: ${{ fromJson(needs.detect.outputs.tenants) }}
+    environment:
+      name: ${{ matrix.tenant }}
+    env:
+      # Jamf Platform API credentials from the tenant's Environment. Tenants
+      # connected through the Jamf Pro API use JAMFPRO_* instead (see README).
+      JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
+      JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
+      JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - uses: ./.github/actions/state-backend
+        with:
+          tenant: ${{ matrix.tenant }}
+      - name: Init
+        run: terraform -chdir="tenants/${{ matrix.tenant }}" init -input=false
+      - name: Plan
+        run: |
+          set -o pipefail
+          terraform -chdir="tenants/${{ matrix.tenant }}" plan -input=false -no-color -lock-timeout=120s \
+            | tee "$RUNNER_TEMP/plan.txt"
+      - name: Comment the plan on the pull request
+        # One comment per tenant, updated on every push rather than added again.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TENANT: ${{ matrix.tenant }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          marker="<!-- plan:$TENANT -->"
+          {
+            echo "$marker"
+            echo "#### Plan for \`$TENANT\` at ${HEAD_SHA::7}"
+            echo '```'
+            # GitHub comments are limited to 65,536 characters.
+            head -c 60000 "$RUNNER_TEMP/plan.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/comment.md"
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty")
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F "body=@$RUNNER_TEMP/comment.md" --silent
+          else
+            gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment.md"
+          fi
+
+  result:
+    name: Plan result
+    needs: [detect, check, plan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every plan succeeded
+        run: |
+          for r in "${{ needs.detect.result }}" "${{ needs.check.result }}" "${{ needs.plan.result }}"; do
+            case "$r" in success|skipped) ;; *) echo "A plan job ended with: $r"; exit 1 ;; esac
+          done

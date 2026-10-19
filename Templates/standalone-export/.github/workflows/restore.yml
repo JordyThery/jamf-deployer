@@ -1,0 +1,76 @@
+name: Restore baseline
+
+# Adding the "restore-baseline" label to a "Changed in Jamf: <tenant>" issue
+# applies the code to that tenant, undoing what was changed in Jamf. Only people
+# with write access to the repository can trigger it.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write   # the state backend writes state and lock branches
+  issues: write
+
+jobs:
+  authorize:
+    if: github.event.label.name == 'restore-baseline' && startsWith(github.event.issue.title, 'Changed in Jamf:')
+    runs-on: ubuntu-latest
+    outputs:
+      tenant: ${{ steps.check.outputs.tenant }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ github.event.issue.title }}
+          ACTOR: ${{ github.event.sender.login }}
+        run: |
+          permission=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${ACTOR}/permission" --jq .permission)
+          case "$permission" in admin|maintain|write) ;; *)
+            echo "$ACTOR has $permission access; restoring needs write access."; exit 1 ;;
+          esac
+          tenant="${TITLE#Changed in Jamf: }"
+          [ -d "tenants/$tenant" ] || { echo "No tenant named $tenant"; exit 1; }
+          echo "tenant=$tenant" >> "$GITHUB_OUTPUT"
+
+  restore:
+    needs: authorize
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.authorize.outputs.tenant }}
+    concurrency:
+      group: tenant-${{ needs.authorize.outputs.tenant }}
+      cancel-in-progress: false
+    env:
+      TENANT: ${{ needs.authorize.outputs.tenant }}
+      JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
+      JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
+      JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - uses: ./.github/actions/state-backend
+        with:
+          tenant: ${{ env.TENANT }}
+      - name: Init
+        run: terraform -chdir="tenants/$TENANT" init -input=false
+      - name: Apply
+        run: |
+          set -o pipefail
+          terraform -chdir="tenants/$TENANT" apply -input=false -no-color -auto-approve -lock-timeout=120s \
+            | tee "$RUNNER_TEMP/apply.txt"
+      - name: Close the issue
+        run: |
+          {
+            echo "Baseline restored by @${{ github.event.sender.login }}."
+            echo '```'
+            tail -c 20000 "$RUNNER_TEMP/apply.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+          gh issue close "${{ github.event.issue.number }}" --comment "$(cat "$RUNNER_TEMP/body.md")"
