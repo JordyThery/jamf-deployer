@@ -11,6 +11,13 @@ nonisolated struct PreviewSession: Sendable {
     var diagnostics: [EngineStreamEvent.Diagnostic]
     var blockVersions: [String: String]
     var createdAt: Date
+    /// The engine commands this preview ran, and the one Deploy runs, as a
+    /// person would type them in the workspace (credentials stay in the
+    /// environment, never on the command line).
+    var engineCommands: [String] = []
+    var deployCommand: String = ""
+    /// The generated configuration the commands ran in.
+    var workspaceURL: URL?
 }
 
 /// Orchestrates everything between "Preview Changes" and "Deploy" for every
@@ -528,6 +535,15 @@ final class TenantDeployService {
         tenantStore.update(updated)
     }
 
+    static func applyArguments(for tenant: Tenant, planFile: String) -> [String] {
+        ["apply", "-input=false", "-json", parallelism(for: tenant), planFile]
+    }
+
+    /// An engine invocation as it reads on a command line.
+    nonisolated static func commandLine(_ arguments: [String]) -> String {
+        "tofu " + arguments.joined(separator: " ")
+    }
+
     /// The jamfpro plugin expects one request at a time; the Platform
     /// gateway takes a few writes in parallel.
     static func parallelism(for tenant: Tenant) -> String {
@@ -974,15 +990,16 @@ final class TenantDeployService {
             extraEnvironment: try secretSettingEnvironment(for: tenant, output: output)
         )
 
+        let initArguments = ["init", "-input=false"]
+        let planArguments = ["plan", "-input=false", "-out=plan.bin", "-json"] + Self.readParallelism(for: tenant)
+
         phase = .initializing
         logEngine("init", tenant: tenant)
-        try await runEngine(runner, ["init", "-input=false"])
+        try await runEngine(runner, initArguments)
 
         phase = .planning
         logEngine("plan", tenant: tenant)
-        let planRun = try await runEngine(
-            runner, ["plan", "-input=false", "-out=plan.bin", "-json"] + Self.readParallelism(for: tenant)
-        )
+        let planRun = try await runEngine(runner, planArguments)
         let plan = try await runner.showPlan(planFileName: "plan.bin")
 
         var blockNames: [String: String] = ["tenant": "Adopted objects"]
@@ -1002,7 +1019,10 @@ final class TenantDeployService {
             summary: summary,
             diagnostics: diagnostics,
             blockVersions: blockVersions,
-            createdAt: .now
+            createdAt: .now,
+            engineCommands: [initArguments, planArguments].map(Self.commandLine),
+            deployCommand: Self.commandLine(Self.applyArguments(for: tenant, planFile: "plan.bin")),
+            workspaceURL: generatedURL(for: tenant)
         )
     }
 
@@ -1038,7 +1058,7 @@ final class TenantDeployService {
                 // Jamf's classic API fails more creates under load; four
                 // concurrent operations measurably reduce that at little cost.
                 // The Jamf Pro plugin requires one operation at a time.
-                arguments: ["apply", "-input=false", "-json", Self.parallelism(for: tenant), session.planFileName]
+                arguments: Self.applyArguments(for: tenant, planFile: session.planFileName)
             ) { event in
                 if event.type == .applyComplete || event.type == .applyErrored {
                     let message = event.message

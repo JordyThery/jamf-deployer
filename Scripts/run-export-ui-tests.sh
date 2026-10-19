@@ -74,8 +74,16 @@ for e in eas:
     cp "$WORK"/*.log(N) /tmp/jamf-deployer-export-logs/ 2> /dev/null
     rm -rf "$REVIEW" "$MOVE" "$WORK"
     rm -f ~/Documents/"Jamf Deployer Recovery — Export Sandbox.txt"
+    if [[ -n "$DETAILS_BEFORE" ]]; then
+        defaults write be.jordythery.jamf-deployer showsTechnicalDetails -bool "$DETAILS_BEFORE"
+    else
+        defaults delete be.jordythery.jamf-deployer showsTechnicalDetails 2> /dev/null
+    fi
 }
 CLEANED=0
+# The preview step needs technical details; your own setting comes back.
+DETAILS_BEFORE="$(defaults read be.jordythery.jamf-deployer showsTechnicalDetails 2> /dev/null || true)"
+defaults write be.jordythery.jamf-deployer showsTechnicalDetails -bool true
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
 
@@ -125,6 +133,7 @@ run() {
 set +e
 run test01ConnectAndDeploy
 jp "print('  in Jamf:', len(cats), 'categories,', len(eas), 'attributes')"
+run test01bPreviewShowsTheEngineWork
 
 run test02ExportForReview
 echo "Review export:"

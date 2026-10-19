@@ -240,6 +240,9 @@ struct PreviewDeploySheet: View {
                     }
                 }
             }
+            if showsTechnicalDetails, !session.engineCommands.isEmpty {
+                behindThePreview(session)
+            }
         }
     }
 
@@ -289,6 +292,47 @@ struct PreviewDeploySheet: View {
         case .create, .adopt: .tinted
         case .remove, .replace: .warning
         default: .neutral
+        }
+    }
+
+    /// The plain Terraform behind the preview: the commands, the generated
+    /// configuration and where it lives, so the same steps can be repeated
+    /// by hand or in a pipeline.
+    @ViewBuilder
+    private func behindThePreview(_ session: PreviewSession) -> some View {
+        Section("Behind this preview") {
+            Text("The app generated an OpenTofu configuration for this tenant and ran these commands in it. Credentials were passed as environment variables, never written to the folder.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            ForEach(session.engineCommands, id: \.self) { command in
+                Text(command)
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+            }
+            LabeledContent("Deploy runs") {
+                Text(session.deployCommand)
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+            }
+            if let workspace = session.workspaceURL {
+                DisclosureGroup("Generated configuration") {
+                    ForEach(["main.tf", "providers.tf"], id: \.self) { file in
+                        if let text = try? String(contentsOf: workspace.appending(path: file), encoding: .utf8) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(file).font(.caption.bold())
+                                Text(text)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+                Button("Show Workspace in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([workspace.appending(path: "main.tf")])
+                }
+            }
         }
     }
 

@@ -46,6 +46,18 @@ final class ExportUITests: DeployerUITestCase {
         XCTAssertTrue(anyContaining("7 succeeded").waitForExistence(timeout: 15), "The baseline did not deploy")
     }
 
+    /// With technical details on (set by the script), a preview shows the
+    /// commands it ran and the generated configuration.
+    func test01bPreviewShowsTheEngineWork() throws {
+        openTenant(Self.tenant)
+        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        XCTAssertTrue(anyContaining("Behind this preview").waitForExistence(timeout: 300), "The preview shows no engine details")
+        XCTAssertTrue(anyContaining("tofu plan -input=false -out=plan.bin -json").exists, "The plan command is not shown")
+        XCTAssertTrue(anyContaining("tofu apply -input=false -json").exists, "The deploy command is not shown")
+        XCTAssertTrue(app.buttons["Show Workspace in Finder"].exists)
+        tap(app.sheets.buttons["Close"])
+    }
+
     func test02ExportForReview() throws {
         openExportSheet()
         chooseTenantAndFolder(try env("EXPORT_REVIEW_DIR"))
