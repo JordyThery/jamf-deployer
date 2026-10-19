@@ -160,7 +160,13 @@ public nonisolated enum OverrideGenerator {
             case .bool:
                 lines.append("  \(attribute.name) = \(raw == "true" ? "true" : "false")")
             case .number:
-                lines.append("  \(attribute.name) = \(raw.isEmpty ? "0" : raw)")
+                // Written unquoted, so only a plain number passes through
+                // (the same check WorkspaceGenerator applies); anything else
+                // becomes null rather than arbitrary HCL.
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                let isNumber = Double(trimmed) != nil
+                    && trimmed.allSatisfy { $0.isNumber || $0 == "." || $0 == "-" }
+                lines.append("  \(attribute.name) = \(trimmed.isEmpty ? "0" : isNumber ? trimmed : "null")")
             case .stringList:
                 let items = raw.split(separator: ",").map {
                     WorkspaceGenerator.hclString($0.trimmingCharacters(in: .whitespaces))

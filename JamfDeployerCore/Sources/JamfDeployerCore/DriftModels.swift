@@ -137,11 +137,14 @@ public nonisolated enum DriftReportBuilder {
 
             // Same-length object arrays diff element-wise, so a change
             // inside a blueprint's component list names its exact field.
+            // Both sides must be all objects: an element turning into null
+            // or a string falls through to the leaf diff below.
             if !wholeSensitive, depth < 3,
                case .array(let oldItems) = old,
                case .array(let newItems) = new,
                oldItems.count == newItems.count,
-               oldItems.allSatisfy({ $0.objectValue != nil }) {
+               oldItems.allSatisfy({ $0.objectValue != nil }),
+               newItems.allSatisfy({ $0.objectValue != nil }) {
                 // Sensitivity masks mirror the value: one mask per element.
                 func elementMask(_ mask: JSONValue?, _ index: Int) -> JSONValue? {
                     guard case .array(let masks)? = mask, index < masks.count else { return nil }

@@ -26,9 +26,9 @@ nonisolated struct TenantSecrets: Sendable {
         item(purpose: "engineer-client-id")
     }
 
-    /// Encrypts the tenant record (OpenTofu state). Losing it makes the
-    /// record unreadable, so a recovery sheet is required before the first
-    /// deploy.
+    /// Encrypts the tenant's deployment state (OpenTofu state). Losing it
+    /// makes the state unreadable, so a recovery sheet is required before
+    /// the first deploy.
     var statePassphrase: KeychainItem {
         item(purpose: "state-passphrase")
     }

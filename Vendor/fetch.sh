@@ -54,9 +54,13 @@ curl -sL -O "https://github.com/deploymenttheory/terraform-provider-jamfpro/rele
 shasum -a 256 -c <(grep darwin "terraform-provider-jamfpro_${JAMFPRO_VERSION}_SHA256SUMS")
 
 echo "== jamformer $JAMFORMER_VERSION =="
+mkdir -p "$HERE/jamformer"
 cd "$HERE/jamformer"
+BASE="https://github.com/Jamf-Concepts/jamformer/releases/download/v${JAMFORMER_VERSION}"
 [[ -f "jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz" ]] || \
-  curl -sL -O "https://github.com/Jamf-Concepts/jamformer/releases/download/v${JAMFORMER_VERSION}/jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz"
+  curl -sL -O "$BASE/jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz"
+curl -sL -O "$BASE/checksums.txt"
+shasum -a 256 -c <(grep " jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz$" checksums.txt)
 tar -xzf "jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz" jamformer
 
 echo "== terraform-backend-git $BACKEND_GIT_VERSION (plumber-cd, Apache-2.0) =="

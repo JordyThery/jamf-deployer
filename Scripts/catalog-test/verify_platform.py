@@ -2,7 +2,12 @@
 # Checks the Platform-only objects (Blueprint, compliance benchmark).
 import json, subprocess, sys, urllib.parse, urllib.request
 svc, prefix, expect = sys.argv[1:4]
-kc = lambda a: subprocess.run(["security", "find-generic-password", "-s", svc, "-a", a, "-w"], capture_output=True, text=True).stdout.strip()
+def kc(a):
+    found = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", a, "-w"], capture_output=True, text=True)
+    value = found.stdout.strip()
+    if found.returncode != 0 or not value:
+        sys.exit(f"Keychain item missing: service {svc!r}, account {a!r}")
+    return value
 base = kc("base-url").rstrip("/")
 form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": kc("client-id"), "client_secret": kc("client-secret")}).encode()
 token = json.load(urllib.request.urlopen(urllib.request.Request(base + "/auth/token", data=form)))["access_token"]

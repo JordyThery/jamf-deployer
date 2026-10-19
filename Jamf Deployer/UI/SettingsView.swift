@@ -118,7 +118,7 @@ struct SupportBundleButton: View {
             jamfpro provider \(EngineInfo.jamfProProviderVersion)
             jamformer \(EngineInfo.jamformerVersion)
             terraform-backend-git \(EngineInfo.stateBackendVersion)
-            Team mode: \(deployService.isTeamMode ? "on" : "off")
+            Team Mode: \(deployService.isTeamMode ? "on" : "off")
             Last sync: \(deployService.lastSync?.formatted(.iso8601) ?? "-")
             Sync message: \(deployService.syncMessage ?? "-")
             """

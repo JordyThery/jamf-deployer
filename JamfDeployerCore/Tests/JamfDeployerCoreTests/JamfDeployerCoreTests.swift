@@ -48,8 +48,8 @@ struct PreviewTests {
         let plan = try JSONDecoder().decode(PlanFile.self, from: fixtureData("show-plan-drift.json"))
         let drifted = plan.resourceDrift ?? []
         #expect(!drifted.isEmpty)
-        let category = drifted.first { $0.address.contains("pro_category") }
-        #expect(category?.changedAttributeNames == ["name"])
+        let category = try #require(drifted.first { $0.address.contains("pro_category") })
+        #expect(PreviewBuilder.fieldDiffs(for: category).map(\.path) == ["name"])
     }
 
     @Test func attachesImpactAlertsToObjects() throws {
@@ -269,13 +269,29 @@ struct GeneratorTests {
         for connection in [ConnectionKind.platform, .jamfPro] {
             let solo = try WorkspaceGenerator.generate(WorkspaceInput(
                 namePrefix: "JD - ", selections: [], providerVersion: "1.5.0", connection: connection))
-            #expect(solo.providersTF.contains(#"backend "local""#))
-            #expect(solo.providersTF.contains(#"path = "../state/terraform.tfstate""#))
+            // The backend sits in the terraform block's body, two spaces in.
+            #expect(solo.providersTF.contains("""
+
+              # The tenant record lives next to the generated configuration,
+              # encrypted via TF_ENCRYPTION, with automatic backups.
+              backend "local" {
+                path = "../state/terraform.tfstate"
+              }
+            }
+            """))
 
             let team = try WorkspaceGenerator.generate(WorkspaceInput(
                 namePrefix: "JD - ", selections: [], providerVersion: "1.5.0",
                 connection: connection, stateBackend: .http))
-            #expect(team.providersTF.contains(#"backend "http""#))
+            #expect(team.providersTF.contains("""
+
+              # Team Mode: the state backend on this Mac stores the encrypted
+              # record in the team repository and locks it while in use.
+              # Its address and password come from TF_HTTP_* variables.
+              backend "http" {
+              }
+            }
+            """))
             #expect(!team.providersTF.contains("backend \"local\""))
             // Address and password come from TF_HTTP_* only.
             #expect(!team.providersTF.contains("address ="))
@@ -323,6 +339,40 @@ struct GeneratorTests {
 
     @Test func escapesHCLStrings() {
         #expect(WorkspaceGenerator.hclString(#"a "quoted" ${thing}"#) == #""a \"quoted\" $${thing}""#)
+        #expect(WorkspaceGenerator.hclString("a\r\nb\tc") == #""a\r\nb\tc""#)
+        #expect(BlockCapture.hclStringLiteral("a\r\nb\tc %{x}") == #""a\r\nb\tc %%{x}""#)
+    }
+
+    @Test func stringListsSplitCRLFInput() throws {
+        let block = try Self.metadata(
+            #"{"id": "lists", "name": "Lists", "settings": [{"key": "items", "title": "Items", "type": "list"}]}"#)
+        let output = try WorkspaceGenerator.generate(WorkspaceInput(
+            namePrefix: "JD - ",
+            selections: [GeneratedSelection(block: block, settings: ["items": "one\r\ntwo\r\n"])],
+            providerVersion: "1.5.0"))
+        #expect(output.mainTF.contains(#"["one", "two"]"#))
+    }
+
+    @Test func errorsNameBlocksAndSettingsByTitle() throws {
+        let catalog = try Self.catalog()
+        let enrollment = try #require(catalog.block(id: "enrollment"))
+        let setting = try #require(enrollment.settings.first { $0.key == "ade_instance_name" })
+        #expect {
+            try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "JD - ", selections: [Self.selection(catalog, "enrollment")], providerVersion: "1.5.0"))
+        } throws: { error in
+            guard case WorkspaceGeneratorError.missingRequiredSetting(let block, let title) = error else { return false }
+            return block == enrollment.name && title == setting.title
+        }
+        let consumer = try Self.metadata(
+            #"{"id": "cap-policies", "name": "Policies", "needs": {"script": ["Missing Script"]}}"#)
+        #expect {
+            try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "JD - ", selections: [GeneratedSelection(block: consumer, settings: [:])], providerVersion: "1.5.0"))
+        } throws: { error in
+            if case WorkspaceGeneratorError.unmetDependencies(block: "Policies", type: "script", names: ["Missing Script"]) = error { return true }
+            return false
+        }
     }
 }
 
@@ -402,7 +452,7 @@ struct AppCatalogTests {
         #expect {
             try WorkspaceGenerator.generate(input)
         } throws: { error in
-            if case WorkspaceGeneratorError.scopeNotChosen(block: "app-catalog") = error { return true }
+            if case WorkspaceGeneratorError.scopeNotChosen(block: block.name) = error { return true }
             return false
         }
     }
@@ -500,6 +550,21 @@ struct DriftFieldTests {
         #expect(DriftReportBuilder.deepFieldDiffs(before: before, after: after).isEmpty)
         let changed = JSONValue.object(["scope": .object(["computer_group_ids": .array([.number(6)]), "building_ids": .array([])])])
         #expect(DriftReportBuilder.deepFieldDiffs(before: before, after: changed).map(\.path) == ["scope.computer_group_ids"])
+    }
+
+    @Test func objectListElementTurningNullIsReported() throws {
+        let planJSON = """
+        {"format_version":"1.2","resource_drift":[
+          {"address":"jamfplatform_blueprints_blueprint.updates","type":"jamfplatform_blueprints_blueprint","name":"updates",
+           "change":{"actions":["update"],
+             "before":{"component_blocks":[{"kind":"a"},{"kind":"b"}]},
+             "after":{"component_blocks":[{"kind":"a"},null]}}}
+        ]}
+        """
+        let plan = try JSONDecoder().decode(PlanFile.self, from: Data(planJSON.utf8))
+        let report = DriftReportBuilder.build(plan: plan, blockNames: [:])
+        let object = try #require(report.objects.first)
+        #expect(object.fields.map(\.path) == ["component_blocks"])
     }
 }
 
@@ -1044,6 +1109,18 @@ struct AdoptPreviewTests {
         #expect(changing.fieldDiffs.map(\.path) == ["priority"])
         #expect(!summary.hasDestructiveChanges)
     }
+
+    @Test func unsetAndEmptyListsAreNotShownAsChanges() throws {
+        let planJSON = """
+        {"format_version":"1.2","resource_changes":[
+          {"address":"jamfplatform_pro_script.fix","type":"jamfplatform_pro_script","name":"fix",
+           "change":{"actions":["update"],"before":{"name":"Fix","ids":null,"tags":[]},"after":{"name":"Fixed","ids":[],"tags":null}}}
+        ]}
+        """
+        let plan = try JSONDecoder().decode(PlanFile.self, from: Data(planJSON.utf8))
+        let change = try #require(plan.resourceChanges?.first)
+        #expect(PreviewBuilder.fieldDiffs(for: change).map(\.path) == ["name"])
+    }
 }
 
 @Suite("Provider schema catalog")
@@ -1080,6 +1157,13 @@ struct SchemaCatalogTests {
         #expect(hcl.contains(#"resource "jamfplatform_pro_category" "custom_ops""#))
         #expect(hcl.contains(#"name = "JD - Ops""#))
         #expect(hcl.contains("priority = 9"))
+
+        // Numbers are written unquoted, so anything else becomes null.
+        let injected = OverrideGenerator.hcl(
+            resourceType: "jamfplatform_pro_category", terraformName: "custom_ops",
+            values: [(priority, "9\n  name = \"x\"")])
+        #expect(injected.contains("priority = null"))
+        #expect(!injected.contains(#"name = "x""#))
     }
 }
 

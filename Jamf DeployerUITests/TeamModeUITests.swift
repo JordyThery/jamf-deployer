@@ -59,8 +59,12 @@ final class TeamModeUITests: DeployerUITestCase {
     /// Precondition (set by the script): a teammate holds the tenant's lock.
     func test05LockedByATeammate() throws {
         openTenant(Self.tenant)
-        tap(app.toolbars.buttons["Check for Changes"], timeout: 30)
-        XCTAssertTrue(anyContaining("by teammate").waitForExistence(timeout: 300), "The teammate's lock was not reported")
+        let check = app.toolbars.buttons["Check for Changes"]
+        tap(check, timeout: 30)
+        // The check stops at the teammate's lock; wait until it has.
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: check)
+        waitForExpectations(timeout: 300)
+        XCTAssertTrue(anyContaining("Try again when they finish").waitForExistence(timeout: 30), "The teammate's lock was not reported")
         openSidebar("Dashboard")
         tap(app.toolbars.buttons["Sync"], timeout: 10)
         openTenant(Self.tenant)
@@ -74,7 +78,7 @@ final class TeamModeUITests: DeployerUITestCase {
         openTeamSettings()
         tap(app.buttons["Leave Team Mode…"], timeout: 10)
         tap(dialogButton("Leave Team Mode"), timeout: 10)
-        XCTAssertTrue(anyContaining("Left team mode").waitForExistence(timeout: 300), "Leaving did not finish")
+        XCTAssertTrue(anyContaining("Left Team Mode").waitForExistence(timeout: 300), "Leaving did not finish")
         app.typeKey("w", modifierFlags: .command)
         try checkForChanges(expectingChanges: false)
     }
@@ -83,7 +87,7 @@ final class TeamModeUITests: DeployerUITestCase {
         openTeamSettings()
         type(try env("TEAM_REPOSITORY"), into: app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'https://github.com/org/'")).firstMatch)
         paste(try env("TEAM_PASSPHRASE"), into: app.secureTextFields.matching(NSPredicate(format: "placeholderValue == 'Needed to join'")).firstMatch)
-        tap(app.buttons["Join Team Space…"])
+        tap(app.buttons["Join Team Space"])
         XCTAssertTrue(anyContaining("Joined the team space").waitForExistence(timeout: 300), "Joining did not finish")
         app.typeKey("w", modifierFlags: .command)
         try checkForChanges(expectingChanges: false)
@@ -99,7 +103,7 @@ final class TeamModeUITests: DeployerUITestCase {
         openTeamSettings()
         tap(app.buttons["Leave Team Mode…"], timeout: 10)
         tap(dialogButton("Leave Team Mode"), timeout: 10)
-        XCTAssertTrue(anyContaining("Left team mode").waitForExistence(timeout: 120))
+        XCTAssertTrue(anyContaining("Left Team Mode").waitForExistence(timeout: 120))
     }
 
     // MARK: Helpers

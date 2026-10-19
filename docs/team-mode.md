@@ -23,7 +23,7 @@ State is encrypted on this Mac with OpenTofu's native state encryption (PBKDF2 +
 - Each engineer enters it once when joining. It is kept in that Mac's Keychain.
 - **Settings → Team** shows or copies it, and accepts it on a Mac that doesn't have it yet. The tenant recovery sheet in Team Mode holds the team passphrase and the team space URL.
 
-Without the team passphrase, nobody can read the records, including the app.
+Without the team passphrase, nobody can read the engine state, including the app. Tenant records on `main` are plain JSON and hold no secrets.
 
 ## What is and isn't in the repository
 
@@ -54,7 +54,7 @@ The app first zips a backup of the local store. It then pushes the store to `mai
 
 **Join** (everyone else): open Settings and go to **Team**.
 1. Enter the repository URL and the team passphrase.
-2. Click **Join Team Space…**.
+2. Click **Join Team Space**.
 
 What happens to this Mac's data:
 - Local tenants the team space doesn't know yet are copied in, and their state moves to the state branch.

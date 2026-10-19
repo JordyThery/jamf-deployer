@@ -15,6 +15,25 @@ A="${CUSTOM_OBJECT_SERVICE:-JamfDeployer-Spike}"
 kc() { security find-generic-password -s "$1" -a "$2" -w }
 WORK="$(mktemp -d /tmp/jamf-deployer-cotest.XXXXXX)"
 HELPERS="$(dirname "$0")/catalog-test"
+# Removes everything the run created; runs once, however the script ends.
+cleanup() {
+    (( CLEANED )) && return 0
+    CLEANED=1
+    setopt local_options no_err_exit
+    echo "Cleaning up"
+    if (( $+functions[jp] )); then
+        jp "
+for s in scripts:
+    call('DELETE', '/api/v1/scripts/' + s['id']); print('  deleted', s['name'])
+for a in attributes:
+    call('DELETE', '/api/v1/computer-extension-attributes/' + a['id']); print('  deleted', a['name'])"
+    fi
+    rm -f ~/Documents/"Jamf Deployer Recovery — CO Platform.txt" ~/Documents/"Jamf Deployer Recovery — CO Jamf Pro.txt"
+    rm -rf "$WORK"
+}
+CLEANED=0
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
 export TEST_RUNNER_SBX_CLIENT_ID="$(kc $A client-id)"
 export TEST_RUNNER_SBX_CLIENT_SECRET="$(kc $A client-secret)"
@@ -73,12 +92,3 @@ jp "
 print('  restored in Jamf:', all(s['scriptContents'] == 'echo UIT' for s in scripts) and all(a['inventoryDisplayType'] == 'GENERAL' for a in attributes))"
 run test06RemoveTenants
 set -e
-
-echo "Cleaning up"
-jp "
-for s in scripts:
-    call('DELETE', '/api/v1/scripts/' + s['id']); print('  deleted', s['name'])
-for a in attributes:
-    call('DELETE', '/api/v1/computer-extension-attributes/' + a['id']); print('  deleted', a['name'])"
-rm -f ~/Documents/"Jamf Deployer Recovery — CO Platform.txt" ~/Documents/"Jamf Deployer Recovery — CO Jamf Pro.txt"
-rm -rf "$WORK"

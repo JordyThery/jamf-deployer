@@ -192,20 +192,20 @@ public nonisolated enum WorkspaceGenerator {
                     break
                 }
                 if let provided = selection.providedScope {
-                    let provider = try Self.provider(of: provided, kind: "device_group", for: block.id, in: input)
+                    let provider = try Self.provider(of: provided, kind: "device_group", for: block.name, in: input)
                     // Jamf Pro API modules only know Jamf Pro IDs.
                     let map = block.scope.kind == .platformGroup && input.connection == .platform
                         ? "device_group_ids" : "device_group_jamf_pro_ids"
                     arguments.append((variable, "module.\(sanitized(provider.id)).\(map)[\(hclString(provided.name))]"))
                     break
                 }
-                throw WorkspaceGeneratorError.scopeNotChosen(block: block.id)
+                throw WorkspaceGeneratorError.scopeNotChosen(block: block.name)
             }
 
             // Category wiring: one another block creates, an existing
             // category, or none ("-1").
             if block.acceptsCategory, let provided = selection.providedCategory {
-                let provider = try Self.provider(of: provided, kind: "category", for: block.id, in: input)
+                let provider = try Self.provider(of: provided, kind: "category", for: block.name, in: input)
                 arguments.append(("category_id", "module.\(sanitized(provider.id)).category_ids[\(hclString(provided.name))]"))
             } else if block.acceptsCategory {
                 arguments.append(("category_id", hclString(selection.existingCategoryID ?? "-1")))
@@ -222,7 +222,7 @@ public nonisolated enum WorkspaceGenerator {
                 let missing = names.filter { !covered.contains($0) }
                 guard missing.isEmpty else {
                     throw WorkspaceGeneratorError.unmetDependencies(
-                        block: block.id, type: depKey, names: missing)
+                        block: block.name, type: depKey, names: missing)
                 }
                 let maps = providers
                     .map { "module.\(sanitized($0.id)).\(depKey)_ids" }
@@ -246,7 +246,7 @@ public nonisolated enum WorkspaceGenerator {
                 // Secret values are supplied at launch time (TF_VAR_* from the
                 // Keychain), so an empty stored value is expected here.
                 if setting.required && raw.isEmpty && setting.type != .bool && setting.type != .secret {
-                    throw WorkspaceGeneratorError.missingRequiredSetting(block: block.id, setting: setting.key)
+                    throw WorkspaceGeneratorError.missingRequiredSetting(block: block.name, setting: setting.title)
                 }
                 switch setting.type {
                 case .secret:
@@ -274,7 +274,9 @@ public nonisolated enum WorkspaceGenerator {
                 case .string, .enumeration, .appPicker, .macAppStorePicker, .mobileAppStorePicker:
                     arguments.append((setting.key, hclString(raw)))
                 case .stringList:
-                    let items = raw.split(separator: "\n").map { hclString(String($0)) }
+                    // "\r\n" is one Character, so splitting on "\n" alone
+                    // would leave pasted CRLF text as a single item.
+                    let items = raw.split(whereSeparator: \.isNewline).map { hclString(String($0)) }
                     arguments.append((setting.key, "[\(items.joined(separator: ", "))]"))
                 }
             }
@@ -393,7 +395,7 @@ public nonisolated enum WorkspaceGenerator {
                     types.insert(String(match.1))
                 }
             }
-            for type in types { owners[type, default: []].append(selection.block.id) }
+            for type in types { owners[type, default: []].append(selection.block.name) }
         }
         if let (type, blocks) = owners.sorted(by: { $0.key < $1.key }).first(where: { $0.value.count > 1 }) {
             throw WorkspaceGeneratorError.conflictingSettings(type: type, blocks: blocks)
@@ -428,7 +430,9 @@ public nonisolated enum WorkspaceGenerator {
     }
 
     /// The state backend block, placed inside the terraform block of
-    /// providers.tf (whose interpolation sits at 8 spaces of indentation).
+    /// providers.tf. The interpolation there sits at column 0 once Swift
+    /// strips the literal's indentation, so every line gets the block's
+    /// two-space body indentation here.
     static func backendBlock(_ input: WorkspaceInput) -> String {
         let lines: [String] = switch input.stateBackend {
         case .local: [
@@ -446,8 +450,8 @@ public nonisolated enum WorkspaceGenerator {
             "}",
         ]
         }
-        return lines.enumerated()
-            .map { index, line in (index == 0 ? "  " : "          ") + line }
+        return lines
+            .map { "  " + $0 }
             .joined(separator: "\n")
     }
 
@@ -458,11 +462,11 @@ public nonisolated enum WorkspaceGenerator {
     }
 
     /// The selected block that creates a referenced group or category.
-    static func provider(of object: ProvidedObject, kind: String, for blockID: String, in input: WorkspaceInput) throws -> BlockMetadata {
+    static func provider(of object: ProvidedObject, kind: String, for blockName: String, in input: WorkspaceInput) throws -> BlockMetadata {
         guard let provider = input.selections.map(\.block).first(where: { $0.id == object.blockID }),
               (provider.provides[kind] ?? []).contains(object.name)
         else {
-            throw WorkspaceGeneratorError.unmetDependencies(block: blockID, type: kind, names: [object.name])
+            throw WorkspaceGeneratorError.unmetDependencies(block: blockName, type: kind, names: [object.name])
         }
         return provider
     }
@@ -478,6 +482,8 @@ public nonisolated enum WorkspaceGenerator {
         escaped = escaped.replacingOccurrences(of: "${", with: "$${")
         escaped = escaped.replacingOccurrences(of: "%{", with: "%%{")
         escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
+        escaped = escaped.replacingOccurrences(of: "\r", with: "\\r")
+        escaped = escaped.replacingOccurrences(of: "\t", with: "\\t")
         return "\"\(escaped)\""
     }
 }

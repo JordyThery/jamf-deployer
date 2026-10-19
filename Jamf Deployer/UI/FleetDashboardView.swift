@@ -12,6 +12,7 @@ struct FleetDashboardView: View {
     @State private var searchText = ""
     @State private var showsOnlyNeedsAttention = false
     @State private var isRollingOut = false
+    @State private var isSyncing = false
 
     private var rows: [Tenant] {
         tenantStore.tenants.filter { tenant in
@@ -116,10 +117,15 @@ struct FleetDashboardView: View {
             .help("Add a Jamf tenant to the fleet")
             if deployService.isTeamMode {
                 Button {
-                    Task { await deployService.syncTeamState() }
+                    isSyncing = true
+                    Task {
+                        await deployService.syncTeamState()
+                        isSyncing = false
+                    }
                 } label: {
                     Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                 }
+                .disabled(isSyncing)
                 .help("Pull the latest tenant records and locks from the team space")
             }
             Button {

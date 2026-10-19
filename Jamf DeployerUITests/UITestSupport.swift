@@ -195,7 +195,8 @@ class DeployerUITestCase: XCTestCase {
         row.rightClick()
         tap(app.menuItems["Remove Tenant…"])
         tap(app.sheets.buttons["Remove Tenant"], timeout: 10)
-        XCTAssertTrue(row.waitForNonExistence(timeout: 10))
+        // In Team Mode the tenant's state is deleted from the team space first.
+        XCTAssertTrue(row.waitForNonExistence(timeout: 120))
     }
 
     /// Waits until a preview sheet reaches its review step.

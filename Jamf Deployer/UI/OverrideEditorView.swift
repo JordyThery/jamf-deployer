@@ -183,7 +183,7 @@ struct OverrideEditorView: View {
                 ContentUnavailableView(
                     "Pick an Object Type",
                     systemImage: "square.grid.3x1.folder.badge.plus",
-                    description: Text("Every type the Jamf providers support is listed — the form is built from the live schema.")
+                    description: Text("Every type the Jamf engine plugins support is listed — the form is built from the live schema.")
                 )
                 .frame(maxWidth: .infinity)
             }

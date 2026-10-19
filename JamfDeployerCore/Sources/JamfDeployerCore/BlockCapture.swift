@@ -1405,7 +1405,10 @@ public nonisolated enum BlockCapture {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "${", with: "$${")
-            .replacingOccurrences(of: "%{", with: "%%{") + "\""
+            .replacingOccurrences(of: "%{", with: "%%{")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t") + "\""
     }
 
     /// Returns each `variable "name" { … }` declaration in a variables file,

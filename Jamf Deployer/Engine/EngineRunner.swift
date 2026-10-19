@@ -184,14 +184,25 @@ actor EngineRunner {
         process.standardInput = input == nil ? FileHandle.nullDevice : stdin
         process.standardOutput = stdout
         process.standardError = stderr
+        // A child that exits before reading its input must not raise SIGPIPE
+        // in the app; the write then fails and the exit status reports why.
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         let terminated = Self.installTerminationWait(process)
         try process.run()
-        if let input {
-            stdin.fileHandleForWriting.write(input)
-            try? stdin.fileHandleForWriting.close()
+
+        // Writing and both reads block, so each runs on its own thread:
+        // a full pipe on any of them would otherwise stall the others.
+        let writer = stdin.fileHandleForWriting
+        let writeTask = Task.detached {
+            if let input { try? writer.write(contentsOf: input) }
+            try? writer.close()
         }
-        let errorTask = Task { stderr.fileHandleForReading.readDataToEndOfFile() }
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let outputHandle = stdout.fileHandleForReading
+        let errorHandle = stderr.fileHandleForReading
+        let outputTask = Task.detached { outputHandle.readDataToEndOfFile() }
+        let errorTask = Task.detached { errorHandle.readDataToEndOfFile() }
+        await writeTask.value
+        let data = await outputTask.value
         let errors = await errorTask.value
         await Self.awaitTermination(terminated)
         guard process.terminationStatus == 0 else {

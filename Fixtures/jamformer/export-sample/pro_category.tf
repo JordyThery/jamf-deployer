@@ -41,17 +41,17 @@ resource "jamfplatform_pro_category" "jamf" {
   priority = 7
 }
 
-resource "jamfplatform_pro_category" "l9_spike_cis_l1_monitor" {
+resource "jamfplatform_pro_category" "jd_spike_cis_l1_monitor" {
   provider = jamfplatform
 
-  name     = "L9 Spike - CIS L1 Monitor"
+  name     = "JD Spike - CIS L1 Monitor"
   priority = 9
 }
 
-resource "jamfplatform_pro_category" "l9_spike_deployer" {
+resource "jamfplatform_pro_category" "jd_spike_deployer" {
   provider = jamfplatform
 
-  name     = "L9 Spike - Deployer"
+  name     = "JD Spike - Deployer"
   priority = 9
 }
 

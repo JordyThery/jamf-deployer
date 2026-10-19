@@ -16,6 +16,28 @@ A="${ROLLOUT_SERVICE_A:-JamfDeployer-Spike}"
 B="${ROLLOUT_SERVICE_B:-JamfDeployer-Demo}"
 kc() { security find-generic-password -s "$1" -a "$2" -w }
 WORK="$(mktemp -d /tmp/jamf-deployer-uitest.XXXXXX)"
+# Removes everything the run created; runs once, however the script ends.
+cleanup() {
+    (( CLEANED )) && return 0
+    CLEANED=1
+    setopt local_options no_err_exit
+    echo "Cleaning up"
+    if (( $+functions[api] )); then
+        for service in "$A" "$B"; do
+            api "$service" "
+for c in test:
+    call('DELETE', '/pro/v1/categories/' + c['id'])
+    print('  deleted', c['name'], 'on $service')"
+        done
+    fi
+    rm -f ~/Documents/"Jamf Deployer Recovery — UI Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — UI Demo.txt"
+    rm -f ~/Documents/AsBuilt-"UI Sandbox"-*.md(N) ~/Documents/Snapshot-"UI Demo"-*.zip(N)
+    rm -rf ~/Library/Application\ Support/Jamf\ Deployer/cloned-blocks/blocks/clone-uisandbox-*(N) ~/Library/Application\ Support/Jamf\ Deployer/cloned-blocks/blocks/uit-captured-categories
+    rm -rf "$WORK"
+}
+CLEANED=0
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
 # A local catalog with exactly two release tags: v1.0.0 is the demo catalog
 # (CATALOG_SOURCE, default the public one, at its default branch) and v1.0.1
@@ -95,15 +117,3 @@ for step in test06DeployDemoBaseline test07RolloutCatalogRelease test08HistoryRo
     run $step
 done
 set -e
-
-echo "Cleaning up"
-for service in "$A" "$B"; do
-    api "$service" "
-for c in test:
-    call('DELETE', '/pro/v1/categories/' + c['id'])
-    print('  deleted', c['name'], 'on $service')"
-done
-rm -f ~/Documents/"Jamf Deployer Recovery — UI Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — UI Demo.txt"
-rm -f ~/Documents/AsBuilt-"UI Sandbox"-*.md(N) ~/Documents/Snapshot-"UI Demo"-*.zip(N)
-rm -rf ~/Library/Application\ Support/Jamf\ Deployer/cloned-blocks/blocks/clone-uisandbox-*(N) ~/Library/Application\ Support/Jamf\ Deployer/cloned-blocks/blocks/uit-captured-categories
-rm -rf "$WORK"

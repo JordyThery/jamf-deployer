@@ -9,11 +9,12 @@ Date: 2026-10-17 · Engine: OpenTofu 1.13.1 · Providers: jamfplatform 1.5.0, ja
 - Provider filesystem mirror at `Vendor/providers/registry.opentofu.org/{jamf/jamfplatform@1.5.0, jamf-concepts/jamfprotect@0.12.0}` (packed layout, SHA256-verified, both architectures).
 - jamformer 0.6.0 (darwin-universal).
 
-### Spike workspaces (`Spike/`)
+### Spike workspaces
+*These were temporary spike workspaces and are no longer part of the repository.*
 - `tofu.tfrc` — CLI config with `filesystem_mirror` + `direct { exclude }`; proven that init installs only from the mirror (negative control with a broken mirror fails; mirror installs report "unauthenticated").
 - `mirror-test/` — provider install + `providers schema -json` capture.
 - `engine-fixtures/` — offline cycle with `terraform_data`: encryption, forget, fixture capture.
-- `live-sandbox/` — hand-written foundation + rosetta blocks plus blueprint, benchmark, prestage (var-gated), package upload (var-gated), with `run.sh` (plan/apply/refresh/destroy/output; credentials read from the login Keychain, service `JamfDeployer-Spike`).
+- `live-sandbox/` — hand-written foundation + rosetta blocks plus blueprint, benchmark, prestage (var-gated), package upload (var-gated), with `run.sh` (plan/apply/refresh/destroy/output; credentials read from the login Keychain).
 - `mcp.sh` — query helper for the Jamf Developer MCP over HTTPS (needs the `MCP-Protocol-Version: 2025-06-18` header or the server 500s).
 
 ### Fixtures (`Fixtures/`) — the contract for the app's parsers
@@ -39,11 +40,11 @@ Drift flow proven: rename via direct API → `tofu plan -refresh-only` reports `
 ## 2. How to test manually
 
 CLI (no credentials needed for the first two):
-1. `Spike/mirror-test`: `TF_CLI_CONFIG_FILE=Spike/tofu.tfrc Vendor/opentofu/bin/tofu init` → providers install from the mirror, no network.
-2. `Spike/engine-fixtures`: same pattern with the `TF_ENCRYPTION` env from `run.sh` → encrypted state, `forget` behaviour.
-3. `Spike/live-sandbox`: `./run.sh plan` → review → `./run.sh apply` → `./run.sh refresh` → `./run.sh destroy`. Optional gates: `TF_VAR_ade_instance_name="Apple Business Manager"`, `TF_VAR_package_path=$PWD/files/jamf-deployer-spike.pkg`.
+1. Mirror test: `TF_CLI_CONFIG_FILE=tofu.tfrc Vendor/opentofu/bin/tofu init` → providers install from the mirror, no network.
+2. Engine fixtures: same pattern with the `TF_ENCRYPTION` env from `run.sh` → encrypted state, `forget` behaviour.
+3. Live sandbox: `./run.sh plan` → review → `./run.sh apply` → `./run.sh refresh` → `./run.sh destroy`. Optional gates: `TF_VAR_ade_instance_name="Apple Business Manager"`, `TF_VAR_package_path=$PWD/files/jamf-deployer-spike.pkg`.
 
-App: build & run (⌘R) → debug window → Init → Preview changes → Read plan (decoded actions + changed attributes) → Deploy → Check for changes. First use triggers a Keychain access prompt for the `JamfDeployer-Spike` items — click Always Allow.
+App: build & run (⌘R) → debug window → Init → Preview changes → Read plan (decoded actions + changed attributes) → Deploy → Check for changes. First use triggers a Keychain access prompt for the spike's login Keychain items — click Always Allow.
 
 ## 3. TODO(verify) resolutions
 
@@ -85,4 +86,4 @@ App: build & run (⌘R) → debug window → Init → Preview changes → Read p
 2. **App Sandbox disabled** (required to exec the engine). This assumes Developer ID + Sparkle distribution like Intune Deployer, i.e. no Mac App Store. Confirm.
 3. **Vendor binaries in git**: extracted binaries are gitignored; the verified zips (~90 MB) currently are not. Options: commit zips, or add a pinned fetch-and-verify script. Preference?
 4. Spike leftovers: credentials screenshots at the repo root are gitignored but still on disk — consider deleting them now that the sandbox credentials are in the Keychain (the demo environment's screenshot is still unread/unstored).
-5. Naming: per your guidance, no tenant-provider or "MSP"/"customer" wording anywhere; spike prefix is now "JD Spike - ". Default `name_prefix` for real baselines ("JD - "?) to settle in Phase 2.
+5. Naming: per your guidance, neutral vocabulary everywhere; spike prefix is now "JD Spike - ". Default `name_prefix` for real baselines ("JD - "?) to settle in Phase 2.

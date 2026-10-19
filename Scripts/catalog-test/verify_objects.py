@@ -5,7 +5,12 @@ import base64, json, subprocess, sys, urllib.request, urllib.error
 
 svc, prefix = sys.argv[1], sys.argv[2]
 expect = sys.argv[3] if len(sys.argv) > 3 else "present"
-kc = lambda a: subprocess.run(["security", "find-generic-password", "-s", svc, "-a", a, "-w"], capture_output=True, text=True).stdout.strip()
+def kc(a):
+    found = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", a, "-w"], capture_output=True, text=True)
+    value = found.stdout.strip()
+    if found.returncode != 0 or not value:
+        sys.exit(f"Keychain item missing: service {svc!r}, account {a!r}")
+    return value
 base = "https://" + kc("jamfpro-fqdn")
 basic = base64.b64encode((kc("jamfpro-username") + ":" + kc("jamfpro-password")).encode()).decode()
 token = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/v1/auth/token", method="POST", headers={"Authorization": "Basic " + basic})))["token"]

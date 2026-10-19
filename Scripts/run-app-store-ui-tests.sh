@@ -16,6 +16,26 @@ APP="${APP_NAME:-Microsoft Word}"
 kc() { security find-generic-password -s "$1" -a "$2" -w }
 WORK="$(mktemp -d /tmp/jamf-deployer-astest.XXXXXX)"
 HELPERS="$(dirname "$0")/catalog-test"
+# Removes everything the run created; runs once, however the script ends.
+cleanup() {
+    (( CLEANED )) && return 0
+    CLEANED=1
+    setopt local_options no_err_exit
+    echo "Cleaning up"
+    if (( $+functions[jp] )); then
+        jp "
+print('  app left in Jamf after removal:', len(apps))
+for a in apps:
+    classic('DELETE', '/macapplications/id/' + str(a['id'])); print('  deleted', a['name'])
+for g in groups:
+    call('DELETE', '/api/v2/computer-groups/static-groups/' + str(g['id'])); print('  deleted', g['name'])"
+    fi
+    rm -f ~/Documents/"Jamf Deployer Recovery — AS Platform.txt"
+    rm -rf "$WORK"
+}
+CLEANED=0
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
 export TEST_RUNNER_SBX_CLIENT_ID="$(kc $A client-id)"
 export TEST_RUNNER_SBX_CLIENT_SECRET="$(kc $A client-secret)"
@@ -79,13 +99,3 @@ for a in apps:
     print('  restored in Jamf:', classic('GET', '/macapplications/id/' + str(a['id']))['mac_application']['general']['deployment_type'])"
 run test05RemoveBlockAndTenant
 set -e
-
-echo "Cleaning up"
-jp "
-print('  app left in Jamf after removal:', len(apps))
-for a in apps:
-    classic('DELETE', '/macapplications/id/' + str(a['id'])); print('  deleted', a['name'])
-for g in groups:
-    call('DELETE', '/api/v2/computer-groups/static-groups/' + str(g['id'])); print('  deleted', g['name'])"
-rm -f ~/Documents/"Jamf Deployer Recovery — AS Platform.txt"
-rm -rf "$WORK"

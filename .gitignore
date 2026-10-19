@@ -6,7 +6,6 @@ plan*.bin
 Vendor/opentofu/bin/
 Vendor/jamformer/jamformer
 *credentials*.png
-Spike/jamformer-out/
 
 # Build products and per-user state
 .build/
@@ -21,8 +20,6 @@ Vendor/jamformer/
 Vendor/providers/
 Vendor/terraform-backend-git/
 
-# Spike artifacts
-Spike/live-sandbox/files/*.pkg
 .terraform.lock.hcl
 Jamf Deployer.app/
 Jamf.Deployer.*.zip

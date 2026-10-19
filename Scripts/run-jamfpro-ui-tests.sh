@@ -16,6 +16,30 @@ A="${JAMFPRO_SERVICE_A:-JamfDeployer-Spike}"
 B="${JAMFPRO_SERVICE_B:-JamfDeployer-Demo}"
 kc() { security find-generic-password -s "$1" -a "$2" -w }
 WORK="$(mktemp -d /tmp/jamf-deployer-jpuitest.XXXXXX)"
+# Removes everything the run created, the temporary API client last; runs
+# once, however the script ends.
+cleanup() {
+    (( CLEANED )) && return 0
+    CLEANED=1
+    setopt local_options no_err_exit
+    echo "Cleaning up"
+    if (( $+functions[jp] )); then
+        for service in "$A" "$B"; do
+            jp "$service" "
+for c in test:
+    call('DELETE', '/api/v1/categories/' + c['id'])
+    print('  deleted', c['name'], 'on $service')"
+        done
+    fi
+    rm -f ~/Documents/"Jamf Deployer Recovery — JP Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — JP Demo.txt" \
+        ~/Documents/"Jamf Deployer Recovery — JP Sandbox API Client.txt"
+    rm -f ~/Documents/Snapshot-"JP Sandbox"-*.zip(N)
+    rm -rf "$WORK"
+    if [[ -n "$CLIENT_ID" ]]; then remove_client; fi
+}
+CLEANED=0
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
 export TEST_RUNNER_JPSBX_URL="https://$(kc $A jamfpro-fqdn)"
 export TEST_RUNNER_JPSBX_USERNAME="$(kc $A jamfpro-username)"
@@ -56,14 +80,13 @@ print(role['id'], client['id'], secret['clientId'], secret['clientSecret'])")"
 read ROLE_ID CLIENT_ID TEST_RUNNER_JPSBX_CLIENT_ID TEST_RUNNER_JPSBX_CLIENT_SECRET <<< "$CREDS"
 export TEST_RUNNER_JPSBX_CLIENT_ID TEST_RUNNER_JPSBX_CLIENT_SECRET
 # The temporary client can change categories, so it goes away however the
-# script ends.
+# script ends (from cleanup).
 remove_client() {
     jp "$A" "
 call('DELETE', '/api/v1/api-integrations/$CLIENT_ID')
 call('DELETE', '/api/v1/api-roles/$ROLE_ID')
 print('  deleted the temporary API client and role')"
 }
-trap remove_client EXIT
 
 xcodebuild build -project "Jamf Deployer.xcodeproj" -scheme "Jamf Deployer" -configuration Debug -destination "platform=macOS,arch=arm64" -quiet
 # Save panels open in ~/Documents, where the cleanup below looks.
@@ -98,15 +121,3 @@ for step in test05DriftKeepChange test06ExportSnapshot test07Rollout test08DaySe
     run $step
 done
 set -e
-
-echo "Cleaning up"
-for service in "$A" "$B"; do
-    jp "$service" "
-for c in test:
-    call('DELETE', '/api/v1/categories/' + c['id'])
-    print('  deleted', c['name'], 'on $service')"
-done
-rm -f ~/Documents/"Jamf Deployer Recovery — JP Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — JP Demo.txt" \
-    ~/Documents/"Jamf Deployer Recovery — JP Sandbox API Client.txt"
-rm -f ~/Documents/Snapshot-"JP Sandbox"-*.zip(N)
-rm -rf "$WORK"
