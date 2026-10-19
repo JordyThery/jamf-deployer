@@ -34,6 +34,8 @@ export TEST_RUNNER_SBX_ENVIRONMENT_ID="$(kc $A environment-id)"
 export TEST_RUNNER_TEAM_REPOSITORY="https://github.com/$REPO.git"
 
 rm -f ~/Documents/"Jamf Deployer Recovery — Team Sandbox.txt"
+export TEST_RUNNER_TEAM_EXPORT_DIR="$HOME/Documents/UIT Team Export"
+rm -rf "$TEST_RUNNER_TEAM_EXPORT_DIR"; mkdir -p "$TEST_RUNNER_TEAM_EXPORT_DIR"
 # This Mac's store is set aside; the run starts with an empty one.
 pkill -x "Jamf Deployer" 2>/dev/null || true
 # Without a store there is nothing to set aside; the marker tells
@@ -78,6 +80,7 @@ restore_store() {
         gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" > /dev/null 2>&1
     done
     rm -f ~/Documents/"Jamf Deployer Recovery — Team Sandbox.txt"
+    rm -rf "$TEST_RUNNER_TEAM_EXPORT_DIR"
     # Step logs are kept for diagnosis, without the passphrase: the marker
     # line, and the value itself wherever it shows up (a failing test dumps
     # the UI hierarchy, which can show the passphrase as text).
@@ -161,6 +164,7 @@ echo "  teammate locks the tenant: $(curl -s -o /dev/null -w '%{http_code}' -u m
     --data '{"ID":"teammate-lock","Operation":"OperationTypePlan","Who":"teammate@other-mac","Version":"1.13.1","Created":"2026-10-19T08:00:00Z","Path":"","Info":""}' "$U")"
 kill $MATE
 run test05LockedByATeammate
+echo "  team export: $(ls "$TEST_RUNNER_TEAM_EXPORT_DIR/tenants" 2> /dev/null | tr '\n' ' ')"
 echo "  lock branches left: $(gh api "repos/$REPO/branches" --jq '.[].name' | grep -c '^locks/')"
 run test06LeaveTeamMode
 echo "  local state back in the workspace: $(ls "$SUPPORT/store/tenants/$ID/state/terraform.tfstate" 2>/dev/null | wc -l | tr -d ' ')"

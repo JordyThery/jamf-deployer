@@ -461,12 +461,26 @@ struct PreviewDeploySheet: View {
             // App-level errors describe themselves; the translation table is
             // for raw engine and provider output.
             if let described = (error as? LocalizedError)?.errorDescription {
-                stage = .failed(described, detail: raw)
+                stage = .failed(described, detail: Self.readableDetail(error))
             } else {
                 let translated = ErrorTranslation.translate(raw)
-                stage = .failed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: raw)
+                stage = .failed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: Self.readableDetail(error))
             }
         }
+    }
+
+    /// What the engine said, for the failure's details: its error
+    /// diagnostics, or the end of its output, rather than Swift's own
+    /// description of the error value.
+    private static func readableDetail(_ error: Error) -> String {
+        if case EngineRunner.EngineError.nonZeroExit(let result) = error {
+            let diagnostics = result.errorDiagnostics.map { diagnostic in
+                [diagnostic.address, diagnostic.summary, diagnostic.detail]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+            }
+            return diagnostics.isEmpty ? result.rawLines.suffix(40).joined(separator: "\n") : diagnostics.joined(separator: "\n\n")
+        }
+        return (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
 
     private func startDeploy(_ session: PreviewSession) {
@@ -489,10 +503,10 @@ struct PreviewDeploySheet: View {
             } catch {
                 let raw = String(describing: error)
                 if let described = (error as? LocalizedError)?.errorDescription {
-                    stage = .deployFailed(described, detail: raw)
+                    stage = .deployFailed(described, detail: Self.readableDetail(error))
                 } else {
                     let translated = ErrorTranslation.translate(raw)
-                    stage = .deployFailed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: raw)
+                    stage = .deployFailed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: Self.readableDetail(error))
                 }
             }
         }

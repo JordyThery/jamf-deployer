@@ -10,7 +10,12 @@ final class ExportUITests: DeployerUITestCase {
     static let catalogName = "UIT Export Catalog"
 
     func test01ConnectAndDeploy() throws {
-        try connect(name: Self.tenant, prefix: "SBX")
+        // EXPORT_CONNECTION=jamfpro runs the suite on a Jamf Pro API tenant.
+        if ProcessInfo.processInfo.environment["EXPORT_CONNECTION"] == "jamfpro" {
+            try connectJamfPro(name: Self.tenant, prefix: "JPX")
+        } else {
+            try connect(name: Self.tenant, prefix: "SBX")
+        }
         openTenant(Self.tenant)
         let prefixField = app.textFields.matching(NSPredicate(format: "value BEGINSWITH 'JD'")).firstMatch
         if prefixField.waitForExistence(timeout: 5) {
@@ -36,14 +41,36 @@ final class ExportUITests: DeployerUITestCase {
         openTenant(Self.tenant)
         // Matched by the demo blocks' own descriptions: other catalogs on
         // this Mac may have blocks with the same names.
-        for block in ["Categories, Applications, Enrollment", "Extension Attributes, A Baseline Marker"] {
+        // EXPORT_EXTRAS=1 adds the Jamf Protect baseline and the test
+        // catalog's block with a secret setting (EXPORT_SECRET).
+        let extras = ProcessInfo.processInfo.environment["EXPORT_EXTRAS"] == "1"
+        var blocks = ["Categories, Applications, Enrollment", "Extension Attributes, A Baseline Marker"]
+        if extras { blocks += ["Jamf Protect Baseline, Endpoint security", "UIT Secret Marker, "] }
+        for block in blocks {
             let checkbox = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", block)).firstMatch
-            XCTAssertTrue(checkbox.waitForExistence(timeout: 30), "\(block) is not in the library")
+            XCTAssertTrue(checkbox.waitForExistence(timeout: 90), "\(block) is not in the library")
             if (checkbox.value as? Int) != 1 { checkbox.click() }
+        }
+        if extras {
+            // Settings open one block at a time; open each until the token shows.
+            let token = app.secureTextFields["Test token"]
+            // Each selected block's row has one Show/Hide Settings button.
+            let toggles = app.buttons.matching(NSPredicate(format: "label IN {'Show Settings', 'Hide Settings'}"))
+            for index in 0..<toggles.count where !token.exists {
+                let toggle = toggles.element(boundBy: index)
+                if toggle.label == "Show Settings" {
+                    toggle.click()
+                    sleep(1)
+                }
+            }
+            XCTAssertTrue(token.waitForExistence(timeout: 5), "The secret setting is not shown")
+            paste(try env("EXPORT_SECRET"), into: token)
+            app.typeKey(.tab, modifierFlags: [])
         }
         stageCustomCategory(on: Self.tenant, objectName: "export_custom", name: "UIT EX - Custom", priority: "5")
         previewAndDeploy()
-        XCTAssertTrue(anyContaining("7 succeeded").waitForExistence(timeout: 15), "The baseline did not deploy")
+        XCTAssertTrue(anyContaining(extras ? "12 succeeded" : "7 succeeded").waitForExistence(timeout: 15),
+                      "The baseline did not deploy")
     }
 
     /// With technical details on (set by the script), a preview shows the
@@ -60,7 +87,7 @@ final class ExportUITests: DeployerUITestCase {
 
     func test02ExportForReview() throws {
         openExportSheet()
-        chooseTenantAndFolder(try env("EXPORT_REVIEW_DIR"))
+        chooseTenantAndFolder(Self.tenant, try env("EXPORT_REVIEW_DIR"))
         tap(app.sheets.buttons["Export"])
         XCTAssertTrue(anyContaining("Exported 1 tenant").waitForExistence(timeout: 300), "The export did not finish")
         tap(app.sheets.buttons["Done"])
@@ -68,7 +95,7 @@ final class ExportUITests: DeployerUITestCase {
 
     func test03MoveToRepository() throws {
         openExportSheet()
-        chooseTenantAndFolder(try env("EXPORT_MOVE_DIR"))
+        chooseTenantAndFolder(Self.tenant, try env("EXPORT_MOVE_DIR"))
         let move = app.sheets.radioButtons.matching(NSPredicate(format: "label ENDSWITH %@", "Move to a repository")).firstMatch
         scrollIntoView(move)
         move.click()
@@ -83,11 +110,13 @@ final class ExportUITests: DeployerUITestCase {
         tap(app.sheets.buttons["Export and Move"])
         // Ends with the outcome, or with the sheet's error (shown in the failure).
         let moved = anyContaining("Moved 1 tenant")
-        let failure = app.sheets.staticTexts.matching(NSPredicate(
-            format: "value CONTAINS[c] 'could not' OR value CONTAINS[c] 'has changes' OR value CONTAINS[c] 'already has'")).firstMatch
+        let failure = app.sheets.descendants(matching: .any)["exportError"]
         let deadline = Date.now.addingTimeInterval(600)
         while !moved.exists, !failure.exists, Date.now < deadline { sleep(2) }
-        XCTAssertTrue(moved.exists, "The move did not finish: \(failure.exists ? (failure.value as? String ?? failure.label) : "timed out")")
+        if !moved.exists {
+            let texts = app.sheets.staticTexts.allElementsBoundByIndex.map { ($0.value as? String) ?? $0.label }
+            XCTFail("The move did not finish: \(failure.exists ? failure.label : "timed out") | \(texts.joined(separator: " | "))")
+        }
         tap(app.sheets.buttons["Done"])
         openTenant(Self.tenant)
         XCTAssertTrue(anyContaining("moved to the Terraform repository").waitForExistence(timeout: 10),
@@ -112,34 +141,5 @@ final class ExportUITests: DeployerUITestCase {
             form.scroll(byDeltaX: 0, deltaY: -80)
             attempts += 1
         }
-    }
-
-    private func openExportSheet() {
-        openSidebar("Dashboard")
-        tap(app.toolbars.buttons["Export as Terraform…"], timeout: 10)
-        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10))
-    }
-
-    /// Ticks the test tenant (and only it) and picks the folder through the
-    /// open panel's Go to Folder field.
-    private func chooseTenantAndFolder(_ path: String) {
-        for checkbox in app.sheets.checkBoxes.allElementsBoundByIndex
-        where !checkbox.label.hasPrefix(Self.tenant) && checkbox.label != "Stop managing these tenants in this app"
-            && (checkbox.value as? Int) == 1 {
-            checkbox.click()
-        }
-        let mine = app.sheets.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", Self.tenant)).firstMatch
-        XCTAssertTrue(mine.waitForExistence(timeout: 10), "The tenant is not offered")
-        if (mine.value as? Int) != 1 { mine.click() }
-
-        tap(app.sheets.buttons["Choose…"])
-        let panel = app.dialogs.firstMatch
-        XCTAssertTrue(panel.waitForExistence(timeout: 10), "The folder panel did not open")
-        app.typeKey("g", modifierFlags: [.command, .shift])
-        sleep(1)
-        app.typeText(path + "\n")
-        sleep(1)
-        tap(app.dialogs.buttons["Choose"].firstMatch, timeout: 10)
-        XCTAssertTrue(anyContaining((path as NSString).lastPathComponent).waitForExistence(timeout: 10), "The folder was not chosen")
     }
 }

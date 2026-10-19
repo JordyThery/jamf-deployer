@@ -151,6 +151,7 @@ struct RepositoryExportSheet: View {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .textSelection(.enabled)
+                    .accessibilityIdentifier("exportError")
             }
         }
         .formStyle(.grouped)

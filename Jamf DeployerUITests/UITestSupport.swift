@@ -125,12 +125,17 @@ class DeployerUITestCase: XCTestCase {
         let secret = try env("\(prefix)_CLIENT_SECRET")
         let environmentID = try env("\(prefix)_ENVIRONMENT_ID")
 
+        // Optional: `<prefix>_REGION` (default US) and a Protect connection
+        // from `<prefix>_PROTECT_URL`, `_PROTECT_CLIENT_ID`, `_PROTECT_CLIENT_SECRET`.
+        let environment = ProcessInfo.processInfo.environment
+        let region = environment["\(prefix)_REGION"] ?? "US"
+
         if app.outlines.staticTexts[name].exists { return }
         tap(app.toolbars.buttons["Connect a Tenant"])
 
         type(name, into: field("Contoso Production"))
         tap(app.sheets.popUpButtons.matching(NSPredicate(format: "value == 'EU'")).firstMatch)
-        tap(app.menuItems["US"])
+        tap(app.menuItems[region])
         tap(app.buttons["Continue"])
         tap(app.buttons["Continue"])
 
@@ -138,6 +143,12 @@ class DeployerUITestCase: XCTestCase {
         paste(secret, into: app.sheets.secureTextFields.firstMatch)
         paste(environmentID, into: field("e77c1408"))
         tap(app.buttons["Continue"])
+        if let protectURL = environment["\(prefix)_PROTECT_URL"] {
+            paste(protectURL, into: field("https://yourorg.protect.jamfcloud.com"))
+            // The client ID field has no placeholder; it follows the URL field.
+            paste(try env("\(prefix)_PROTECT_CLIENT_ID"), into: app.sheets.textFields.element(boundBy: 1))
+            paste(try env("\(prefix)_PROTECT_CLIENT_SECRET"), into: app.sheets.secureTextFields.firstMatch)
+        }
         tap(app.buttons["Run Preflight"])
         tap(app.buttons["Add Tenant"], timeout: 180)
         XCTAssertTrue(app.outlines.staticTexts[name].waitForExistence(timeout: 10))
@@ -200,7 +211,7 @@ class DeployerUITestCase: XCTestCase {
     }
 
     /// Waits until a preview sheet reaches its review step.
-    func waitForReview(timeout: TimeInterval = 300) -> Bool {
+    func waitForReview(timeout: TimeInterval = 600) -> Bool {
         let deploy = app.buttons["Deploy"]
         let save = app.buttons["Save Recovery Sheet…"]
         let deadline = Date().addingTimeInterval(timeout)
@@ -304,5 +315,36 @@ class DeployerUITestCase: XCTestCase {
     /// The baseline editor's checkbox for a catalog block.
     func blockCheckbox(_ name: String) -> XCUIElement {
         app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", name + ",")).firstMatch
+    }
+
+    // MARK: Export as Terraform
+
+    func openExportSheet() {
+        openSidebar("Dashboard")
+        tap(app.toolbars.buttons["Export as Terraform…"], timeout: 10)
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10))
+    }
+
+    /// Ticks `tenant` (and only it) in the export sheet and picks the folder
+    /// through the open panel's Go to Folder field.
+    func chooseTenantAndFolder(_ tenant: String, _ path: String) {
+        for checkbox in app.sheets.checkBoxes.allElementsBoundByIndex
+        where !checkbox.label.hasPrefix(tenant) && checkbox.label != "Stop managing these tenants in this app"
+            && (checkbox.value as? Int) == 1 {
+            checkbox.click()
+        }
+        let mine = app.sheets.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", tenant)).firstMatch
+        XCTAssertTrue(mine.waitForExistence(timeout: 10), "The tenant is not offered")
+        if (mine.value as? Int) != 1 { mine.click() }
+
+        tap(app.sheets.buttons["Choose…"])
+        let panel = app.dialogs.firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 10), "The folder panel did not open")
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        sleep(1)
+        app.typeText(path + "\n")
+        sleep(1)
+        tap(app.dialogs.buttons["Choose"].firstMatch, timeout: 10)
+        XCTAssertTrue(anyContaining((path as NSString).lastPathComponent).waitForExistence(timeout: 10), "The folder was not chosen")
     }
 }

@@ -254,10 +254,11 @@ final class TenantDeployService {
 
         var exports: [StandaloneExport.Tenant] = []
         var folders: [UUID: String] = [:]
+        var outputs: [UUID: WorkspaceGenerator.Output] = [:]
         for tenant in tenants {
             let catalog = try loadCatalog(for: tenant)
             // Regenerating the workspace also lays out its adopted files.
-            try generateWorkspace(for: tenant, catalog: catalog)
+            outputs[tenant.id] = try generateWorkspace(for: tenant, catalog: catalog)
             let selections = try WorkspaceGenerator.resolveModules(
                 generatedSelections(for: tenant, catalog: catalog), catalog: catalog, connection: tenant.connection)
             let slug = StandaloneExport.slug(for: tenant.name, taken: Set(folders.values))
@@ -302,7 +303,9 @@ final class TenantDeployService {
         // deployed (or was changed in Jamf) is settled here first.
         var states: [(slug: String, state: Data)] = []
         for tenant in tenants {
-            let runner = try await makeRunner(for: tenant)
+            // The plan needs the tenant's secret settings, as a preview does.
+            let secrets = try outputs[tenant.id].map { try secretSettingEnvironment(for: tenant, output: $0) } ?? [:]
+            let runner = try await makeRunner(for: tenant, extraEnvironment: secrets)
             try await runEngine(runner, ["init", "-input=false"])
             do {
                 try await runner.run(arguments: ["plan", "-input=false", "-detailed-exitcode", "-lock=false", "-json"]
