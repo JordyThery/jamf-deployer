@@ -5,8 +5,8 @@ import DeployerKit
 /// Settings → Team: the safe switch into (and out of) a shared store.
 ///
 /// A team space is a Git repository: tenant records, history and catalog
-/// sources on its main branch, every tenant's encrypted engine state on a
-/// separate branch written by the state backend, which also locks a
+/// sources on its main branch, every tenant's encrypted deployment state on
+/// a separate branch written by the state backend, which also locks a
 /// tenant's state while an engineer previews, checks or deploys it.
 struct TeamSettingsView: View {
     @Environment(TenantStore.self) private var tenantStore
@@ -49,20 +49,20 @@ struct TeamSettingsView: View {
             Text("Team")
         } footer: {
             Text(deployService.isTeamMode
-                ? "Tenant records, history and the list of catalog sources sync through the team space. Each tenant's record is stored encrypted on the repository's \(StateBackendService.stateBranch) branch and locked while someone previews, checks or deploys it. Every engineer signs in to tenants with their own API client or account, kept in their own Keychain."
-                : "A team space is a Git repository (for example on GitHub) that tenants, history and catalog sources sync through; tenant records are stored encrypted on a separate branch of it. Git authentication uses your existing git, gh or SSH setup. A full backup of this Mac's store is made before anything changes.")
+                ? "Tenant records, history and the list of catalog sources sync through the team space. Each tenant's deployment state is stored encrypted on the repository's \(StateBackendService.stateBranch) branch and locked while someone previews, checks or deploys it. Every engineer signs in to tenants with their own API client or account, kept in their own Keychain."
+                : "A team space is a Git repository (for example on GitHub) that tenants, history and catalog sources sync through; each tenant's deployment state is stored encrypted on a separate branch of it. Git authentication uses your existing git, gh or SSH setup. A full backup of this Mac's store is made before anything changes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .confirmationDialog(
-            "Leave team mode?",
+            "Leave Team Mode?",
             isPresented: $isConfirmingLeave,
             titleVisibility: .visible
         ) {
             Button("Leave Team Mode", role: .destructive) { leave() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every tenant's record is copied back to this Mac and this Mac stops syncing. The team space itself is untouched.")
+            Text("Every tenant's deployment state is copied back to this Mac and this Mac stops syncing. The team space itself is untouched.")
         }
     }
 
@@ -96,15 +96,14 @@ struct TeamSettingsView: View {
                             NSPasteboard.general.setString(TeamPassphrase.item.load() ?? "", forType: .string)
                         }
                         .controlSize(.small)
-                    } else {
-                        Button("Show") { isShowingPassphrase = true }
-                            .controlSize(.small)
-                            .help("Shows the passphrase to share with an engineer joining the team space")
                     }
+                    Button(isShowingPassphrase ? "Hide" : "Show") { isShowingPassphrase.toggle() }
+                        .controlSize(.small)
+                        .help("Shows the passphrase to share with an engineer joining the team space")
                 }
             }
         } else {
-            passphraseEntry(prompt: "This Mac needs the team passphrase to read the team's tenant records. Ask a teammate for it.")
+            passphraseEntry(prompt: "This Mac needs the team passphrase to read the team's deployment state. Ask a teammate for it.")
         }
     }
 
@@ -122,7 +121,7 @@ struct TeamSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Team passphrase")
                     .font(.callout.bold())
-                Text("It encrypts every tenant record in the team space. Save it in your team's password manager now: engineers enter it when they join, and without it the records cannot be read.")
+                Text("It encrypts every tenant's deployment state in the team space. Save it in your team's password manager now: engineers enter it when they join, and without it the state cannot be read.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -154,11 +153,16 @@ struct TeamSettingsView: View {
                     isCreating = true
                 }
                 .help("Publishes this Mac's tenants to an empty repository as a new team space")
-                Button("Join Team Space…") { joinTeamSpace() }
+                Button("Join Team Space") { joinTeamSpace() }
                     .help("Clones an existing team space with its team passphrase; this Mac's current tenants are imported into it")
                     .disabled(passphraseField.isEmpty)
             }
             .disabled(remoteURLField.isEmpty || isWorking || !GitStoreService.isGitAvailable)
+            if !GitStoreService.isGitAvailable {
+                Text("Team spaces need Git. Install the Xcode Command Line Tools (xcode-select --install), then reopen Settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -195,19 +199,25 @@ struct TeamSettingsView: View {
                 message = "The Keychain did not accept the passphrase."
                 return
             }
-            if await deployService.teamPassphraseOpensRecords() {
-                hasTeamPassphrase = true
-                passphraseField = ""
-                message = "Team passphrase saved."
-            } else {
+            do {
+                if try await deployService.checkTeamPassphrase() {
+                    hasTeamPassphrase = true
+                    passphraseField = ""
+                    message = "Team passphrase saved."
+                } else {
+                    TeamPassphrase.item.delete()
+                    message = TeamError.wrongPassphrase.errorDescription
+                }
+            } catch {
                 TeamPassphrase.item.delete()
-                message = "That passphrase does not open the team's tenant records. Check it with a teammate."
+                message = "The passphrase could not be checked: \(Self.describe(error))"
             }
         }
     }
 
-    /// Publish this store as a new team space (after a local backup), then
-    /// move every tenant's record into it.
+    /// Publishes this store as a new team space (after a local backup) and
+    /// moves every tenant's deployment state into it. If any step after
+    /// publishing fails, this Mac goes back to working alone, unchanged.
     private func createTeamSpace() {
         let remote = remoteURLField.trimmingCharacters(in: .whitespaces)
         isWorking = true
@@ -215,7 +225,7 @@ struct TeamSettingsView: View {
         Task {
             defer { isWorking = false }
             do {
-                try backUpStore()
+                try await Self.backUpStore()
                 try await deployService.gitStore.ensureRepo()
                 _ = try await deployService.gitStore.commitAll(message: "Prepare team space")
                 do {
@@ -224,22 +234,32 @@ struct TeamSettingsView: View {
                     try? await deployService.gitStore.detachRemote()
                     throw TeamError.repositoryNotEmpty
                 }
-                try await deployService.gitStore.ensureStateBranch()
-                guard TeamPassphrase.item.save(newPassphrase) else { throw TeamError.keychain }
-                await deployService.syncTeamState()
-                try await deployService.moveStateToTeam(tenants: tenantStore.tenants)
-                _ = try await deployService.gitStore.commitAll(message: "Move tenant records to the state backend")
-                try await deployService.gitStore.pushRebasing()
+                do {
+                    try await deployService.gitStore.ensureStateBranch()
+                    guard TeamPassphrase.item.save(newPassphrase) else { throw TeamError.keychain }
+                    await deployService.syncTeamState()
+                    try await deployService.moveStateToTeam(tenants: tenantStore.tenants)
+                    _ = try await deployService.gitStore.commitAll(message: "Create team space")
+                    try await deployService.gitStore.pushRebasing()
+                } catch {
+                    // Local state is only retired once everything succeeded.
+                    try? await deployService.gitStore.detachRemote()
+                    TeamPassphrase.item.delete()
+                    await deployService.syncTeamState()
+                    throw TeamError.createFailed(Self.describe(error))
+                }
+                deployService.retireLocalState(of: tenantStore.tenants)
                 hasTeamPassphrase = true
                 isCreating = false
                 message = "Team space created. Engineers join with the same URL and the team passphrase."
             } catch {
-                message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                message = Self.describe(error)
             }
         }
     }
 
-    /// Clone an existing team space and bring this Mac's tenants into it.
+    /// Clones an existing team space and brings this Mac's tenants into it.
+    /// If any step after the clone fails, this Mac's own store comes back.
     private func joinTeamSpace() {
         let remote = remoteURLField.trimmingCharacters(in: .whitespaces)
         let passphrase = passphraseField.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -248,25 +268,31 @@ struct TeamSettingsView: View {
         Task {
             defer { isWorking = false }
             do {
-                try backUpStore()
-                let imported = try await Self.join(remote: remote)
-                tenantStore.reload()
-                catalogSources.reload()
-                guard TeamPassphrase.item.save(passphrase) else { throw TeamError.keychain }
-                await deployService.syncTeamState()
-                try await deployService.gitStore.ensureStateBranch()
-                guard await deployService.teamPassphraseOpensRecords() else {
+                try await Self.backUpStore()
+                let imported = try await Task.detached { try Self.join(remote: remote) }.value
+                do {
+                    tenantStore.reload()
+                    catalogSources.reload()
+                    try await deployService.gitStore.ensureRepo()
+                    guard TeamPassphrase.item.save(passphrase) else { throw TeamError.keychain }
+                    await deployService.syncTeamState()
+                    try await deployService.gitStore.ensureStateBranch()
+                    guard try await deployService.checkTeamPassphrase() else { throw TeamError.wrongPassphrase }
+                    let importedTenants = tenantStore.tenants.filter { imported.contains($0.id) }
+                    try await deployService.moveStateToTeam(tenants: importedTenants)
+                    if !imported.isEmpty {
+                        _ = try await deployService.gitStore.commitAll(
+                            message: "Import \(imported.count) tenant\(imported.count == 1 ? "" : "s") from a joining Mac")
+                        try await deployService.gitStore.pushRebasing()
+                    }
+                    deployService.retireLocalState(of: importedTenants)
+                } catch {
                     TeamPassphrase.item.delete()
-                    hasTeamPassphrase = false
-                    message = "Joined, but that passphrase does not open the team's tenant records. Enter the right one below."
-                    return
-                }
-                try await deployService.moveStateToTeam(
-                    tenants: tenantStore.tenants.filter { imported.contains($0.id) })
-                if !imported.isEmpty {
-                    _ = try await deployService.gitStore.commitAll(
-                        message: "Import \(imported.count) tenant\(imported.count == 1 ? "" : "s") from a joining Mac")
-                    try await deployService.gitStore.pushRebasing()
+                    try? await Task.detached { try Self.restoreReplacedStore() }.value
+                    tenantStore.reload()
+                    catalogSources.reload()
+                    await deployService.syncTeamState()
+                    throw TeamError.joinFailed(Self.describe(error))
                 }
                 hasTeamPassphrase = true
                 passphraseField = ""
@@ -274,7 +300,7 @@ struct TeamSettingsView: View {
                     ? "Joined the team space."
                     : "Joined the team space and imported \(imported.count) local tenant\(imported.count == 1 ? "" : "s")."
             } catch {
-                message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                message = Self.describe(error)
             }
         }
     }
@@ -287,35 +313,63 @@ struct TeamSettingsView: View {
             do {
                 try await deployService.moveStateToLocal()
                 try await deployService.gitStore.detachRemote()
+                adoptEngineerClientIDs()
+                _ = try? await deployService.gitStore.commitAll(message: "Leave team space")
                 await deployService.syncTeamState()
                 TeamPassphrase.item.delete()
                 hasTeamPassphrase = false
-                message = "Left team mode — everything stays on this Mac. Save a new recovery sheet for each tenant before its next deploy."
+                isShowingPassphrase = false
+                message = "Left Team Mode — everything stays on this Mac. Save a new recovery sheet for each tenant before its next deploy."
             } catch {
-                message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                message = Self.describe(error)
             }
         }
     }
 
-    /// Zip the whole store before any conversion: the universal escape hatch.
-    private func backUpStore() throws {
-        let store = GitStoreService.storeURL
-        guard FileManager.default.fileExists(atPath: store.path) else { return }
-        let stamp = Date.now.formatted(.iso8601.year().month().day().timeSeparator(.omitted).dateTimeSeparator(.standard)).replacingOccurrences(of: ":", with: "")
-        let backup = store.deletingLastPathComponent().appending(path: "store-backup-\(stamp).zip")
-        let ditto = Process()
-        ditto.standardInput = FileHandle.nullDevice
-        ditto.executableURL = URL(filePath: "/usr/bin/ditto")
-        ditto.arguments = ["-c", "-k", "--sequesterRsrc", store.path, backup.path]
-        try ditto.run()
-        ditto.waitUntilExit()
-        guard ditto.terminationStatus == 0 else { throw TeamError.backupFailed }
+    /// Working alone, this Mac's own API client or account becomes the one in
+    /// each tenant's record.
+    private func adoptEngineerClientIDs() {
+        for tenant in tenantStore.tenants {
+            let item = TenantSecrets(tenantID: tenant.id).engineerClientID
+            guard let clientID = item.load() else { continue }
+            var updated = tenant
+            updated.clientID = clientID
+            tenantStore.update(updated)
+            item.delete()
+        }
+    }
+
+    private static func describe(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    /// Zips the whole store before any conversion: the universal escape hatch.
+    nonisolated static func backUpStore() async throws {
+        try await Task.detached {
+            let store = GitStoreService.storeURL
+            guard FileManager.default.fileExists(atPath: store.path) else { return }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+            let backup = store.deletingLastPathComponent()
+                .appending(path: "store-backup-\(formatter.string(from: .now)).zip")
+            let ditto = Process()
+            ditto.standardInput = FileHandle.nullDevice
+            ditto.executableURL = URL(filePath: "/usr/bin/ditto")
+            ditto.arguments = ["-c", "-k", "--sequesterRsrc", store.path, backup.path]
+            try ditto.run()
+            ditto.waitUntilExit()
+            guard ditto.terminationStatus == 0 else { throw TeamError.backupFailed }
+        }.value
     }
 
     nonisolated enum TeamError: LocalizedError {
         case backupFailed
         case repositoryNotEmpty
         case keychain
+        case wrongPassphrase
+        case createFailed(String)
+        case joinFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -325,13 +379,30 @@ struct TeamSettingsView: View {
                 "The repository could not be used: it already has content, or Git could not push to it. Use an empty repository you can push to, or join the team space instead."
             case .keychain:
                 "The Keychain did not accept the team passphrase."
+            case .wrongPassphrase:
+                "That passphrase does not open the team's deployment state. Check it with a teammate."
+            case .createFailed(let reason):
+                "The team space could not be created: \(reason) This Mac is unchanged. The repository may hold a partial copy now, so empty it before trying again."
+            case .joinFailed(let reason):
+                "\(reason) This Mac is unchanged; join again when that is resolved."
             }
+        }
+    }
+
+    /// Puts this Mac's own store back after a join that did not finish.
+    nonisolated static func restoreReplacedStore() throws {
+        let fileManager = FileManager.default
+        let store = GitStoreService.storeURL
+        let retired = store.deletingLastPathComponent().appending(path: "store-replaced")
+        try? fileManager.removeItem(at: store)
+        if fileManager.fileExists(atPath: retired.path) {
+            try fileManager.moveItem(at: retired, to: store)
         }
     }
 
     /// Clone to a fresh folder, swap stores, import local tenants. Returns
     /// the imported tenants' IDs.
-    nonisolated static func join(remote: String) async throws -> Set<UUID> {
+    nonisolated static func join(remote: String) throws -> Set<UUID> {
         let fileManager = FileManager.default
         let store = GitStoreService.storeURL
         let fresh = store.deletingLastPathComponent().appending(path: "store-joining")

@@ -2,6 +2,8 @@
 
 Date: 2026-10-17 · Builds clean · JamfDeployerCore: 16 tests pass · Exit criterion met: the empty demo tenant reached the full baseline (18 objects, 6 blocks) through the app's own code path, drift-free afterwards ("Unchanged: 18").
 
+*The foundation block described here was later split into the demo catalog's Device Groups, Categories and Extension Attributes blocks and made optional.*
+
 ## 1. What was built
 
 ### Catalog (`Catalog/` — the "Jamf Deployer Official" source, local for now)

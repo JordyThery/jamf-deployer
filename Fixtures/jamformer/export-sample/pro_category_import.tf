@@ -59,7 +59,7 @@ import {
   identity = {
     id = "34"
   }
-  to = jamfplatform_pro_category.l9_spike_cis_l1_monitor
+  to = jamfplatform_pro_category.jd_spike_cis_l1_monitor
 }
 
 import {
@@ -68,7 +68,7 @@ import {
   identity = {
     id = "33"
   }
-  to = jamfplatform_pro_category.l9_spike_deployer
+  to = jamfplatform_pro_category.jd_spike_deployer
 }
 
 import {

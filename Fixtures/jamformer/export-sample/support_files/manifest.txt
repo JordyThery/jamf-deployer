@@ -1,5 +1,5 @@
-support_files/extension_attributes/L9 Spike - CIS L1 Monitor - Passed Result List.sh
-support_files/extension_attributes/L9 Spike - CIS L1 Monitor - Failed Result List.sh
+support_files/extension_attributes/JD Spike - CIS L1 Monitor - Passed Result List.sh
+support_files/extension_attributes/JD Spike - CIS L1 Monitor - Failed Result List.sh
 support_files/extension_attributes/Swift Dialog installed.sh
 support_files/extension_attributes/TF - Jamf Connect installed.sh
 support_files/extension_attributes/Jamf Connect Login Window.sh

@@ -30,8 +30,6 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Software Updates** | Declarative software-update settings via a Jamf Blueprint: automatic download and install, with deferral windows you control. | Medium |
 | **Compliance — CIS Level 1** | A compliance benchmark built from the CIS Level 1 baseline. Starts in monitor mode: it reports, it does not change devices. | High |
 | **Rosetta 2** | A script plus check-in policy that installs Rosetta 2 on Apple silicon Macs so Intel-only apps keep working. | Low |
-
-Every demo block has a Jamf Pro API version except Software Updates and Compliance — CIS Level 1, which build on Platform features (Blueprints and compliance benchmarks). On a tenant connected through the Jamf Pro API those two show as needing the Platform API, and presets leave them out.
 | **Check-in & Inventory** | Check-in frequency, whether startup and login run policies, and what inventory Macs report. Tenant-wide setting. | Low |
 | **Re-enrollment** | What Jamf Pro clears when a Mac enrolls again, so reused Macs start with a clean record. Tenant-wide setting. | Low |
 | **Local Admin Password Rotation** | Rotates managed local admin passwords on a schedule and after each viewing. Tenant-wide setting. | Medium |
@@ -41,6 +39,8 @@ Every demo block has a Jamf Pro API version except Software Updates and Complian
 | **Mobile Device Groups** | Smart groups for supervised iPads and supervised iPhones — what the mobile blocks scope to. | Low |
 | **Mobile Passcode** | A passcode policy for iPads and iPhones: minimum length, no simple values, automatic lock. | Medium |
 | **Mobile Enrollment** | A mobile PreStage for Automated Device Enrollment: supervised, MDM non-removable, consumer setup panes skipped. | Medium |
+
+Every demo block has a Jamf Pro API version except Software Updates and Compliance — CIS Level 1, which build on Platform features (Blueprints and compliance benchmarks). On a tenant connected through the Jamf Pro API those two show as needing the Platform API, and presets leave them out.
 
 Both App Store blocks pick apps with **Choose Apps…**, which lists only apps the tenant holds Apps and Books licenses for. Every tenant they deploy to needs licenses for the same apps, free apps included. Per app you choose the delivery (install automatically or offer in Self Service) and a category. When a tenant has several Apps and Books locations, the picker asks which one; the block stores its name in the **Apps and Books location** setting, which is looked up by name on each tenant.
 

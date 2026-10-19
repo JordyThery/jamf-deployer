@@ -2,6 +2,8 @@
 
 Date: 2026-10-17 · Builds clean · JamfDeployerCore: 30 tests pass · Exit criterion met live: the hand-configured sandbox was adopted with a preview showing **Adopt: 61 and nothing else**, imports applied, post-adopt drift check clean.
 
+*The foundation block described here was later split into the demo catalog's Device Groups, Categories and Extension Attributes blocks and made optional.*
+
 ## 1. What was built
 
 ### Adopt an existing tenant

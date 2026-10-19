@@ -2,6 +2,8 @@
 
 Date: 2026-10-17 · Builds clean · JamfDeployerCore: 26 tests pass · Exit criterion met live: the Rosetta policy + script were captured from the demo tenant into a reusable block and deployed to the sandbox tenant (then removed again).
 
+*The foundation block described here was later split into the demo catalog's Device Groups, Categories and Extension Attributes blocks and made optional.*
+
 ## 1. What was built
 
 ### Terraform on demand (never bundled)

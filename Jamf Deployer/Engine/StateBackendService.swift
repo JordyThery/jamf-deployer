@@ -54,6 +54,9 @@ final class StateBackendService {
     private var port: Int = 0
     private var password = ""
     private var runningRemote: String?
+    /// A start in progress, shared by callers that arrive meanwhile (a fleet
+    /// check runs several tenants at once).
+    private var starting: (remote: String, task: Task<Void, Error>)?
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "StateBackend")
 
     static var binaryURL: URL {
@@ -67,8 +70,8 @@ final class StateBackendService {
         URL.applicationSupportDirectory.appending(path: "Jamf Deployer/engine/state-backend")
     }
 
-    /// Stops a backend left running by an app that crashed or was force-quit
-    /// — only when the recorded process really is the bundled backend.
+    /// Stops a backend left running by an app that crashed or was force-quit,
+    /// when the recorded process is the app's bundled copy.
     nonisolated static func stopLeftoverBackend() {
         let pidFile = workFolderURL.appending(path: ".terraform-backend-git.pid")
         guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
@@ -76,7 +79,7 @@ final class StateBackendService {
         else { return }
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         if proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0,
-           String(cString: buffer).hasSuffix("/terraform-backend-git") {
+           String(cString: buffer).hasSuffix("/Vendor/terraform-backend-git/terraform-backend-git") {
             kill(pid, SIGTERM)
         }
         try? FileManager.default.removeItem(at: pidFile)
@@ -93,6 +96,9 @@ final class StateBackendService {
             "TF_HTTP_UNLOCK_ADDRESS": address,
             "TF_HTTP_USERNAME": "jamf-deployer",
             "TF_HTTP_PASSWORD": password,
+            // A lock held by a teammate is refused like a server error, and
+            // the engine retries those; keep that wait short.
+            "TF_HTTP_RETRY_WAIT_MAX": "5",
         ]
     }
 
@@ -108,12 +114,15 @@ final class StateBackendService {
             "Version": "", "Created": Date.now.formatted(.iso8601), "Path": "", "Info": "Remove tenant",
         ]
         let body = try JSONSerialization.data(withJSONObject: info)
+        let unlock = try JSONSerialization.data(withJSONObject: ["ID": lockID])
         try await send("LOCK", address, body: body)
-        defer {
-            let unlock = try? JSONSerialization.data(withJSONObject: ["ID": lockID])
-            Task { try? await self.send("UNLOCK", address, body: unlock) }
+        do {
+            try await send("DELETE", address + "&ID=\(lockID)", body: nil)
+        } catch {
+            try? await send("UNLOCK", address, body: unlock)
+            throw error
         }
-        try await send("DELETE", address + "&ID=\(lockID)", body: nil)
+        try await send("UNLOCK", address, body: unlock)
     }
 
     func stop() {
@@ -140,16 +149,28 @@ final class StateBackendService {
     }
 
     private func ensureRunning(remote: String) async throws {
+        if let starting, starting.remote == remote {
+            try await starting.task.value
+            return
+        }
         if let process, process.isRunning, runningRemote == remote { return }
+        let task = Task { try await self.start(remote: remote) }
+        starting = (remote, task)
+        defer { starting = nil }
+        try await task.value
+    }
+
+    private func start(remote: String) async throws {
         stop()
         let binary = Self.binaryURL
         guard FileManager.default.isExecutableFile(atPath: binary.path) else { throw BackendError.missingBinary }
 
         Self.stopLeftoverBackend()
         try FileManager.default.createDirectory(at: Self.workFolderURL, withIntermediateDirectories: true)
+        // A credential helper can take a while (gh may refresh its token).
+        var environment = try await Task.detached { try Self.gitCredentialEnvironment(remote: remote) }.value
         port = try Self.freePort()
         password = UUID().uuidString + UUID().uuidString
-        var environment = try Self.gitCredentialEnvironment(remote: remote)
         environment["TF_BACKEND_GIT_HTTP_USERNAME"] = "jamf-deployer"
         environment["TF_BACKEND_GIT_HTTP_PASSWORD"] = password
         environment["HOME"] = NSHomeDirectory()
@@ -168,14 +189,22 @@ final class StateBackendService {
         process = launched
         runningRemote = remote
 
-        // Ready once the port accepts connections.
+        // Ready once the port accepts connections while the backend still
+        // runs: if it exited (for example because another process took the
+        // port), whatever listens there is not ours.
         for _ in 0..<50 {
-            if Self.isListening(port: port) { return }
             guard launched.isRunning else { break }
+            if Self.isListening(port: port) {
+                try await Task.sleep(for: .milliseconds(200))
+                if launched.isRunning { return }
+                break
+            }
             try await Task.sleep(for: .milliseconds(100))
         }
-        let detail = String(decoding: errors.fileHandleForReading.availableData, as: UTF8.self)
         stop()
+        let errorHandle = errors.fileHandleForReading
+        let output = await Task.detached { errorHandle.readDataToEndOfFile() }.value
+        let detail = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         throw BackendError.didNotStart(detail.isEmpty ? "it did not respond on its local port" : String(detail.prefix(200)))
     }
 
@@ -236,9 +265,10 @@ final class StateBackendService {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         try process.run()
-        input.fileHandleForWriting.write(Data("protocol=\(scheme)\nhost=\(host)\n\n".utf8))
-        try input.fileHandleForWriting.close()
+        try? input.fileHandleForWriting.write(contentsOf: Data("protocol=\(scheme)\nhost=\(host)\n\n".utf8))
+        try? input.fileHandleForWriting.close()
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return [:] }

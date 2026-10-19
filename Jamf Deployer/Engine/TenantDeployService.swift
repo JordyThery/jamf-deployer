@@ -44,6 +44,12 @@ final class TenantDeployService {
     /// Tenants with an engine run in progress (preview, check or deploy):
     /// one run per tenant workspace at a time.
     private var busyTenants: Set<UUID> = []
+    /// Tenants whose team-space state is being deleted (Remove Tenant).
+    private var removingTenants: Set<UUID> = []
+
+    func isRemoving(_ tenantID: UUID) -> Bool {
+        removingTenants.contains(tenantID)
+    }
 
     /// Team-space state the UI shows.
     private(set) var isTeamMode = false
@@ -125,11 +131,13 @@ final class TenantDeployService {
 
     // MARK: Moving state between this Mac and the team space
 
-    /// Moves the given tenants' state from their workspaces into the team
+    /// Copies the given tenants' state from their workspaces into the team
     /// space, re-encrypted with the team passphrase. Runs with Team Mode on.
     /// State is piped from `state pull` into `state push` and never written
-    /// to disk decrypted; the local copy is kept as an encrypted backup.
+    /// to disk decrypted. The local copies stay in place until
+    /// `retireLocalState(of:)`, so a setup that fails later can be undone.
     func moveStateToTeam(tenants: [Tenant]) async throws {
+        try guardNoEngineWork()
         for tenant in tenants where isManaged(tenant) {
             let stateURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
             guard FileManager.default.fileExists(atPath: stateURL.path) else { continue }
@@ -144,18 +152,32 @@ final class TenantDeployService {
             let team = try await makeRunner(for: tenant, stateBackend: .http)
             try await runEngine(team, ["init", "-input=false"])
             _ = try await team.checkedOutput(arguments: ["state", "push", "-"], input: state)
+        }
+    }
 
+    /// Once the team space holds their state, the tenants' local copies
+    /// become encrypted backups.
+    func retireLocalState(of tenants: [Tenant]) {
+        for tenant in tenants {
+            let stateURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
+            guard FileManager.default.fileExists(atPath: stateURL.path) else { continue }
             let backups = stateURL.deletingLastPathComponent().appending(path: "backups")
             try? FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
-            try FileManager.default.moveItem(
+            try? FileManager.default.moveItem(
                 at: stateURL, to: backups.appending(path: "before-team-space-\(DeployHistoryEntry.makeID()).tfstate"))
         }
+    }
+
+    /// State moves read and write every tenant, so nothing else may run.
+    private func guardNoEngineWork() throws {
+        guard busyTenants.isEmpty, activePreviewTenants.isEmpty else { throw DeployError.engineWorkInProgress }
     }
 
     /// Moves every tenant's state from the team space back into its
     /// workspace, encrypted with the tenant's own passphrase (a new one when
     /// the tenant was created in the team space). Runs before leaving.
     func moveStateToLocal() async throws {
+        try guardNoEngineWork()
         for tenant in tenantStore.tenants where isManaged(tenant) {
             let catalog = try loadCatalog(for: tenant)
             try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .http)
@@ -178,27 +200,44 @@ final class TenantDeployService {
     }
 
     /// Whether the team passphrase on this Mac opens the team space's
-    /// records: reads the first tenant with state. True when there is none.
-    func teamPassphraseOpensRecords() async -> Bool {
-        for tenant in tenantStore.tenants where isManaged(tenant) && tenant.lastDeploy != nil {
-            guard let catalog = try? loadCatalog(for: tenant),
-                  (try? generateWorkspace(for: tenant, catalog: catalog, stateBackend: .http)) != nil,
-                  let runner = try? await makeRunner(for: tenant, stateBackend: .http),
-                  (try? await runEngine(runner, ["init", "-input=false"])) != nil
-            else { continue }
-            return (try? await runner.checkedOutput(arguments: ["state", "pull"])) != nil
+    /// deployment state, read from the first deployed tenant. True when no
+    /// tenant has state yet; throws when the check itself could not run.
+    func checkTeamPassphrase() async throws -> Bool {
+        guard let tenant = tenantStore.tenants.first(where: { isManaged($0) && $0.lastDeploy != nil }) else {
+            return true
         }
-        return true
+        let catalog = try loadCatalog(for: tenant)
+        try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .http)
+        let runner = try await makeRunner(for: tenant, stateBackend: .http)
+        do {
+            try await runEngine(runner, ["init", "-input=false"])
+            _ = try await runner.checkedOutput(arguments: ["state", "pull"])
+            return true
+        } catch EngineRunner.EngineError.nonZeroExit(let result)
+            where result.rawLines.contains(where: { $0.contains("decryption failed") }) {
+            return false
+        }
     }
 
     /// Removes a tenant from the app — and, in Team Mode, from the team
-    /// space, state included. Nothing in Jamf is touched.
-    func removeTenant(_ tenant: Tenant) async {
+    /// space, state included. Nothing in Jamf is touched. When the team
+    /// space's state cannot be deleted (a teammate holds its lock, say),
+    /// the tenant stays.
+    func removeTenant(_ tenant: Tenant) async throws {
         if isTeamMode, let remote = teamRemoteURL {
+            guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
+            busyTenants.insert(tenant.id)
+            removingTenants.insert(tenant.id)
+            defer {
+                busyTenants.remove(tenant.id)
+                removingTenants.remove(tenant.id)
+            }
             do {
                 try await stateBackend.deleteState(tenantID: tenant.id, remote: remote)
             } catch {
-                syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                locks = await gitStore.stateLocks()
+                if let lock = locks[tenant.id] { throw DeployError.locked(lock) }
+                throw error
             }
         }
         tenantStore.remove(tenant)
@@ -225,11 +264,21 @@ final class TenantDeployService {
         do {
             return try await runner.run(arguments: arguments)
         } catch EngineRunner.EngineError.nonZeroExit(let result) {
-            if let lock = StateBackendService.lock(fromEngineOutput: result.rawLines) {
-                throw DeployError.locked(lock)
-            }
+            if let lock = await lockHolding(result, runner: runner) { throw DeployError.locked(lock) }
             throw EngineRunner.EngineError.nonZeroExit(result)
         }
+    }
+
+    /// The lock that stopped a run. The state backend refuses a held lock
+    /// without naming its holder, so the lock is read from the team space.
+    private func lockHolding(_ result: EngineRunner.RunResult, runner: EngineRunner) async -> StateBackendService.StateLock? {
+        if let lock = StateBackendService.lock(fromEngineOutput: result.rawLines) { return lock }
+        guard isTeamMode,
+              result.rawLines.contains(where: { $0.contains("Error acquiring the state lock") }),
+              let tenantID = runners.first(where: { $0.value === runner })?.key
+        else { return nil }
+        locks = await gitStore.stateLocks()
+        return locks[tenantID]
     }
 
     // MARK: Workspace
@@ -570,16 +619,16 @@ final class TenantDeployService {
 
                 \(TeamPassphrase.item.load() ?? "(not available on this Mac)")
 
-            The team passphrase encrypts every tenant record in this team
-            space; the records are stored on the \(StateBackendService.stateBranch)
+            The team passphrase encrypts the deployment state of every tenant
+            in this team space, stored on the \(StateBackendService.stateBranch)
             branch of the team repository. Keep this sheet in your team's
-            password manager. Without the passphrase the records cannot be
-            read and the tenants would have to be adopted again.
+            password manager. Without the passphrase the state cannot be read
+            and the tenants would have to be adopted again.
             """
         }
         return """
-        Jamf Deployer — Tenant Record Recovery Sheet
-        =============================================
+        Jamf Deployer — Recovery Sheet
+        ===============================
 
         Tenant:     \(tenant.name)
         Identifier: \(tenant.id.uuidString)
@@ -589,20 +638,31 @@ final class TenantDeployService {
 
             \((try? statePassphrase(for: tenant)) ?? "(not available on this Mac)")
 
-        This passphrase encrypts the tenant record (the app's memory of what
-        it manages in this tenant). Keep this sheet in a password manager or
-        another safe place. Without it, a reinstalled app cannot read the
-        record and the tenant would have to be adopted again.
+        This passphrase encrypts the tenant's deployment state (the app's
+        memory of what it manages in this tenant). Keep this sheet in a
+        password manager or another safe place. Without it, a reinstalled app
+        cannot read the state and the tenant would have to be adopted again.
         """
     }
 
     // MARK: Engine plumbing
 
-    /// Encrypts the tenant record and saved plans with the tenant's passphrase.
+    /// A value for a quoted HCL string: a typed passphrase may contain
+    /// quotes, backslashes or interpolation markers.
+    nonisolated static func hclEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "${", with: "$${")
+            .replacingOccurrences(of: "%{", with: "%%{")
+    }
+
+    /// Encrypts the deployment state and saved plans with the passphrase.
     private func encryptionConfiguration(for tenant: Tenant, passphrase: String? = nil) throws -> String {
         """
         key_provider "pbkdf2" "passphrase" {
-          passphrase = "\(try passphrase ?? statePassphrase(for: tenant))"
+          passphrase = "\(Self.hclEscaped(try passphrase ?? statePassphrase(for: tenant)))"
         }
         method "aes_gcm" "default" {
           keys = key_provider.pbkdf2.passphrase
@@ -865,8 +925,9 @@ final class TenantDeployService {
         let entryID = DeployHistoryEntry.makeID()
         let entryURL = historyURL(for: tenant).appending(path: entryID)
         try? FileManager.default.createDirectory(at: entryURL, withIntermediateDirectories: true)
-        // The engine prints sensitive values in clear text; history (and the
-        // team repository) only ever gets the redacted copy.
+        // `show -json` prints sensitive values in clear text, so history (and
+        // the team repository) keeps the redacted plan. The event log holds
+        // what the engine printed during the run, sensitive values masked.
         if let planData = try? await runner.showPlanData(planFileName: session.planFileName),
            let redacted = PlanRedactor.redact(planData) {
             try? redacted.write(to: entryURL.appending(path: "plan.json"))
@@ -1287,11 +1348,12 @@ final class TenantDeployService {
         case previewInProgress
         case tenantBusy
         case missingStatePassphrase
+        case engineWorkInProgress
 
         var errorDescription: String? {
             switch self {
             case .missingCredentials:
-                "The tenant's client secret is missing from the Keychain. Enter it with Update Client Secret… on the tenant page."
+                "The tenant's client secret or password is missing from the Keychain. Enter it on the tenant page (Update Client Secret… or Update Password…)."
             case .planExpired:
                 "This preview is no longer valid. Run Preview Changes again before deploying."
             case .blockMissingFromCatalog(let id):
@@ -1311,7 +1373,9 @@ final class TenantDeployService {
             case .previewInProgress:
                 "A preview is open for this tenant. Finish or close it before checking for changes."
             case .missingStatePassphrase:
-                "This tenant's record is encrypted with a passphrase this Mac does not have. Enter the passphrase from the tenant's recovery sheet with Update Client Secret… on the tenant page."
+                "This tenant's deployment state is encrypted with a passphrase this Mac does not have. Enter the passphrase from the tenant's recovery sheet with Update Client Secret… on the tenant page."
+            case .engineWorkInProgress:
+                "A preview, check or deploy is still running. Wait for it to finish, then try again."
             case .tenantBusy:
                 "This tenant is already being previewed, checked or deployed. Try again when that finishes."
             }

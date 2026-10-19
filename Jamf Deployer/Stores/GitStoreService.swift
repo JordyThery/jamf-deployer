@@ -69,16 +69,18 @@ actor GitStoreService {
                 .write(to: manifestURL)
         }
 
-        if !fileManager.fileExists(atPath: storeURL.appending(path: ".git").path) {
+        let isNew = !fileManager.fileExists(atPath: storeURL.appending(path: ".git").path)
+        if isNew {
             try run("init", "--initial-branch", "main")
+        }
+        // Commits need an identity; a Mac without a Git setup (or a store
+        // just cloned from a team space) gets the app's own.
+        if ((try? run("config", "user.email")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             try run("config", "user.name", "Jamf Deployer")
             try run("config", "user.email", "jamf-deployer@localhost")
-            _ = try? commitAll(message: "Initialize Jamf Deployer store")
         }
-        // State files committed before the ignore rule leave the index.
-        if !((try? run("ls-files", "--", "tenants/*/state/*")) ?? "").isEmpty {
-            try run("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", "tenants/*/state")
-            _ = try? commitAll(message: "Keep engine state out of the store repository")
+        if isNew {
+            _ = try? commitAll(message: "Initialize Jamf Deployer store")
         }
     }
 

@@ -257,8 +257,11 @@ struct AdoptView: View {
     // MARK: Actions
 
     private func discover() {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load(),
-              let terraformURL = terraform.binaryURL else { return }
+        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
+            step = .failed("The tenant's stored credentials are missing. Enter them on the tenant page (Update Client Secret… or Update Password…).")
+            return
+        }
+        guard let terraformURL = terraform.binaryURL else { return }
         step = .discovering
         logTail = []
         // Only names the exporter offers: an unknown name aborts the export.

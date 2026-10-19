@@ -1,6 +1,6 @@
 # Phase 1 — App shell and parity
 
-Date: 2026-10-17 · Builds clean (Swift 6, strict concurrency, MainActor default isolation, macOS 15 target) · Bundle `be.jordythery.jamf-deployer`, team K3LQ9NPBMG, hardened runtime, App Sandbox off (required to run the engine), v0.1.0 (1)
+Date: 2026-10-17 · Builds clean (Swift 6, strict concurrency, MainActor default isolation, macOS 15 target) · Bundle `be.jordythery.jamf-deployer`, hardened runtime, App Sandbox off (required to run the engine), v0.1.0 (1)
 
 ## 1. What was built
 
@@ -33,12 +33,12 @@ Extracted from Intune Deployer's patterns so both apps can share it (Intune Depl
 
 ## 2. How to test manually
 1. Build & run (⌘R). First launch shows the guided tour; replay via Help → Guided Tour.
-2. Fleet shows the empty state → **Connect a Tenant…** → walk the wizard (sandbox credentials are in the Keychain under `JamfDeployer-Spike` / `JamfDeployer-Demo`; both are US region, environment scope). Watch preflight stream its checks.
+2. Fleet shows the empty state → **Connect a Tenant…** → walk the wizard (sandbox credentials are in the login Keychain; both are US region, environment scope). Watch preflight stream its checks.
 3. The new tenant appears in the sidebar and dashboard with version + token expiry columns filled from preflight.
 4. Open the tenant → Run Preflight re-runs and updates the stored snapshot.
 5. ⌘⇧L shows every API call with status and duration.
 6. App menu → Check for Updates… (feed `JordyThery/jamf-deployer` has no releases yet — expect the friendly failure; the mechanism itself is live-verified below).
-7. Settings → toggle Show technical details → the Engine (technical) window exposes the Phase 0 spike (init/preview/deploy against `Spike/live-sandbox`).
+7. Settings → toggle Show technical details → the Engine (technical) window exposes the Phase 0 spike (init/preview/deploy against the spike workspace).
 
 ## 3. Live verification results (headless harness using the real app code)
 - Sandbox environment: credentials ✓, 11.33.0 ✓, all four permission probes ✓, Cloud Services Connection ✓, "already has configuration (61 objects) — consider Adopt" ⚠ (correct), ADE 2027-06-04 / VPP 2027-06-04 harvested.
@@ -54,5 +54,5 @@ Extracted from Intune Deployer's patterns so both apps can share it (Intune Depl
 - App-target unit tests need a test target (pbxproj change) — engine parser tests ride in DeployerKit for now; a proper `Jamf DeployerTests` target is worth adding in Phase 2 (ask me to guide you through adding it, or add it when convenient).
 
 ## 5. Decisions made / needed
-- **Made:** GitHub-releases updater for parity instead of Sparkle (brief's Sparkle assumption didn't match Intune Deployer reality); binaries out of git with `Vendor/fetch.sh`; demo credentials stored in Keychain (`JamfDeployer-Demo`), screenshots kept on disk per your request.
+- **Made:** GitHub-releases updater for parity instead of Sparkle (brief's Sparkle assumption didn't match Intune Deployer reality); binaries out of git with `Vendor/fetch.sh`; demo credentials stored in the login Keychain, screenshots kept on disk per your request.
 - **Needed from you:** none to start Phase 2. Optional: create the public `jamf-deployer` GitHub repo when you want real update checks to succeed, and consider a test target for the app.

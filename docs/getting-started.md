@@ -24,7 +24,7 @@ Connecting Jamf Protect (for the Protect building blocks) is an optional wizard 
 
 ## 3. Compose a baseline
 
-First visit to **Building Blocks**: the app ships only the configuration-free blocks (App Catalog, Mac App Store Apps, iPad and iPhone Apps, Jamf Protect Baseline, Security Cloud) — add the **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** to try a full baseline (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings, Self Service maintenance and macOS version groups — versioned by release tag). For real fleets, capture your own blocks or publish your own catalog — the demo repository is the template.
+First visit to **Building Blocks**: the app ships only the configuration-free blocks (App Catalog, Mac App Store Apps, iPad and iPhone Apps, Jamf Protect Baseline, Security Cloud) — add the **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** to try a full baseline (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings, Self Service maintenance, macOS version groups and the mobile blocks — versioned by release tag). For real fleets, capture your own blocks or publish your own catalog — the demo repository is the template.
 
 Then compose the baseline in the tenant's **Overview** tab, under **Add from the catalog**:
 
@@ -38,7 +38,7 @@ See [Building Blocks](building-blocks.md) for what each block creates.
 
 Click **Preview Changes** (⌘P). The app generates the configuration, compares it with the tenant, and lists every object it would add, change or remove — grouped by block, with field-level detail. Nothing has happened to the tenant yet.
 
-Before the first deploy, the app asks you to save a **recovery sheet** (**Save Recovery Sheet…**) with the passphrase that encrypts this tenant's records — store it somewhere safe.
+Before the first deploy, the app asks you to save a **recovery sheet** (**Save Recovery Sheet…**) with the passphrase that encrypts this tenant's deployment state and plan files — store it somewhere safe.
 
 If the preview looks right, click **Deploy**. Only the previewed plan is applied; if anything changed in between, the deploy stops. On a production tenant, a deploy that removes or replaces objects asks you to type the tenant name first. If Jamf reports a server error for an object it actually created, the app finds it by name after the deploy, and the next preview adopts it instead of creating a duplicate.
 

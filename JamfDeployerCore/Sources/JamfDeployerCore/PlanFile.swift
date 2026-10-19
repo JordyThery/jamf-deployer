@@ -62,16 +62,3 @@ public nonisolated struct PlanFile: Decodable, Sendable {
         case resourceDrift = "resource_drift"
     }
 }
-
-nonisolated extension PlanFile.ResourceChange {
-    /// Attribute-level diff between before and after, for the Preview screen.
-    /// Returns top-level attribute names whose values differ.
-    public var changedAttributeNames: [String] {
-        guard
-            let before = change.before?.objectValue,
-            let after = change.after?.objectValue
-        else { return [] }
-        let keys = Set(before.keys).union(after.keys)
-        return keys.filter { before[$0] != after[$0] }.sorted()
-    }
-}

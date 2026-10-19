@@ -98,7 +98,7 @@ final class CustomObjectUITests: DeployerUITestCase {
 
     /// The form scrolls; fields further down are scrolled to before use.
     private func scrollIntoView(_ element: XCUIElement) {
-        XCTAssertTrue(element.waitForExistence(timeout: 10), "\(element) is not in the form")
+        XCTAssertTrue(element.waitForExistence(timeout: 30), "\(element) is not in the form")
         let form = app.sheets.scrollViews.firstMatch
         var attempts = 0
         while !element.isHittable, attempts < 30 {

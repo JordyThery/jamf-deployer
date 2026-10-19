@@ -234,7 +234,6 @@ struct BlockDetailSheet: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(CatalogSourceStore.self) private var catalogSources
     @State private var readme: String?
-    @State private var reviewedConfirmation = false
     @State private var isEditingDetails = false
     @State private var isConfirmingDelete = false
     @State private var editName = ""

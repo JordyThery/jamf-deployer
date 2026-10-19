@@ -64,6 +64,8 @@ struct ConnectTenantWizard: View {
     @State private var checks: [PreflightCheck] = []
     @State private var report: PreflightReport?
     @State private var isRunningPreflight = false
+    /// The latest preflight; results of an earlier one (before Back) are dropped.
+    @State private var preflightRun = UUID()
     @State private var saveError: String?
 
     var body: some View {
@@ -430,10 +432,13 @@ struct ConnectTenantWizard: View {
         }
         let client = JamfPlatformClient(configuration: configuration, activityLog: activityLog)
         let connection = connection
+        let run = UUID()
+        preflightRun = run
         Task {
             let result = await PreflightService.run(client: client, connection: connection) { progress in
-                checks = progress
+                if preflightRun == run { checks = progress }
             }
+            guard preflightRun == run else { return }
             checks = result.checks
             report = result
             isRunningPreflight = false

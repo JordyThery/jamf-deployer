@@ -28,7 +28,7 @@ struct TenantDetailView: View {
     @State private var handOverTypedName = ""
     @State private var keepOutcomes: [String: String] = [:]
     @State private var isUpdatingSecret = false
-    @State private var isConfirmingBreakLock = false
+    @State private var isConfirmingForceUnlock = false
     @State private var unlockError: String?
     @State private var catalog: LoadedCatalog?
     @State private var adoptedSummary: [(label: String, count: Int)] = []
@@ -78,12 +78,13 @@ struct TenantDetailView: View {
                                 .font(.callout)
                                 Spacer()
                                 Button("Force Unlock…", role: .destructive) {
-                                    isConfirmingBreakLock = true
+                                    isConfirmingForceUnlock = true
                                 }
                                 .controlSize(.small)
                                 .help("Only for a lock left behind by an interrupted run")
-                                .confirmationDialog("Force unlock “\(tenant.name)”?", isPresented: $isConfirmingBreakLock, titleVisibility: .visible) {
+                                .confirmationDialog("Force unlock “\(tenant.name)”?", isPresented: $isConfirmingForceUnlock, titleVisibility: .visible) {
                                     Button("Force Unlock", role: .destructive) {
+                                        unlockError = nil
                                         Task {
                                             do {
                                                 try await deployService.forceUnlock(tenant: tenant, lock: lock)
@@ -567,7 +568,9 @@ struct TenantDetailView: View {
             checks = [PreflightCheck(
                 id: "secret", title: "Stored credentials",
                 outcome: .fail,
-                detail: "The client secret is missing from the Keychain. Enter it with Update Client Secret… in the Connection section."
+                detail: tenant.isJamfPro && tenant.jamfProAuth == .userAccount
+                    ? "The password is missing from the Keychain. Enter it with Update Password… in the Connection section."
+                    : "The client secret is missing from the Keychain. Enter it with Update Client Secret… in the Connection section."
             )]
             return
         }
@@ -626,7 +629,7 @@ struct UpdateClientSecretSheet: View {
                 SecureField(usesPassword ? "Password" : "Client secret", text: $secret)
                 if needsPassphrase {
                     SecureField("Recovery passphrase", text: $passphrase)
-                    Text("This Mac has no passphrase for the tenant's record. Enter the one from its recovery sheet, or leave it empty for a tenant that was never deployed.")
+                    Text("This Mac has no passphrase for the tenant's deployment state. Enter the one from its recovery sheet, or leave it empty for a tenant that was never deployed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -644,7 +647,8 @@ struct UpdateClientSecretSheet: View {
             Button("Save") { save() }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(secret.isEmpty && passphrase.isEmpty && clientID == tenant.engineerClientID)
+                .disabled(secret.isEmpty && passphrase.isEmpty
+                    && (clientID == tenant.engineerClientID || clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
         }
         .frame(width: 480, height: needsPassphrase || deployService.isTeamMode ? 340 : 260)
         .onAppear { clientID = tenant.engineerClientID }

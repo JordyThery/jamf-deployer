@@ -52,7 +52,7 @@ resource "jamfplatform_pro_script" "compliance_benchmark_6ac1eb687d59fd2f1238db7
 resource "jamfplatform_pro_script" "compliance_benchmark_6ad2dac512daba130f642175_tahoe_sh" {
   provider = jamfplatform
 
-  category_id     = jamfplatform_pro_category.l9_spike_cis_l1_monitor.id
+  category_id     = jamfplatform_pro_category.jd_spike_cis_l1_monitor.id
   name            = "compliance_benchmark_6ad2dac512daba130f642175_tahoe.sh"
   os_requirements = "26.x"
   priority        = "AFTER"

@@ -46,18 +46,18 @@ The fleet dashboard keeps every tenant's sync state, baseline size and Apple tok
 ## Security
 
 - **Credentials never touch disk.** API secrets live in your Mac's Keychain and are handed to the deployment engine as environment variables for the duration of a run — never written to configuration, logs or state. Deploy history keeps a copy of each applied plan with every sensitive value masked.
-- **Tenant records are encrypted.** The engine's state and plan files are encrypted with a per-tenant passphrase (PBKDF2 + AES-GCM); a recovery sheet is saved before the first deploy. Without the passphrase the record is unreadable, including by the app.
+- **Deployment state is encrypted.** The engine's state and plan files are encrypted with a per-tenant passphrase (PBKDF2 + AES-GCM); a recovery sheet is saved before the first deploy. Without the passphrase the state is unreadable, including by the app.
 - **Nothing deploys without a preview.** The app only ever applies the exact plan you approved; there is no auto-apply.
 - **Team spaces share no credentials.** Each engineer signs in with their own Jamf API client or account, kept in their Keychain. Engine state is encrypted on each Mac with the team passphrase before it reaches the repository.
 - The app talks only to your Jamf tenants, your Git remotes (Team Mode and Git catalog sources), GitHub's API for release and component-update checks, and HashiCorp's release server when you agree to the Terraform download for exports and adoption.
 
 ## Building
 
-Open the project in Xcode 27 or later, run `Vendor/fetch.sh` once to download the engine, providers and jamformer, then build the `Jamf Deployer` scheme. Exporting and adopting existing tenants optionally use HashiCorp Terraform, which the app downloads on first use with your consent (it is BUSL-licensed and never bundled).
+Open the project in Xcode 27 or later, run `Vendor/fetch.sh` once to download the engine, providers, jamformer and the Git state backend, then build the `Jamf Deployer` scheme. Exporting and adopting existing tenants optionally use HashiCorp Terraform, which the app downloads on first use with your consent (it is BUSL-licensed and never bundled).
 
 ## Acknowledgements
 
-Jamf Deployer stands on [OpenTofu](https://opentofu.org) (MPL-2.0), the [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) providers (MPL-2.0), and [jamformer](https://github.com/Jamf-Concepts/jamformer). Their licenses accompany the bundled copies.
+Jamf Deployer stands on [OpenTofu](https://opentofu.org) (MPL-2.0), the [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) providers (MPL-2.0), the [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) provider by Deployment Theory (MPL-2.0), [terraform-backend-git](https://github.com/plumber-cd/terraform-backend-git) by plumber-cd (Apache-2.0), and [jamformer](https://github.com/Jamf-Concepts/jamformer). Their licenses accompany the bundled copies.
 
 This is an independent project, not affiliated with or endorsed by Jamf.
 

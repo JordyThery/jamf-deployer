@@ -22,22 +22,17 @@ export TEST_RUNNER_DEMO_CLIENT_ID="$(kc $B client-id)"
 export TEST_RUNNER_DEMO_CLIENT_SECRET="$(kc $B client-secret)"
 export TEST_RUNNER_DEMO_ENVIRONMENT_ID="$(kc $B environment-id)"
 
-# The UI test target doesn't build the app, so build the Debug app first.
-# Save panels open in ~/Documents, where the cleanup below looks.
-defaults write be.jordythery.jamf-deployer NSNavLastRootDirectory -string "$HOME/Documents"
-# Touching the test sources forces a fresh test bundle.
-touch "Jamf DeployerUITests/"*.swift
-xcodebuild build -project "Jamf Deployer.xcodeproj" -scheme "Jamf Deployer" -configuration Debug -destination "platform=macOS,arch=arm64" -quiet
-set +e
-xcodebuild test -project "Jamf Deployer.xcodeproj" -scheme "Jamf DeployerUITests" -destination 'platform=macOS' \
-    -only-testing:"Jamf DeployerUITests/RolloutUITests" 2>&1 | grep -E "error:|Test Case .*(passed|failed)|TEST (SUCCEEDED|FAILED)"
-set -e
-
-# Remove the test categories (the app never deletes on its own).
-for service in "$A" "$B"; do
-    echo "Cleaning up $service"
-    BASE="$(kc $service base-url)" CID="$(kc $service client-id)" SEC="$(kc $service client-secret)" ENVID="$(kc $service environment-id)" \
-    /usr/bin/python3 - <<'EOF'
+# Removes the test categories (the app never deletes on its own) and the
+# recovery sheets, which hold the test tenants' state passphrases. Runs
+# once, however the script ends.
+cleanup() {
+    (( CLEANED )) && return 0
+    CLEANED=1
+    setopt local_options no_err_exit
+    for service in "$A" "$B"; do
+        echo "Cleaning up $service"
+        BASE="$(kc $service base-url)" CID="$(kc $service client-id)" SEC="$(kc $service client-secret)" ENVID="$(kc $service environment-id)" \
+        /usr/bin/python3 - <<'EOF'
 import json, os, urllib.parse, urllib.request
 base = os.environ["BASE"].rstrip("/")
 body = urllib.parse.urlencode({"grant_type": "client_credentials",
@@ -54,7 +49,20 @@ for category in call("GET", "/pro/v1/categories?page-size=2000")["results"]:
         call("DELETE", "/pro/v1/categories/" + category["id"])
         print("  deleted category", category["id"])
 EOF
-done
+    done
+    rm -f ~/Documents/"Jamf Deployer Recovery — Rollout Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — Rollout Demo.txt"
+}
+CLEANED=0
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
-# The recovery sheets hold the test tenants' state passphrases.
-rm -f ~/Documents/"Jamf Deployer Recovery — Rollout Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — Rollout Demo.txt"
+# The UI test target doesn't build the app, so build the Debug app first.
+# Save panels open in ~/Documents, where the cleanup below looks.
+defaults write be.jordythery.jamf-deployer NSNavLastRootDirectory -string "$HOME/Documents"
+# Touching the test sources forces a fresh test bundle.
+touch "Jamf DeployerUITests/"*.swift
+xcodebuild build -project "Jamf Deployer.xcodeproj" -scheme "Jamf Deployer" -configuration Debug -destination "platform=macOS,arch=arm64" -quiet
+set +e
+xcodebuild test -project "Jamf Deployer.xcodeproj" -scheme "Jamf DeployerUITests" -destination 'platform=macOS' \
+    -only-testing:"Jamf DeployerUITests/RolloutUITests" 2>&1 | grep -E "error:|Test Case .*(passed|failed)|TEST (SUCCEEDED|FAILED)"
+set -e

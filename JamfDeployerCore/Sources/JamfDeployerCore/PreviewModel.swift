@@ -178,6 +178,8 @@ public nonisolated enum PreviewBuilder {
             let isUnknown = unknown[key]?.boolValue == true
             let new = after[key] ?? .null
             if !isUnknown && old == new { continue }
+            // An unset list and an empty one mean the same (as in drift).
+            if !isUnknown && old.isNullOrEmptyList && new.isNullOrEmptyList { continue }
 
             let maskedOld = sensitiveBefore[key]?.boolValue == true ? "••••••" : old.displayText
             let maskedNew: String

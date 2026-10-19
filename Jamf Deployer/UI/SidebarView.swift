@@ -23,6 +23,7 @@ struct SidebarView: View {
     @Binding var selection: SidebarSelection?
     @Binding var isConnectingTenant: Bool
     @State private var tenantPendingRemoval: Tenant?
+    @State private var removalError: String?
 
     var body: some View {
         List(selection: $selection) {
@@ -37,7 +38,7 @@ struct SidebarView: View {
                     Label {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(tenant.name)
-                            Text(tenant.connectionLabel)
+                            Text(deployService.isRemoving(tenant.id) ? "Removing…" : tenant.connectionLabel)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -50,6 +51,7 @@ struct SidebarView: View {
                         Button("Remove Tenant…", role: .destructive) {
                             tenantPendingRemoval = tenant
                         }
+                        .disabled(deployService.isRemoving(tenant.id))
                     }
                 }
                 Button {
@@ -83,7 +85,13 @@ struct SidebarView: View {
                     if case .tenant(tenant.id) = selection {
                         selection = .fleet
                     }
-                    Task { await deployService.removeTenant(tenant) }
+                    Task {
+                        do {
+                            try await deployService.removeTenant(tenant)
+                        } catch {
+                            removalError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        }
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -91,6 +99,14 @@ struct SidebarView: View {
             Text(deployService.isTeamMode
                 ? "Nothing in Jamf is changed. The tenant record and its state are deleted from the team space for everyone, and its credentials from this Mac."
                 : "Nothing in Jamf is changed. The tenant record kept by this app and its stored credentials are deleted.")
+        }
+        .alert(
+            "The tenant was not removed",
+            isPresented: Binding(get: { removalError != nil }, set: { if !$0 { removalError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Its deployment state could not be deleted from the team space: \(removalError ?? "") Try again later.")
         }
     }
 }

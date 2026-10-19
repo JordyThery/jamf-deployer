@@ -1,6 +1,6 @@
 # Phase 8 — Team mode and polish
 
-Date: 2026-10-17 · Builds clean · JamfDeployerCore: 34 tests pass · Design agreed first (docs/plans/team-mode.md): **GitHub replaces S3/Azure as the one team backend**, every store is a Git repo, and locking rides on Git's atomic push.
+Date: 2026-10-17 · Builds clean · JamfDeployerCore: 34 tests pass · Design agreed first: **GitHub replaces S3/Azure as the one team backend**, every store is a Git repo, and locking rides on Git's atomic push.
 
 ## 1. What was built
 
@@ -11,7 +11,7 @@ Date: 2026-10-17 · Builds clean · JamfDeployerCore: 34 tests pass · Design ag
 ### Team mode = that repo with a remote
 - **`GitStoreService`** (system git as a child process — HTTPS with gh/credential helper or SSH both work; `GIT_TERMINAL_PROMPT=0` so nothing ever hangs on an auth prompt): init, commit, pull --rebase --autostash, push with rejection detection.
 - *Replaced before 1.0 by the engine's own locking through a Git state backend (see docs/team-mode.md).*
-- **Locking via compare-and-swap**: acquiring = committing `locks/<tenant>.json` and winning the push; losing the race rewinds the lock commit and reports the holder. Releasing commits the run's outcome (state, history, tenant.json) together with the lock removal. Stale locks: **Break Lock…** on the tenant (recorded in the commit message).
+- **Locking via compare-and-swap**: acquiring = committing `locks/<tenant>.json` and winning the push; losing the race rewinds the lock commit and reports the holder. Releasing commits the run's outcome (state, history, tenant.json) together with the lock removal. Stale locks: a manual break on the tenant (recorded in the commit message); shipped in 1.0 as **Force Unlock**.
 - Deploy service integration: preview acquires the tenant's lock (held through the sheet; closing without deploying releases it), deploy releases with a structured commit + push, drift checks lock/commit too. Locked tenants surface as "This tenant is being worked on by X on Y" before any engine run.
 - **UI**: dashboard rows and the tenant view show "Being deployed by Jamie on Jamie's MacBook" with lock age; a Sync button pulls records + locks; Settings → Team hosts the whole lifecycle.
 
@@ -30,21 +30,20 @@ Date: 2026-10-17 · Builds clean · JamfDeployerCore: 34 tests pass · Design ag
 1. Settings → Team → paste an empty private repo URL → **Create Team Space** (a store zip backup lands next to the store first).
 2. On a second Mac (or after Leave + Join): **Join Team Space** — tenants appear, local ones are imported.
 3. Open a tenant → Preview Changes on Mac A; on Mac B the dashboard shows "Being deployed by … on …" and its own Preview refuses with the same message. Close A's sheet without deploying → B can proceed.
-4. Tenant view → Break Lock… for the stale-crash case.
+4. Tenant view → break the lock for the stale-crash case (shipped in 1.0 as **Force Unlock**).
 5. "Add a Custom Object…" → pick e.g. `pro_category` → fill name/priority → Stage → Preview shows the Create.
 6. Settings → Create Support Bundle….
 
 ## 3. Live verification (real GitHub repo, two simulated engineers)
-Against `github.com/JordyThery/jamf-deployer-teamspace-test` (private, created via gh):
+Against a private test repository (created via gh):
 - Team space created from the real store (2 tenants pushed); second store cloned and saw both.
 - **Lock contention**: A acquired; B's acquire was correctly rejected with the holder identified ("Jordy on Mac van Jordy Thery…"); after A's release (which carried A's change, visible to B after pull) B acquired cleanly; a stale lock was broken and the break propagated.
 - The push-rejection CAS path (lose the race → rewind → report holder) is the exact code the app ships.
-- This Mac remains in team mode against the test repo — leave it via Settings → Team whenever you like.
 
 ## 4. Remaining TODO(verify) / open items
 - Git auth relies on the Mac's existing git credentials (gh helper or SSH). A PAT-entry field with askpass injection is designed but not built — joining engineers currently need `gh auth login` or SSH set up once.
 - The object editor covers primitive-attribute types only (honestly labeled); nested-object editing (e.g. whole policies) remains the domain of blocks, capture and adopt.
-- Lock TTL is informational (age shown) — no auto-expiry; Break Lock is the manual escape.
+- Lock TTL is informational (age shown) — no auto-expiry; a manual unlock (**Force Unlock** in 1.0) is the escape.
 - A full VoiceOver/contrast audit (the dedicated nutrition-label checks) is still worth a dedicated pass before release; this phase's sweep covered the shared components and new UI.
 - The brief's S3/azurerm backends were dropped by agreement; the storage layer stays thin enough to add a native backend later.
 
