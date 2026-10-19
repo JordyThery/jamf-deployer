@@ -67,11 +67,23 @@ final class TeamModeUITests: DeployerUITestCase {
         XCTAssertTrue(anyContaining("Try again when they finish").waitForExistence(timeout: 30), "The teammate's lock was not reported")
         openSidebar("Dashboard")
         tap(app.toolbars.buttons["Sync"], timeout: 10)
+        // Exporting waits for the teammate too.
+        openExportSheet()
+        XCTAssertTrue(anyContaining("is working on this tenant").waitForExistence(timeout: 30),
+                      "The export sheet does not show the teammate's lock")
+        tap(app.sheets.buttons["Cancel"])
         openTenant(Self.tenant)
         tap(app.buttons["Force Unlock…"], timeout: 60)
         tap(dialogButton("Force Unlock"), timeout: 10)
         XCTAssertTrue(app.buttons["Force Unlock…"].waitForNonExistence(timeout: 300), "The lock was not released")
         try checkForChanges(expectingChanges: false)
+
+        // Unlocked, the tenant exports from the team space (synced first).
+        openExportSheet()
+        chooseTenantAndFolder(Self.tenant, try env("TEAM_EXPORT_DIR"))
+        tap(app.sheets.buttons["Export"])
+        XCTAssertTrue(anyContaining("Exported 1 tenant").waitForExistence(timeout: 300), "The export did not finish")
+        tap(app.sheets.buttons["Done"])
     }
 
     func test06LeaveTeamMode() throws {

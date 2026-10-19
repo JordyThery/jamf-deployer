@@ -1,0 +1,48 @@
+name: Detect tenants
+description: >-
+  Lists the tenants a change affects as a JSON array: every tenant when a
+  shared module changed, otherwise the tenants whose directory changed.
+  With all=true, lists every tenant.
+
+inputs:
+  base:
+    description: Git revision to compare against (empty with all=true)
+    default: ""
+  all:
+    description: List every tenant
+    default: "false"
+
+outputs:
+  tenants:
+    description: JSON array of tenant directory names
+    value: ${{ steps.find.outputs.tenants }}
+
+runs:
+  using: composite
+  steps:
+    - id: find
+      shell: bash
+      env:
+        BASE: ${{ inputs.base }}
+        ALL: ${{ inputs.all }}
+      run: |
+        set -euo pipefail
+        every() { for d in tenants/*/; do n=$(basename "$d"); [ "$n" = "_template" ] || echo "$n"; done; }
+        # A first push (or a base Git does not have) has nothing to compare
+        # against, so every tenant counts as changed.
+        if [ "$ALL" = "true" ] || [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]] \
+          || ! git cat-file -e "${BASE}^{commit}" 2> /dev/null; then
+          list=$(every)
+        else
+          changed=$(git diff --name-only "$BASE" HEAD)
+          if echo "$changed" | grep -q '^modules/'; then
+            list=$(every)
+          else
+            list=$(echo "$changed" | grep '^tenants/' | grep -v '^tenants/_template/' | cut -d/ -f2 | sort -u || true)
+          fi
+        fi
+        # A removed tenant directory has nothing left to plan.
+        list=$(echo "$list" | while read -r t; do [ -n "$t" ] && [ -d "tenants/$t" ] && echo "$t" || true; done)
+        json=$(printf '%s\n' "$list" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+        echo "tenants=$json" >> "$GITHUB_OUTPUT"
+        echo "Tenants: $json"

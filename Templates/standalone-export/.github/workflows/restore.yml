@@ -1,0 +1,106 @@
+name: Restore baseline
+
+# Adding the "restore-baseline" label to a "Changed in Jamf: <tenant>" issue
+# applies the code to that tenant, undoing what was changed in Jamf. Only
+# issues the Check for Changes workflow opened count, and only people with
+# write access to the repository can trigger it.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write   # the state backend writes state and lock branches
+  issues: write
+
+jobs:
+  authorize:
+    if: >-
+      github.event.label.name == 'restore-baseline'
+      && github.event.issue.user.login == 'github-actions[bot]'
+      && startsWith(github.event.issue.title, 'Changed in Jamf:')
+    runs-on: ubuntu-latest
+    outputs:
+      tenant: ${{ steps.check.outputs.tenant }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ github.event.issue.title }}
+          ACTOR: ${{ github.event.sender.login }}
+        shell: bash
+        run: |
+          permission=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${ACTOR}/permission" --jq .permission)
+          case "$permission" in admin|maintain|write) ;; *)
+            echo "$ACTOR has $permission access; restoring needs write access."; exit 1 ;;
+          esac
+          tenant="${TITLE#Changed in Jamf: }"
+          [[ "$tenant" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "tenants/$tenant" ] || { echo "No tenant named $tenant"; exit 1; }
+          echo "tenant=$tenant" >> "$GITHUB_OUTPUT"
+
+  restore:
+    needs: authorize
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.authorize.outputs.tenant }}
+    concurrency:
+      group: tenant-${{ needs.authorize.outputs.tenant }}
+      cancel-in-progress: false
+    env:
+      TENANT: ${{ needs.authorize.outputs.tenant }}
+      # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
+      # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
+      # The set a tenant does not use stays empty.
+      JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
+      JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
+      JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
+      JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
+      JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
+      JAMFPRO_AUTH_PROVIDER: direct
+      JAMFPRO_AUTH_METHOD: ${{ vars.JAMFPRO_AUTH_METHOD }}
+      JAMFPRO_CLIENT_ID: ${{ secrets.JAMFPRO_CLIENT_ID }}
+      JAMFPRO_CLIENT_SECRET: ${{ secrets.JAMFPRO_CLIENT_SECRET }}
+      JAMFPRO_BASIC_USERNAME: ${{ secrets.JAMFPRO_BASIC_USERNAME }}
+      JAMFPRO_BASIC_PASSWORD: ${{ secrets.JAMFPRO_BASIC_PASSWORD }}
+      # Tenants with Jamf Protect blocks also need these.
+      JAMFPROTECT_URL: ${{ vars.JAMFPROTECT_URL }}
+      JAMFPROTECT_CLIENT_ID: ${{ secrets.JAMFPROTECT_CLIENT_ID }}
+      JAMFPROTECT_CLIENT_SECRET: ${{ secrets.JAMFPROTECT_CLIENT_SECRET }}
+      # The Jamf Pro API plugin needs one operation at a time: those tenants
+      # set PARALLELISM to 1 in their Environment.
+      TF_CLI_ARGS_plan: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_apply: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_destroy: -parallelism=${{ vars.PARALLELISM || '10' }}
+      GH_TOKEN: ${{ github.token }}
+      ACTOR: ${{ github.event.sender.login }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - uses: ./.github/actions/state-backend
+        with:
+          tenant: ${{ env.TENANT }}
+      - uses: ./.github/actions/secret-settings
+        with:
+          secrets: ${{ toJSON(secrets) }}
+      - name: Init
+        run: terraform -chdir="tenants/$TENANT" init -input=false
+      - name: Apply
+        run: |
+          set -o pipefail
+          terraform -chdir="tenants/$TENANT" apply -input=false -no-color -auto-approve -lock-timeout=120s \
+            | tee "$RUNNER_TEMP/apply.txt"
+      - name: Close the issue
+        run: |
+          {
+            echo "Baseline restored by @$ACTOR."
+            echo '```'
+            tail -c 20000 "$RUNNER_TEMP/apply.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+          gh issue close "$ISSUE" --comment "$(cat "$RUNNER_TEMP/body.md")"

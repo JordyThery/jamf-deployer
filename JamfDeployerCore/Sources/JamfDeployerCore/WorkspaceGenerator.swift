@@ -159,26 +159,49 @@ public nonisolated enum WorkspaceGenerator {
         }
     }
 
-    public static func generate(_ input: WorkspaceInput) throws -> Output {
-        var secretVariables: [String: String] = [:]
-        var sections: [String] = []
-
-        // Root variables: name_prefix plus one sensitive variable per secret
-        // setting.
-        var rootVariables = """
-        variable "name_prefix" {
-          description = "Prefix applied to every object name."
-          type        = string
-          default     = \(hclString(input.namePrefix))
+    /// One block's module call, before rendering: the app's workspace and
+    /// the standalone export render the same calls differently.
+    public struct ModuleCall: Sendable {
+        public enum Value: Sendable, Equatable {
+            /// A setting value as an HCL literal, with its HCL type.
+            case setting(String, type: String)
+            /// An expression wiring this block to another one.
+            case reference(String)
+            /// A secret setting, supplied through a sensitive root variable.
+            case secret(variable: String)
         }
-        """
+
+        public struct Argument: Sendable {
+            public var key: String
+            public var value: Value
+        }
+
+        /// The module's name: the block ID with dashes as underscores.
+        public var name: String
+        public var blockID: String
+        /// The module's path inside the block folder ("" or "jamfpro").
+        public var modulePath: String
+        /// Every argument after source and name_prefix, in rendering order.
+        public var arguments: [Argument]
+    }
+
+    /// A sensitive root variable carrying one secret setting.
+    public struct SecretVariable: Sendable {
+        public var key: String          // "<blockID>/<settingKey>"
+        public var name: String
+        public var description: String
+    }
+
+    /// The module calls for `input`, in rendering order, with the secret
+    /// variables they use.
+    public static func moduleCalls(_ input: WorkspaceInput) throws -> (calls: [ModuleCall], secrets: [SecretVariable]) {
+        var calls: [ModuleCall] = []
+        var secrets: [SecretVariable] = []
 
         for selection in sortedSelections(input.selections) {
             let block = selection.block
-            var arguments: [(String, String)] = [
-                ("source", hclString("./modules/\(block.id)" + (selection.modulePath.isEmpty ? "" : "/\(selection.modulePath)"))),
-                ("name_prefix", "var.name_prefix"),
-                ("managed_by_tag", hclString(block.managedByTag)),
+            var arguments: [ModuleCall.Argument] = [
+                .init(key: "managed_by_tag", value: .setting(hclString(block.managedByTag), type: "string")),
             ]
 
             // Scope wiring: one device group supplies both ID kinds.
@@ -188,7 +211,7 @@ public nonisolated enum WorkspaceGenerator {
             case .jamfProGroup, .platformGroup, .jamfProMobileGroup:
                 guard let variable = block.scope.variable else { break }
                 if let existing = selection.existingScopeID {
-                    arguments.append((variable, hclString(existing)))
+                    arguments.append(.init(key: variable, value: .setting(hclString(existing), type: "string")))
                     break
                 }
                 if let provided = selection.providedScope {
@@ -196,7 +219,8 @@ public nonisolated enum WorkspaceGenerator {
                     // Jamf Pro API modules only know Jamf Pro IDs.
                     let map = block.scope.kind == .platformGroup && input.connection == .platform
                         ? "device_group_ids" : "device_group_jamf_pro_ids"
-                    arguments.append((variable, "module.\(sanitized(provider.id)).\(map)[\(hclString(provided.name))]"))
+                    arguments.append(.init(key: variable, value: .reference(
+                        "module.\(sanitized(provider.id)).\(map)[\(hclString(provided.name))]")))
                     break
                 }
                 throw WorkspaceGeneratorError.scopeNotChosen(block: block.name)
@@ -206,9 +230,10 @@ public nonisolated enum WorkspaceGenerator {
             // category, or none ("-1").
             if block.acceptsCategory, let provided = selection.providedCategory {
                 let provider = try Self.provider(of: provided, kind: "category", for: block.name, in: input)
-                arguments.append(("category_id", "module.\(sanitized(provider.id)).category_ids[\(hclString(provided.name))]"))
+                arguments.append(.init(key: "category_id", value: .reference(
+                    "module.\(sanitized(provider.id)).category_ids[\(hclString(provided.name))]")))
             } else if block.acceptsCategory {
-                arguments.append(("category_id", hclString(selection.existingCategoryID ?? "-1")))
+                arguments.append(.init(key: "category_id", value: .setting(hclString(selection.existingCategoryID ?? "-1"), type: "string")))
             }
 
             // Dependency wiring: name-keyed maps from every selected block
@@ -224,19 +249,14 @@ public nonisolated enum WorkspaceGenerator {
                     throw WorkspaceGeneratorError.unmetDependencies(
                         block: block.name, type: depKey, names: missing)
                 }
-                let maps = providers
-                    .map { "module.\(sanitized($0.id)).\(depKey)_ids" }
-                    .joined(separator: ", ")
-                arguments.append(("dep_\(depKey)_ids", providers.count == 1 ? maps : "merge(\(maps))"))
-                let nameMaps = providers
-                    .map { "module.\(sanitized($0.id)).\(depKey)_names" }
-                    .joined(separator: ", ")
-                arguments.append(("dep_\(depKey)_names", providers.count == 1 ? nameMaps : "merge(\(nameMaps))"))
+                func merged(_ suffix: String) -> String {
+                    let maps = providers.map { "module.\(sanitized($0.id)).\(suffix)" }.joined(separator: ", ")
+                    return providers.count == 1 ? maps : "merge(\(maps))"
+                }
+                arguments.append(.init(key: "dep_\(depKey)_ids", value: .reference(merged("\(depKey)_ids"))))
+                arguments.append(.init(key: "dep_\(depKey)_names", value: .reference(merged("\(depKey)_names"))))
                 if depKey == "device_group" {
-                    let proMaps = providers
-                        .map { "module.\(sanitized($0.id)).device_group_jamf_pro_ids" }
-                        .joined(separator: ", ")
-                    arguments.append(("dep_device_group_jamf_pro_ids", providers.count == 1 ? proMaps : "merge(\(proMaps))"))
+                    arguments.append(.init(key: "dep_device_group_jamf_pro_ids", value: .reference(merged("device_group_jamf_pro_ids"))))
                 }
             }
 
@@ -251,42 +271,83 @@ public nonisolated enum WorkspaceGenerator {
                 switch setting.type {
                 case .secret:
                     let variableName = "\(sanitized(block.id))_\(setting.key)"
-                    secretVariables["\(block.id)/\(setting.key)"] = variableName
-                    rootVariables += """
-
-
-                    variable "\(variableName)" {
-                      description = \(hclString("\(block.name): \(setting.title)"))
-                      type        = string
-                      sensitive   = true
-                    }
-                    """
-                    arguments.append((setting.key, "var.\(variableName)"))
+                    secrets.append(SecretVariable(
+                        key: "\(block.id)/\(setting.key)", name: variableName,
+                        description: "\(block.name): \(setting.title)"))
+                    arguments.append(.init(key: setting.key, value: .secret(variable: variableName)))
                 case .bool:
-                    arguments.append((setting.key, raw == "true" ? "true" : "false"))
+                    arguments.append(.init(key: setting.key, value: .setting(raw == "true" ? "true" : "false", type: "bool")))
                 case .number:
                     // Written unquoted, so only a plain number is accepted.
                     let trimmed = raw.trimmingCharacters(in: .whitespaces)
                     guard trimmed.isEmpty || (Double(trimmed) != nil && trimmed.allSatisfy({ $0.isNumber || $0 == "." || $0 == "-" })) else {
                         throw WorkspaceGeneratorError.invalidNumber(block: block.name, setting: setting.title, value: raw)
                     }
-                    arguments.append((setting.key, trimmed.isEmpty ? "null" : trimmed))
+                    arguments.append(.init(key: setting.key, value: .setting(trimmed.isEmpty ? "null" : trimmed, type: "number")))
                 case .string, .enumeration, .appPicker, .macAppStorePicker, .mobileAppStorePicker:
-                    arguments.append((setting.key, hclString(raw)))
+                    arguments.append(.init(key: setting.key, value: .setting(hclString(raw), type: "string")))
                 case .stringList:
                     // "\r\n" is one Character, so splitting on "\n" alone
                     // would leave pasted CRLF text as a single item.
                     let items = raw.split(whereSeparator: \.isNewline).map { hclString(String($0)) }
-                    arguments.append((setting.key, "[\(items.joined(separator: ", "))]"))
+                    arguments.append(.init(key: setting.key, value: .setting("[\(items.joined(separator: ", "))]", type: "list(string)")))
                 }
             }
 
-            let width = arguments.map(\.0.count).max() ?? 0
-            let body = arguments
-                .map { "  \($0.0.padding(toLength: width, withPad: " ", startingAt: 0)) = \($0.1)" }
-                .joined(separator: "\n")
-            sections.append("module \"\(sanitized(block.id))\" {\n\(body)\n}")
+            calls.append(ModuleCall(
+                name: sanitized(block.id), blockID: block.id,
+                modulePath: selection.modulePath, arguments: arguments))
         }
+        return (calls, secrets)
+    }
+
+    /// Lines of `key = value` aligned the way `terraform fmt` aligns them.
+    static func aligned(_ pairs: [(String, String)], indent: String = "  ") -> String {
+        let width = pairs.map(\.0.count).max() ?? 0
+        return pairs
+            .map { "\(indent)\($0.0.padding(toLength: width, withPad: " ", startingAt: 0)) = \($0.1)" }
+            .joined(separator: "\n")
+    }
+
+    public static func generate(_ input: WorkspaceInput) throws -> Output {
+        let (calls, secrets) = try moduleCalls(input)
+
+        // Root variables: name_prefix plus one sensitive variable per secret
+        // setting.
+        var rootVariables = """
+        variable "name_prefix" {
+          description = "Prefix applied to every object name."
+          type        = string
+          default     = \(hclString(input.namePrefix))
+        }
+        """
+        for secret in secrets {
+            rootVariables += """
+
+
+            variable "\(secret.name)" {
+              description = \(hclString(secret.description))
+              type        = string
+              sensitive   = true
+            }
+            """
+        }
+
+        var sections: [String] = calls.map { call in
+            var pairs: [(String, String)] = [
+                ("source", hclString("./modules/\(call.blockID)" + (call.modulePath.isEmpty ? "" : "/\(call.modulePath)"))),
+                ("name_prefix", "var.name_prefix"),
+            ]
+            for argument in call.arguments {
+                switch argument.value {
+                case .setting(let literal, _): pairs.append((argument.key, literal))
+                case .reference(let expression): pairs.append((argument.key, expression))
+                case .secret(let variable): pairs.append((argument.key, "var.\(variable)"))
+                }
+            }
+            return "module \"\(call.name)\" {\n\(aligned(pairs))\n}"
+        }
+        let secretVariables = Dictionary(secrets.map { ($0.key, $0.name) }, uniquingKeysWith: { _, last in last })
 
         // Blocks for Jamf Protect bring in the second provider; its
         // credentials come from JAMFPROTECT_* environment variables.

@@ -1,0 +1,98 @@
+name: Apply
+
+# A merge into main applies the tenants it changed. The pull request review is
+# the approval: nothing reaches main without a reviewed plan. One job per
+# tenant, in that tenant's GitHub Environment, which only main may use; one run
+# per tenant at a time.
+
+on:
+  push:
+    branches: [main]
+    paths: ["tenants/**", "modules/**"]
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: Tenant to apply (directory name under tenants/)
+        required: true
+
+permissions:
+  contents: write   # the state backend writes state and lock branches
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      tenants: ${{ steps.manual.outputs.tenants || steps.detect.outputs.tenants }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: manual
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TENANT: ${{ inputs.tenant }}
+        shell: bash
+        run: |
+          [[ "$TENANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }
+          echo "tenants=$(jq -c -n --arg t "$TENANT" '[$t]')" >> "$GITHUB_OUTPUT"
+      - id: detect
+        if: github.event_name == 'push'
+        uses: ./.github/actions/detect-tenants
+        with:
+          base: ${{ github.event.before }}
+
+  apply:
+    needs: detect
+    if: github.ref == 'refs/heads/main' && needs.detect.outputs.tenants != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tenant: ${{ fromJson(needs.detect.outputs.tenants) }}
+    environment:
+      name: ${{ matrix.tenant }}
+    concurrency:
+      group: tenant-${{ matrix.tenant }}
+      cancel-in-progress: false
+    env:
+      TENANT: ${{ matrix.tenant }}
+      # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
+      # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
+      # The set a tenant does not use stays empty.
+      JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
+      JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
+      JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
+      JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
+      JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
+      JAMFPRO_AUTH_PROVIDER: direct
+      JAMFPRO_AUTH_METHOD: ${{ vars.JAMFPRO_AUTH_METHOD }}
+      JAMFPRO_CLIENT_ID: ${{ secrets.JAMFPRO_CLIENT_ID }}
+      JAMFPRO_CLIENT_SECRET: ${{ secrets.JAMFPRO_CLIENT_SECRET }}
+      JAMFPRO_BASIC_USERNAME: ${{ secrets.JAMFPRO_BASIC_USERNAME }}
+      JAMFPRO_BASIC_PASSWORD: ${{ secrets.JAMFPRO_BASIC_PASSWORD }}
+      # Tenants with Jamf Protect blocks also need these.
+      JAMFPROTECT_URL: ${{ vars.JAMFPROTECT_URL }}
+      JAMFPROTECT_CLIENT_ID: ${{ secrets.JAMFPROTECT_CLIENT_ID }}
+      JAMFPROTECT_CLIENT_SECRET: ${{ secrets.JAMFPROTECT_CLIENT_SECRET }}
+      # The Jamf Pro API plugin needs one operation at a time: those tenants
+      # set PARALLELISM to 1 in their Environment.
+      TF_CLI_ARGS_plan: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_apply: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_destroy: -parallelism=${{ vars.PARALLELISM || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - uses: ./.github/actions/state-backend
+        with:
+          tenant: ${{ env.TENANT }}
+      - uses: ./.github/actions/secret-settings
+        with:
+          secrets: ${{ toJSON(secrets) }}
+      - name: Init
+        run: terraform -chdir="tenants/$TENANT" init -input=false
+      - name: Apply
+        run: terraform -chdir="tenants/$TENANT" apply -input=false -no-color -auto-approve -lock-timeout=120s

@@ -112,7 +112,8 @@ struct TenantDetailView: View {
                     if tenant.isHandedOver {
                         GroupBox {
                             Label(
-                                "This tenant was handed over: everything it managed stays in Jamf, but this app no longer tracks or changes it. The record is archived.",
+                                tenant.exportedTo.map { "This tenant moved to the Terraform repository \($0): change it there with pull requests. This app no longer tracks or changes it, and the record is archived." }
+                                    ?? "This tenant was handed over: everything it managed stays in Jamf, but this app no longer tracks or changes it. The record is archived.",
                                 systemImage: "archivebox"
                             )
                             .font(.callout)

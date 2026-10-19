@@ -1,0 +1,38 @@
+{
+  "alwaysOn": false,
+  "category": "Core",
+  "conflicts": [],
+  "id": "uit-secret-marker",
+  "minJamfProVersion": "11.31.0",
+  "name": "UIT Secret Marker",
+  "objectsCreated": [
+    "1 category"
+  ],
+  "permissions": [
+    "categories:create",
+    "categories:read",
+    "categories:update",
+    "categories:delete"
+  ],
+  "products": [
+    "jamf-platform"
+  ],
+  "provides": {},
+  "requires": [],
+  "risk": "low",
+  "scope": {
+    "kind": "none"
+  },
+  "settings": [
+    {
+      "key": "token",
+      "title": "Test token",
+      "type": "secret",
+      "required": true,
+      "description": "Any value; the category name carries its hash.",
+      "section": "Test"
+    }
+  ],
+  "summary": "Test block: a category named after a hash of a secret setting, so a wrong or missing secret shows up as a change.",
+  "version": "1.0.0"
+}

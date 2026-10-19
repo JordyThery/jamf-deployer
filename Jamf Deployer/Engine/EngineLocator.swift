@@ -38,6 +38,11 @@ nonisolated enum EngineLocator {
         locate("Catalog")
     }
 
+    /// The pipeline files a standalone Terraform export ships with.
+    static var exportTemplatesURL: URL {
+        locate("Templates/standalone-export")
+    }
+
     /// Writes the engine CLI configuration pointing
     /// provider installation at the bundled mirror, so init never downloads.
     static func ensureCLIConfig() throws -> URL {

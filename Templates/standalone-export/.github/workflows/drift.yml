@@ -1,0 +1,126 @@
+name: Check for changes
+
+# Weekly (and on demand): plans every tenant against the live Jamf tenant.
+# When something was changed directly in Jamf, an issue titled
+# "Changed in Jamf: <tenant>" holds the plan. A person decides what happens:
+# keep the change by putting it in code with a pull request, or add the
+# "restore-baseline" label to the issue to put the baseline back (restore.yml).
+# When a later check finds no changes, the issue is closed.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write   # the state backend writes lock branches
+  issues: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      tenants: ${{ steps.detect.outputs.tenants }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        uses: ./.github/actions/detect-tenants
+        with:
+          all: "true"
+
+  check:
+    needs: detect
+    if: needs.detect.outputs.tenants != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tenant: ${{ fromJson(needs.detect.outputs.tenants) }}
+    environment:
+      name: ${{ matrix.tenant }}
+    concurrency:
+      group: tenant-${{ matrix.tenant }}
+      cancel-in-progress: false
+    env:
+      TENANT: ${{ matrix.tenant }}
+      # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
+      # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
+      # The set a tenant does not use stays empty.
+      JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
+      JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
+      JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
+      JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
+      JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
+      JAMFPRO_AUTH_PROVIDER: direct
+      JAMFPRO_AUTH_METHOD: ${{ vars.JAMFPRO_AUTH_METHOD }}
+      JAMFPRO_CLIENT_ID: ${{ secrets.JAMFPRO_CLIENT_ID }}
+      JAMFPRO_CLIENT_SECRET: ${{ secrets.JAMFPRO_CLIENT_SECRET }}
+      JAMFPRO_BASIC_USERNAME: ${{ secrets.JAMFPRO_BASIC_USERNAME }}
+      JAMFPRO_BASIC_PASSWORD: ${{ secrets.JAMFPRO_BASIC_PASSWORD }}
+      # Tenants with Jamf Protect blocks also need these.
+      JAMFPROTECT_URL: ${{ vars.JAMFPROTECT_URL }}
+      JAMFPROTECT_CLIENT_ID: ${{ secrets.JAMFPROTECT_CLIENT_ID }}
+      JAMFPROTECT_CLIENT_SECRET: ${{ secrets.JAMFPROTECT_CLIENT_SECRET }}
+      # The Jamf Pro API plugin needs one operation at a time: those tenants
+      # set PARALLELISM to 1 in their Environment.
+      TF_CLI_ARGS_plan: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_apply: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_destroy: -parallelism=${{ vars.PARALLELISM || '10' }}
+      GH_TOKEN: ${{ github.token }}
+      TITLE: "Changed in Jamf: ${{ matrix.tenant }}"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - uses: ./.github/actions/state-backend
+        with:
+          tenant: ${{ env.TENANT }}
+      - uses: ./.github/actions/secret-settings
+        with:
+          secrets: ${{ toJSON(secrets) }}
+      - name: Init
+        run: terraform -chdir="tenants/$TENANT" init -input=false
+      - name: Plan
+        id: plan
+        run: |
+          set +e
+          terraform -chdir="tenants/$TENANT" plan -input=false -no-color -detailed-exitcode -lock-timeout=120s \
+            > "$RUNNER_TEMP/plan.txt" 2>&1
+          code=$?
+          cat "$RUNNER_TEMP/plan.txt"
+          # 0: matches the code, 2: changed in Jamf, anything else: the check failed.
+          [ "$code" = 0 ] || [ "$code" = 2 ] || exit "$code"
+          echo "changed=$([ "$code" = 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Open or update the issue
+        if: steps.plan.outputs.changed == 'true'
+        run: |
+          gh label create drift --color D93F0B --description "Changed in Jamf, outside the code" 2>/dev/null || true
+          gh label create restore-baseline --color 0E8A16 --description "Put the baseline back" 2>/dev/null || true
+          {
+            echo "A check found changes made directly in Jamf for \`$TENANT\`."
+            echo
+            echo "- **Keep them:** put the change in code with a pull request."
+            echo "- **Undo them:** add the \`restore-baseline\` label to this issue."
+            echo
+            echo '```'
+            head -c 60000 "$RUNNER_TEMP/plan.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+          number=$(gh issue list --state open --label drift --search "\"$TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --title "$TITLE" --label drift --body-file "$RUNNER_TEMP/body.md"
+          fi
+      - name: Close a resolved issue
+        if: steps.plan.outputs.changed == 'false'
+        run: |
+          number=$(gh issue list --state open --label drift --search "\"$TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue close "$number" --comment "The latest check found no changes."
+          fi

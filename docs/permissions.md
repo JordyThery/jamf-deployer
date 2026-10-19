@@ -114,6 +114,17 @@ Protect deployment sync, under the Platform client above.
   the repository — each engineer uses their own Jamf API client or account
   (see [Team Mode](team-mode.md)).
 
+## Export as Terraform
+
+- Moving tenants to a repository needs **push access** to an empty private
+  repository, with Git credentials already configured, the same way as Team
+  Mode. The export creates the repository's `main` and `terraform-state`
+  branches.
+- The exported workflows use the same Jamf API privileges as the app: each
+  tenant's GitHub Environment holds its own API client, and only `main` may
+  use it. Pull request plans use the tenant's `<tenant>-plan` Environment,
+  which any branch can reach; a read-only API client is enough there.
+
 ## On the Mac
 
 - Secrets are stored in the **login Keychain** under the app's own items;
