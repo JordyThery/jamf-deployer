@@ -51,6 +51,7 @@ public nonisolated enum DriftReportBuilder {
         "profile_uuid",
         "profile_url",
         "prestage_installed_profile_ids",
+        "version_lock",
         "member_count",
         "selected_version",
         "latest_available_version",
@@ -114,7 +115,9 @@ public nonisolated enum DriftReportBuilder {
         for key in Set(beforeObject.keys).union(afterObject.keys).sorted() {
             let old = beforeObject[key] ?? .null
             let new = afterObject[key] ?? .null
-            guard old != new else { continue }
+            // An unset list and an empty one mean the same: some engine
+            // plugins read back [] for lists the configuration left out.
+            guard old != new, !(old.isNullOrEmptyList && new.isNullOrEmptyList) else { continue }
             let path = prefix.isEmpty ? key : "\(prefix).\(key)"
             // A mask of `true` covers the whole value, nested fields included.
             let wholeSensitive = sensitiveBefore[key]?.boolValue == true || sensitiveAfter[key]?.boolValue == true

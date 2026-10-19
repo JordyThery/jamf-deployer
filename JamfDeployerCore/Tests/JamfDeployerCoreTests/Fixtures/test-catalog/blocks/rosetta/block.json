@@ -1,17 +1,26 @@
 {
-  "id": "rosetta",
-  "name": "Rosetta 2",
-  "summary": "Installs Rosetta 2 on Apple silicon Macs so Intel-only apps keep working. Script plus a check-in policy.",
+  "acceptsCategory": true,
+  "alwaysOn": false,
   "category": "Applications",
-  "version": "1.0.0",
-  "requires": [
-    "foundation"
-  ],
   "conflicts": [],
-  "products": [
-    "jamf-pro"
+  "defaultCategory": "categories/Applications",
+  "id": "rosetta",
+  "jamfProPermissions": [
+    "Create Scripts",
+    "Read Scripts",
+    "Update Scripts",
+    "Delete Scripts",
+    "Create Policies",
+    "Read Policies",
+    "Update Policies",
+    "Delete Policies"
   ],
   "minJamfProVersion": "11.31.0",
+  "name": "Rosetta 2",
+  "objectsCreated": [
+    "1 script",
+    "1 policy (once per computer, at check-in)"
+  ],
   "permissions": [
     "scripts:create",
     "scripts:read",
@@ -22,17 +31,17 @@
     "policies:update",
     "policies:delete"
   ],
+  "products": [
+    "jamf-pro"
+  ],
+  "requires": [],
   "risk": "low",
-  "alwaysOn": false,
   "scope": {
+    "default": "device-groups/Apple Silicon Macs",
     "kind": "jamfProGroup",
-    "variable": "scope_jamf_pro_group_id",
-    "default": "apple_silicon"
+    "variable": "scope_jamf_pro_group_id"
   },
   "settings": [],
-  "objectsCreated": [
-    "1 script",
-    "1 policy (once per computer, at check-in)"
-  ],
-  "acceptsCategory": true
+  "summary": "Installs Rosetta 2 on Apple silicon Macs so Intel-only apps keep working. Script plus a check-in policy.",
+  "version": "1.1.0"
 }

@@ -36,6 +36,15 @@ nonisolated extension JSONValue: Decodable {
 }
 
 nonisolated extension JSONValue {
+    /// Null or an empty array.
+    public var isNullOrEmptyList: Bool {
+        switch self {
+        case .null: true
+        case .array(let items): items.isEmpty
+        default: false
+        }
+    }
+
     public var objectValue: [String: JSONValue]? {
         if case .object(let value) = self { return value }
         return nil

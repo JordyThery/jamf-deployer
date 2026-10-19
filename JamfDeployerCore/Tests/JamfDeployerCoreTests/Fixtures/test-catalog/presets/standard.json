@@ -1,9 +1,20 @@
 {
   "id": "standard",
   "name": "Standard",
-  "summary": "The full first baseline: enrollment, FileVault, software updates, CIS Level 1 monitoring and Rosetta 2.",
-  "blocks": ["foundation", "enrollment", "filevault", "software-updates", "compliance-cis-l1", "rosetta"],
+  "summary": "The full first baseline: groups, categories and extension attributes, plus enrollment, FileVault, software updates, CIS Level 1 monitoring and Rosetta 2.",
+  "blocks": [
+    "device-groups",
+    "categories",
+    "extension-attributes",
+    "enrollment",
+    "filevault",
+    "software-updates",
+    "compliance-cis-l1",
+    "rosetta"
+  ],
   "defaults": {
-    "compliance-cis-l1": { "enforcement_mode": "MONITOR" }
+    "compliance-cis-l1": {
+      "enforcement_mode": "MONITOR"
+    }
   }
 }

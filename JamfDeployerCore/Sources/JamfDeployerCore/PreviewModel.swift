@@ -46,14 +46,6 @@ public nonisolated struct FieldDiff: Codable, Sendable, Identifiable, Equatable 
         self.after = after
         self.rawAfter = rawAfter
     }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        path = try container.decode(String.self, forKey: .path)
-        before = try container.decode(String.self, forKey: .before)
-        after = try container.decode(String.self, forKey: .after)
-        rawAfter = try container.decodeIfPresent(String.self, forKey: .rawAfter)
-    }
 }
 
 /// One object in the preview.
@@ -143,11 +135,7 @@ public nonisolated enum PreviewBuilder {
                     changes: changes.sorted { $0.address < $1.address }
                 )
             }
-            .sorted {
-                if $0.blockID == "foundation" { return true }
-                if $1.blockID == "foundation" { return false }
-                return $0.blockName < $1.blockName
-            }
+            .sorted { $0.blockName < $1.blockName }
 
         return PreviewSummary(
             groups: groups,

@@ -3,8 +3,8 @@
   "name": "App Catalog",
   "summary": "Apps from Jamf's App Catalog, installed and kept up to date automatically — no packaging. Pick apps with the built-in picker.",
   "category": "Applications",
-  "version": "1.0.0",
-  "requires": ["foundation"],
+  "version": "1.1.0",
+  "requires": [],
   "conflicts": [],
   "products": ["jamf-pro"],
   "minJamfProVersion": "11.31.0",
@@ -12,7 +12,7 @@
   "risk": "medium",
   "alwaysOn": false,
   "acceptsCategory": true,
-  "scope": { "kind": "jamfProGroup", "variable": "scope_jamf_pro_group_id", "default": "all_macs", "smartOnly": true },
+  "scope": { "kind": "jamfProGroup", "variable": "scope_jamf_pro_group_id", "smartOnly": true },
   "settings": [
     {
       "key": "apps_json",

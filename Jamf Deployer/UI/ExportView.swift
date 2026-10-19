@@ -134,7 +134,7 @@ struct ExportView: View {
                 }
             }
             if tenant.isJamfPro {
-                Text("Building blocks and clones need a Jamf Platform API connection; this tenant is connected through the Jamf Pro API.")
+                Text("Capturing building blocks and cloning need a Jamf Platform API connection; this tenant is connected through the Jamf Pro API.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -500,7 +500,7 @@ struct ExportView: View {
             // Clones keep their own groups and categories; a capture that
             // collapsed scope onto a variable leaves the group to be chosen
             // on the destination tenant.
-            var selection = BlockSelection(blockID: blockID, scope: "")
+            var selection = BlockSelection(blockID: blockID, sourceID: source.id.uuidString)
             if captured.usesCategory { selection.existingCategory = .noCategory }
             target.blockSelections.append(selection)
             tenantStore.update(target)

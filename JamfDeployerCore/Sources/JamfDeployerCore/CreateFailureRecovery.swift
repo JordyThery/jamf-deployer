@@ -30,6 +30,12 @@ public nonisolated enum CreateFailureRecovery {
             path: "/proclassic/patchsoftwaretitles", root: "patch_software_titles"),
         "jamfplatform_pro_app_installer": .list(
             path: "/pro/v1/app-installers/deployments", root: "results", pageSize: 2000),
+        // The same objects through the Jamf Pro API plugin.
+        "jamfpro_policy": .byName(path: "/proclassic/policies/name/", root: "policy"),
+        "jamfpro_macos_configuration_profile_plist": .byName(
+            path: "/proclassic/osxconfigurationprofiles/name/", root: "os_x_configuration_profile"),
+        "jamfpro_app_installer": .list(
+            path: "/pro/v1/app-installers/deployments", root: "results", pageSize: 2000),
     ]
 
     /// Failed creates worth checking: a 500, 502, 503 or 504 on a recoverable type,
@@ -41,8 +47,7 @@ public nonisolated enum CreateFailureRecovery {
         var result: [Candidate] = []
         for diagnostic in diagnostics where diagnostic.severity == "error" {
             guard let address = diagnostic.address,
-                  diagnostic.summary.hasPrefix("Error creating"),
-                  (diagnostic.detail ?? "").contains(/status 50[0234]\b/),
+                  Self.isFailedCreate(diagnostic),
                   let change = changes[address],
                   change.change.actions == ["create"],
                   lookups[change.type] != nil,
@@ -53,6 +58,15 @@ public nonisolated enum CreateFailureRecovery {
             }
         }
         return result
+    }
+
+    /// A create that ended in a server error. The Platform plugin reports
+    /// "Error creating … status 500"; the jamfpro plugin reports
+    /// "failed to create … "status_code":500" in the summary itself.
+    static func isFailedCreate(_ diagnostic: EngineStreamEvent.Diagnostic) -> Bool {
+        let text = diagnostic.summary + " " + (diagnostic.detail ?? "")
+        let creating = diagnostic.summary.hasPrefix("Error creating") || diagnostic.summary.hasPrefix("failed to create")
+        return creating && text.contains(/(status |"status_code":)50[0234]\b/)
     }
 
     /// The object name in planned values: top-level `name` or `general.name`.

@@ -278,6 +278,16 @@ struct BlockDetailSheet: View {
         return lines.joined(separator: "\n")
     }
 
+    private var connectionsText: String {
+        let platform = catalog?.supports(blockID: block.id, connection: .platform) ?? true
+        let jamfPro = catalog?.supports(blockID: block.id, connection: .jamfPro) ?? false
+        switch (platform, jamfPro) {
+        case (true, true): return "Deploys to tenants connected through the Jamf Platform API or the Jamf Pro API."
+        case (false, true): return "Deploys to tenants connected through the Jamf Pro API."
+        default: return "Deploys to tenants connected through the Jamf Platform API."
+        }
+    }
+
     /// Tenants whose baseline currently selects this block.
     private var tenantsUsingBlock: [String] {
         tenantStore.tenants
@@ -308,13 +318,32 @@ struct BlockDetailSheet: View {
                         .padding(4)
                     }
 
-                    GroupBox("Permissions it needs") {
-                        Text(block.permissions.joined(separator: "  ·  "))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                    GroupBox("Connections") {
+                        Text(connectionsText)
+                            .font(.callout)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(4)
-                            .textSelection(.enabled)
+                    }
+
+                    GroupBox("Permissions it needs") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if !block.jamfProPermissions.isEmpty {
+                                Text("Jamf Platform API").font(.caption.bold())
+                            }
+                            Text(block.permissions.joined(separator: "  ·  "))
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                            if !block.jamfProPermissions.isEmpty {
+                                Text("Jamf Pro API").font(.caption.bold())
+                                Text(block.jamfProPermissions.joined(separator: "  ·  "))
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(4)
                     }
 
                     if !block.requires.isEmpty {

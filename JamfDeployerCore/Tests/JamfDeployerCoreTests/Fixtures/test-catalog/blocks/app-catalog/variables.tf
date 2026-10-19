@@ -14,13 +14,13 @@ variable "scope_jamf_pro_group_id" {
 }
 
 variable "category_id" {
-  description = "Jamf Pro category for the deployments."
+  description = "Jamf Pro category for apps without their own."
   type        = string
   default     = "-1"
 }
 
 variable "apps_json" {
-  description = "JSON array of apps: [{titleName, publisher, deploymentType, updateBehavior}]. Produced by the App Catalog picker."
+  description = "JSON array of apps: [{titleName, publisher, deploymentType, updateBehavior, categoryId?}]. Produced by the App Catalog picker; an app without categoryId uses category_id."
   type        = string
   default     = "[]"
 

@@ -1,7 +1,11 @@
 {
   "id": "minimal",
   "name": "Minimal",
-  "summary": "Just the foundation and software updates — a starting point to grow from.",
-  "blocks": ["foundation", "software-updates"],
+  "summary": "Device groups, categories and software updates \u2014 a starting point to grow from.",
+  "blocks": [
+    "device-groups",
+    "categories",
+    "software-updates"
+  ],
   "defaults": {}
 }

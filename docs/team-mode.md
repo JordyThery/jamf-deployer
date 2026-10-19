@@ -38,8 +38,6 @@ A new engineer runs **Share Credentials with the Team…** once to publish their
 
 ## Setting up
 
-Everyone on the team needs Jamf Deployer 1.0.4 or later before a tenant is connected through the Jamf Pro API: earlier versions do not know the connection type and would treat the tenant as a Jamf Platform API tenant.
-
 **Create** (first engineer): Settings, under **Team**: enter the URL of an empty private GitHub repository under **Repository URL** → **Create Team Space…**. The app zips a backup of the local store first, then pushes it as-is.
 
 **Join** (everyone else): Settings, under **Team**: enter the repository URL → **Join Team Space…**. Local tenants the team space doesn't know yet are copied in; tenants with the same ID are skipped, never overwritten. The team's settings — including its list of catalog sources — replace this Mac's (a backup is kept). Ask a teammate to share credentials, then you're fully operational.

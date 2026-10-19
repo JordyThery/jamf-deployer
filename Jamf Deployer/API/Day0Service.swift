@@ -165,9 +165,8 @@ final class Day0Service {
             add("protect", "Jamf Protect link", .unknown(detail: "Could not check."))
         }
 
-        // Cloud Services Connection (status only); it serves the App
-        // Catalog block, which Jamf Pro API tenants cannot use.
-        if !tenant.isJamfPro, let (_, status) = try? await client.get(
+        // Cloud Services Connection (status only).
+        if let (_, status) = try? await client.get(
             "/pro/v1/app-installers/titles",
             query: [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")]
         ) {
@@ -175,7 +174,7 @@ final class Day0Service {
                 status == 200
                     ? .done(detail: "Established — the App Catalog works.")
                     : .pending(detail: "Connect it in Jamf Pro under Settings → Jamf apps; the App Catalog block needs it."))
-        } else if !tenant.isJamfPro {
+        } else {
             add("csc", "Cloud Services Connection", .unknown(detail: "Could not check."))
         }
 

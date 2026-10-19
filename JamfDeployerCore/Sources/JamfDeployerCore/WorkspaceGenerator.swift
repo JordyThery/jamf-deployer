@@ -5,48 +5,40 @@ public nonisolated struct GeneratedSelection: Sendable {
     public var block: BlockMetadata
     /// Non-secret setting values keyed by setting key.
     public var settings: [String: String]
-    /// Legacy Foundation group key this block is scoped to (pilot,
-    /// all_macs, …); empty when another scope source is set.
-    public var scope: String
     /// Overrides the catalog's folder for this block — used when a selection
     /// is pinned to a different catalog tag than the tenant default.
     public var folderURL: URL?
     /// An existing group in the tenant the block is scoped to, by the ID
-    /// kind the block's scope variable takes. Replaces the Foundation group.
+    /// kind the block's scope variable takes.
     public var existingScopeID: String?
-    /// An existing category in the tenant ("-1" for none). Replaces the
-    /// Foundation category.
+    /// An existing category in the tenant ("-1" for none).
     public var existingCategoryID: String?
     /// A group another selected block creates.
     public var providedScope: ProvidedObject?
     /// A category another selected block creates.
     public var providedCategory: ProvidedObject?
+    /// The module's path inside the block folder for the tenant's
+    /// connection ("" for the folder itself); see `BlockModule`.
+    public var modulePath: String
 
     public init(
         block: BlockMetadata,
         settings: [String: String],
-        scope: String,
         folderURL: URL? = nil,
         existingScopeID: String? = nil,
         existingCategoryID: String? = nil,
         providedScope: ProvidedObject? = nil,
-        providedCategory: ProvidedObject? = nil
+        providedCategory: ProvidedObject? = nil,
+        modulePath: String = ""
     ) {
         self.block = block
         self.settings = settings
-        self.scope = scope
         self.folderURL = folderURL
         self.existingScopeID = existingScopeID
         self.existingCategoryID = existingCategoryID
         self.providedScope = providedScope
         self.providedCategory = providedCategory
-    }
-
-    /// Whether this selection takes anything from the Foundation block.
-    public var wiresThroughFoundation: Bool {
-        block.wiresThroughFoundation(
-            usesExistingScope: existingScopeID != nil || providedScope != nil,
-            usesExistingCategory: existingCategoryID != nil || providedCategory != nil)
+        self.modulePath = modulePath
     }
 }
 
@@ -58,7 +50,8 @@ public nonisolated struct WorkspaceInput: Sendable {
     public var selections: [GeneratedSelection]
     public var providerVersion: String
     public var protectProviderVersion: String
-    /// The API the tenant is reached through; Jamf Pro tenants carry no blocks.
+    /// The API the tenant is reached through: it picks the engine plugin
+    /// and each block's module.
     public var connection: ConnectionKind
     public var jamfProProviderVersion: String
     /// Blocks leaving the baseline. `keepInJamf` removals become
@@ -98,23 +91,17 @@ public nonisolated struct BlockRemoval: Codable, Sendable, Equatable {
 }
 
 public nonisolated enum WorkspaceGeneratorError: LocalizedError {
-    case missingFoundation
-    case unknownScope(block: String, scope: String)
     case scopeNotChosen(block: String)
     case missingRequiredSetting(block: String, setting: String)
     case invalidNumber(block: String, setting: String, value: String)
     case unmetDependencies(block: String, type: String, names: [String])
     /// Two selected blocks manage the same tenant-wide setting.
     case conflictingSettings(type: String, blocks: [String])
-    /// Catalog blocks are written for the Jamf Platform API.
-    case blocksNeedPlatform
+    /// The block has no module for the tenant's connection.
+    case unsupportedConnection(block: String, connection: ConnectionKind)
 
     public var errorDescription: String? {
         switch self {
-        case .missingFoundation:
-            "A selected block scopes or categorizes through Foundation, so the Foundation block must be selected too. Foundation comes with the demo catalog — or pick existing groups and categories in the block's settings."
-        case .unknownScope(let block, let scope):
-            "The block \"\(block)\" is scoped to \"\(scope)\", which the Foundation block does not provide."
         case .scopeNotChosen(let block):
             "The block \"\(block)\" has no scope yet. Open its settings and choose a group."
         case .missingRequiredSetting(let block, let setting):
@@ -123,10 +110,10 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
             "The block \"\(block)\" needs a number for its \"\(setting)\" setting, not \"\(value)\"."
         case .unmetDependencies(let block, let type, let names):
             "The block \"\(block)\" references \(type.replacingOccurrences(of: "_", with: " "))s no selected block creates: \(names.joined(separator: ", ")). Select the block that creates them, or remove this block."
-        case .blocksNeedPlatform:
-            "Building blocks need a Jamf Platform API connection. This tenant is connected through the Jamf Pro API, so it manages adopted and custom objects only."
+        case .unsupportedConnection(let block, let connection):
+            "The block \"\(block)\" has no \(connection == .jamfPro ? "Jamf Pro API" : "Jamf Platform API") version in the catalog release this tenant uses. Update the block with Baseline Updates…, or remove it from the baseline."
         case .conflictingSettings(let type, let blocks):
-            "The blocks \(blocks.map { "\"\($0)\"" }.joined(separator: " and ")) both manage the tenant's \(type.replacingOccurrences(of: "jamfplatform_pro_", with: "").replacingOccurrences(of: "_", with: " ")). A setting can belong to one block only — deselect one of them."
+            "The blocks \(blocks.map { "\"\($0)\"" }.joined(separator: " and ")) both manage the tenant's \(type.replacingOccurrences(of: "jamfplatform_pro_", with: "").replacingOccurrences(of: "jamfpro_", with: "").replacingOccurrences(of: "_", with: " ")). A setting can belong to one block only — deselect one of them."
         }
     }
 }
@@ -135,9 +122,6 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
 /// appear in generated files: secret settings become sensitive root
 /// variables fed through TF_VAR_* environment variables.
 public nonisolated enum WorkspaceGenerator {
-    /// Foundation group keys → output name stems.
-    public static let foundationGroups = ["pilot", "all_macs", "laptops", "desktops", "apple_silicon"]
-
     public struct Output: Sendable {
         public var providersTF: String
         public var mainTF: String
@@ -146,20 +130,25 @@ public nonisolated enum WorkspaceGenerator {
         public var secretVariableNames: [String: String]
     }
 
-    public static func generate(_ input: WorkspaceInput) throws -> Output {
-        if input.connection == .jamfPro {
-            return try jamfProOutput(input)
+    /// Sets each selection's module path for `connection`, or names the
+    /// first block that cannot deploy through it.
+    public static func resolveModules(
+        _ selections: [GeneratedSelection],
+        catalog: LoadedCatalog,
+        connection: ConnectionKind
+    ) throws -> [GeneratedSelection] {
+        try selections.map { selection in
+            let folder = selection.folderURL ?? catalog.blockFolderURL(id: selection.block.id)
+            guard let path = BlockModule.modulePath(ofBlockAt: folder, for: connection) else {
+                throw WorkspaceGeneratorError.unsupportedConnection(block: selection.block.name, connection: connection)
+            }
+            var resolved = selection
+            resolved.modulePath = path
+            return resolved
         }
-        // Foundation is needed only when a selected block wires to it:
-        // Foundation-scoped blocks, Foundation categories, or an explicit
-        // requirement. Fidelity-captured baselines bring their own groups
-        // and categories, and blocks can point at existing ones instead.
-        let needsFoundation = input.selections.contains(where: \.wiresThroughFoundation)
-        if needsFoundation,
-           !input.selections.contains(where: { $0.block.id == "foundation" }) {
-            throw WorkspaceGeneratorError.missingFoundation
-        }
+    }
 
+    public static func generate(_ input: WorkspaceInput) throws -> Output {
         var secretVariables: [String: String] = [:]
         var sections: [String] = []
 
@@ -176,7 +165,7 @@ public nonisolated enum WorkspaceGenerator {
         for selection in sortedSelections(input.selections) {
             let block = selection.block
             var arguments: [(String, String)] = [
-                ("source", hclString("./modules/\(block.id)")),
+                ("source", hclString("./modules/\(block.id)" + (selection.modulePath.isEmpty ? "" : "/\(selection.modulePath)"))),
                 ("name_prefix", "var.name_prefix"),
                 ("managed_by_tag", hclString(block.managedByTag)),
             ]
@@ -193,32 +182,22 @@ public nonisolated enum WorkspaceGenerator {
                 }
                 if let provided = selection.providedScope {
                     let provider = try Self.provider(of: provided, kind: "device_group", for: block.id, in: input)
-                    let map = block.scope.kind == .platformGroup ? "device_group_ids" : "device_group_jamf_pro_ids"
+                    // Jamf Pro API modules only know Jamf Pro IDs.
+                    let map = block.scope.kind == .platformGroup && input.connection == .platform
+                        ? "device_group_ids" : "device_group_jamf_pro_ids"
                     arguments.append((variable, "module.\(sanitized(provider.id)).\(map)[\(hclString(provided.name))]"))
                     break
                 }
-                if selection.scope.isEmpty {
-                    throw WorkspaceGeneratorError.scopeNotChosen(block: block.id)
-                }
-                // Foundation only ever provided computer groups.
-                guard block.scope.kind != .jamfProMobileGroup, Self.foundationGroups.contains(selection.scope) else {
-                    throw WorkspaceGeneratorError.unknownScope(block: block.id, scope: selection.scope)
-                }
-                let suffix = block.scope.kind == .jamfProGroup ? "jamf_pro_id" : "platform_uuid"
-                arguments.append((variable, "module.foundation.\(selection.scope)_\(suffix)"))
+                throw WorkspaceGeneratorError.scopeNotChosen(block: block.id)
             }
 
-            // Category wiring: an existing category, one another block
-            // creates, or (legacy) Foundation's category for the block's
-            // catalog category.
-            if block.acceptsCategory, let existing = selection.existingCategoryID {
-                arguments.append(("category_id", hclString(existing)))
-            } else if block.acceptsCategory, let provided = selection.providedCategory {
+            // Category wiring: one another block creates, an existing
+            // category, or none ("-1").
+            if block.acceptsCategory, let provided = selection.providedCategory {
                 let provider = try Self.provider(of: provided, kind: "category", for: block.id, in: input)
                 arguments.append(("category_id", "module.\(sanitized(provider.id)).category_ids[\(hclString(provided.name))]"))
             } else if block.acceptsCategory {
-                let key = foundationCategoryKey(for: block.category)
-                arguments.append(("category_id", "module.foundation.category_\(key)_id"))
+                arguments.append(("category_id", hclString(selection.existingCategoryID ?? "-1")))
             }
 
             // Dependency wiring: name-keyed maps from every selected block
@@ -313,29 +292,9 @@ public nonisolated enum WorkspaceGenerator {
         }
         """ : ""
 
-        let providersTF = """
-        # Generated by Jamf Deployer — do not edit. Regenerated on every run.
-        terraform {
-          required_providers {
-            jamfplatform = {
-              source  = "jamf/jamfplatform"
-              version = "\(input.providerVersion)"
-            }\(protectRequirement)
-          }
-
-          # The tenant record lives next to the generated configuration,
-          # encrypted via TF_ENCRYPTION, with automatic backups.
-          backend "local" {
-            path = "../state/terraform.tfstate"
-          }
-        }
-
-        # Credentials come from JAMFPLATFORM_* environment variables at run
-        # time. Nothing secret is ever written to this folder.
-        provider "jamfplatform" {
-          impact_alerts = true
-        }\(protectProvider)
-        """
+        let providersTF = input.connection == .jamfPro
+            ? jamfProProviders(input, protectRequirement: protectRequirement, protectProvider: protectProvider)
+            : platformProviders(input, protectRequirement: protectRequirement, protectProvider: protectProvider)
 
         // "Stop managing": the module call disappears and a removed block
         // tells the engine to forget the objects instead of deleting them.
@@ -365,12 +324,64 @@ public nonisolated enum WorkspaceGenerator {
         )
     }
 
+    static func platformProviders(_ input: WorkspaceInput, protectRequirement: String, protectProvider: String) -> String {
+        """
+        # Generated by Jamf Deployer — do not edit. Regenerated on every run.
+        terraform {
+          required_providers {
+            jamfplatform = {
+              source  = "jamf/jamfplatform"
+              version = "\(input.providerVersion)"
+            }\(protectRequirement)
+          }
+
+          # The tenant record lives next to the generated configuration,
+          # encrypted via TF_ENCRYPTION, with automatic backups.
+          backend "local" {
+            path = "../state/terraform.tfstate"
+          }
+        }
+
+        # Credentials come from JAMFPLATFORM_* environment variables at run
+        # time. Nothing secret is ever written to this folder.
+        provider "jamfplatform" {
+          impact_alerts = true
+        }\(protectProvider)
+        """
+    }
+
+    static func jamfProProviders(_ input: WorkspaceInput, protectRequirement: String, protectProvider: String) -> String {
+        """
+        # Generated by Jamf Deployer — do not edit. Regenerated on every run.
+        terraform {
+          required_providers {
+            jamfpro = {
+              source  = "deploymenttheory/jamfpro"
+              version = "\(input.jamfProProviderVersion)"
+            }\(protectRequirement)
+          }
+
+          # The tenant record lives next to the generated configuration,
+          # encrypted via TF_ENCRYPTION, with automatic backups.
+          backend "local" {
+            path = "../state/terraform.tfstate"
+          }
+        }
+
+        # The instance URL and credentials come from JAMFPRO_* environment
+        # variables at run time. Nothing secret is ever written to this folder.
+        provider "jamfpro" {
+        }\(protectProvider)
+        """
+    }
+
     /// Tenant-wide settings exist once per tenant; two blocks managing the
     /// same one would overwrite each other on every deploy.
     static func checkSettingOwnership(selections: [GeneratedSelection], catalog: LoadedCatalog) throws {
         var owners: [String: [String]] = [:]
         for selection in selections {
-            let folder = selection.folderURL ?? catalog.blockFolderURL(id: selection.block.id)
+            let folder = (selection.folderURL ?? catalog.blockFolderURL(id: selection.block.id))
+                .appending(path: selection.modulePath)
             guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { continue }
             var types: Set<String> = []
             for file in files where file.pathExtension == "tf" {
@@ -413,47 +424,10 @@ public nonisolated enum WorkspaceGenerator {
         }
     }
 
-    /// A Jamf Pro tenant's workspace holds only its adopted objects (copied
-    /// in by the app); the generated part is the engine and plugin setup.
-    static func jamfProOutput(_ input: WorkspaceInput) throws -> Output {
-        guard input.selections.isEmpty else { throw WorkspaceGeneratorError.blocksNeedPlatform }
-        let providersTF = """
-        # Generated by Jamf Deployer — do not edit. Regenerated on every run.
-        terraform {
-          required_providers {
-            jamfpro = {
-              source  = "deploymenttheory/jamfpro"
-              version = "\(input.jamfProProviderVersion)"
-            }
-          }
-
-          # The tenant record lives next to the generated configuration,
-          # encrypted via TF_ENCRYPTION, with automatic backups.
-          backend "local" {
-            path = "../state/terraform.tfstate"
-          }
-        }
-
-        # The instance URL and credentials come from JAMFPRO_* environment
-        # variables at run time. Nothing secret is ever written to this folder.
-        provider "jamfpro" {
-        }
-        """
-        return Output(
-            providersTF: providersTF,
-            mainTF: "# Generated by Jamf Deployer — do not edit. Regenerated on every run.\n",
-            secretVariableNames: [:]
-        )
-    }
-
     // MARK: Helpers
 
     static func sortedSelections(_ selections: [GeneratedSelection]) -> [GeneratedSelection] {
-        selections.sorted {
-            if $0.block.id == "foundation" { return true }
-            if $1.block.id == "foundation" { return false }
-            return $0.block.id < $1.block.id
-        }
+        selections.sorted { $0.block.id < $1.block.id }
     }
 
     /// The selected block that creates a referenced group or category.
@@ -464,16 +438,6 @@ public nonisolated enum WorkspaceGenerator {
             throw WorkspaceGeneratorError.unmetDependencies(block: blockID, type: kind, names: [object.name])
         }
         return provider
-    }
-
-    static func foundationCategoryKey(for category: String) -> String {
-        switch category {
-        case "Security": "security"
-        case "Applications": "applications"
-        case "Maintenance": "maintenance"
-        case "Enrollment": "enrollment"
-        default: "maintenance"
-        }
     }
 
     public static func sanitized(_ id: String) -> String {

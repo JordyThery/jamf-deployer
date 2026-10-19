@@ -1,17 +1,35 @@
 {
-  "id": "software-updates",
-  "name": "Software Updates",
-  "summary": "Declarative software-update settings via a Jamf Blueprint: automatic download and install, with deferral windows you control.",
+  "alwaysOn": false,
   "category": "Updates",
-  "version": "1.0.0",
-  "requires": [
-    "foundation"
-  ],
   "conflicts": [],
-  "products": [
-    "jamf-platform"
+  "driftBindings": [
+    {
+      "fieldPath": "component_blocks[0].software_update_settings.deferral_major_period_days",
+      "resourceType": "jamfplatform_blueprints_blueprint",
+      "settingKey": "deferral_major_days"
+    },
+    {
+      "fieldPath": "component_blocks[0].software_update_settings.deferral_minor_period_days",
+      "resourceType": "jamfplatform_blueprints_blueprint",
+      "settingKey": "deferral_minor_days"
+    },
+    {
+      "fieldPath": "component_blocks[0].software_update_settings.allow_standard_user_os_updates",
+      "resourceType": "jamfplatform_blueprints_blueprint",
+      "settingKey": "allow_standard_user_updates"
+    },
+    {
+      "fieldPath": "component_blocks[0].software_update_settings.notifications_enabled",
+      "resourceType": "jamfplatform_blueprints_blueprint",
+      "settingKey": "notifications_enabled"
+    }
   ],
+  "id": "software-updates",
   "minJamfProVersion": "11.31.0",
+  "name": "Software Updates",
+  "objectsCreated": [
+    "1 Blueprint (software update settings)"
+  ],
   "permissions": [
     "blueprints:create",
     "blueprints:read",
@@ -19,74 +37,54 @@
     "blueprints:delete",
     "device-groups:read"
   ],
+  "products": [
+    "jamf-platform"
+  ],
+  "requires": [],
   "risk": "medium",
-  "alwaysOn": false,
   "scope": {
+    "default": "device-groups/Pilot",
     "kind": "platformGroup",
-    "variable": "scope_platform_group_uuid",
-    "default": "pilot"
+    "variable": "scope_platform_group_uuid"
   },
   "settings": [
     {
-      "key": "deferral_major_days",
-      "title": "Defer major upgrades (days)",
-      "type": "number",
       "default": "14",
+      "description": "How long major macOS upgrades are held back after release (1\u201390).",
+      "key": "deferral_major_days",
       "required": false,
-      "description": "How long major macOS upgrades are held back after release (1–90).",
-      "section": "Deferrals"
+      "section": "Deferrals",
+      "title": "Defer major upgrades (days)",
+      "type": "number"
     },
     {
-      "key": "deferral_minor_days",
-      "title": "Defer minor updates (days)",
-      "type": "number",
       "default": "7",
+      "description": "How long minor macOS updates are held back after release (1\u201390).",
+      "key": "deferral_minor_days",
       "required": false,
-      "description": "How long minor macOS updates are held back after release (1–90).",
-      "section": "Deferrals"
+      "section": "Deferrals",
+      "title": "Defer minor updates (days)",
+      "type": "number"
     },
     {
-      "key": "allow_standard_user_updates",
-      "title": "Standard users may install updates",
-      "type": "bool",
       "default": "true",
-      "required": false,
       "description": "Let non-admin users install OS updates without administrator rights.",
-      "section": "Behaviour"
-    },
-    {
-      "key": "notifications_enabled",
-      "title": "Notify users about updates",
-      "type": "bool",
-      "default": "true",
+      "key": "allow_standard_user_updates",
       "required": false,
+      "section": "Behaviour",
+      "title": "Standard users may install updates",
+      "type": "bool"
+    },
+    {
+      "default": "true",
       "description": "Show update notifications to users.",
-      "section": "Behaviour"
+      "key": "notifications_enabled",
+      "required": false,
+      "section": "Behaviour",
+      "title": "Notify users about updates",
+      "type": "bool"
     }
   ],
-  "objectsCreated": [
-    "1 Blueprint (software update settings)"
-  ],
-  "driftBindings": [
-    {
-      "resourceType": "jamfplatform_blueprints_blueprint",
-      "fieldPath": "component_blocks[0].software_update_settings.deferral_major_period_days",
-      "settingKey": "deferral_major_days"
-    },
-    {
-      "resourceType": "jamfplatform_blueprints_blueprint",
-      "fieldPath": "component_blocks[0].software_update_settings.deferral_minor_period_days",
-      "settingKey": "deferral_minor_days"
-    },
-    {
-      "resourceType": "jamfplatform_blueprints_blueprint",
-      "fieldPath": "component_blocks[0].software_update_settings.allow_standard_user_os_updates",
-      "settingKey": "allow_standard_user_updates"
-    },
-    {
-      "resourceType": "jamfplatform_blueprints_blueprint",
-      "fieldPath": "component_blocks[0].software_update_settings.notifications_enabled",
-      "settingKey": "notifications_enabled"
-    }
-  ]
+  "summary": "Declarative software-update settings via a Jamf Blueprint: automatic download and install, with deferral windows you control.",
+  "version": "1.0.0"
 }
