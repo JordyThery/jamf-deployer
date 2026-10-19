@@ -24,6 +24,11 @@ cp -f "${SRC}/Vendor/opentofu/bin/LICENSE" "${RESOURCES}/Vendor/opentofu/bin/LIC
 mkdir -p "${RESOURCES}/Vendor/jamformer"
 cp -f "${SRC}/Vendor/jamformer/jamformer" "${RESOURCES}/Vendor/jamformer/jamformer"
 
+# The Team Mode state backend, started by the app on this Mac only.
+mkdir -p "${RESOURCES}/Vendor/terraform-backend-git"
+cp -f "${SRC}/Vendor/terraform-backend-git/terraform-backend-git" "${RESOURCES}/Vendor/terraform-backend-git/terraform-backend-git"
+cp -f "${SRC}/Vendor/terraform-backend-git/LICENSE" "${RESOURCES}/Vendor/terraform-backend-git/LICENSE"
+
 # Provider mirror: the app is arm64-only, so only darwin_arm64 archives are
 # bundled. SHA256SUMS files describe the original archives and are dropped —
 # the mirror's hashes are re-derived by the engine at init.
@@ -61,6 +66,7 @@ sign() {
 
 sign "${RESOURCES}/Vendor/opentofu/bin/tofu"
 sign "${RESOURCES}/Vendor/jamformer/jamformer"
+sign "${RESOURCES}/Vendor/terraform-backend-git/terraform-backend-git"
 
 # Sign the provider binaries inside each mirror archive: unzip, sign every
 # Mach-O, re-zip in place.

@@ -59,6 +59,11 @@ struct AboutView: View {
                     url: "https://github.com/Jamf-Concepts/jamformer"
                 )
                 acknowledgement(
+                    "terraform-backend-git",
+                    detail: "the Team Mode state backend, by plumber-cd (Apache-2.0)",
+                    url: "https://github.com/plumber-cd/terraform-backend-git"
+                )
+                acknowledgement(
                     "HashiCorp Terraform",
                     detail: "optional, downloaded on demand for exports (BUSL-1.1)",
                     url: "https://developer.hashicorp.com/terraform"

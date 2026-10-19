@@ -13,8 +13,9 @@ continuity: nothing is recreated, the state carries over.
    — team installs: the same path, on a Mac that has run a preview for the
    tenant (`generated/` is rebuilt locally and is not in the repository).
 2. The tenant's **recovery sheet** (saved before the first deploy). It holds the
-   passphrase that encrypts the state file. Without it the state is
-   unreadable — by anyone, including the app.
+   passphrase that encrypts the state file — in Team Mode, the team
+   passphrase. Without it the state is unreadable — by anyone, including the
+   app.
 3. The tenant's Jamf API credentials (the app kept them in your Keychain;
    they never lived in any file).
 
@@ -27,6 +28,22 @@ cp -R "…/store/tenants/<id>/state"     ~/my-tenant/state
 cd ~/my-tenant/generated
 rm -rf .terraform .terraform.lock.hcl plan.bin drift.bin
 ```
+
+**Team installs:** the state lives on the team space's `jamf-deployer-state`
+branch, not in the workspace. Copy it from there, and point the backend at
+the copy — in `generated/providers.tf`, replace `backend "http" {}` with
+`backend "local" { path = "../state/terraform.tfstate" }`:
+
+```sh
+mkdir -p ~/my-tenant/state
+git -C "…/store" fetch origin jamf-deployer-state
+git -C "…/store" show "origin/jamf-deployer-state:tenants/<id>/terraform.tfstate" \
+  > ~/my-tenant/state/terraform.tfstate
+```
+
+Alternatively, **Leave Team Mode…** on one Mac first: it copies every
+tenant's state back into its workspace, encrypted with the tenant's own
+passphrase (save the new recovery sheet).
 
 Remove the lock file: it records checksums of the app's bundled provider
 copies, which the public registries' packages do not match, so `init` would

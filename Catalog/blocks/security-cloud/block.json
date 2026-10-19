@@ -3,7 +3,7 @@
   "name": "Security Cloud",
   "summary": "Connects Jamf Security Cloud to this Jamf Pro tenant (UEM Connect) and creates a Mac activation profile — Security Cloud then syncs devices and can push the enrollment profile into Jamf Pro.",
   "category": "Security",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "requires": [],
   "conflicts": [],
   "products": ["security-cloud"],

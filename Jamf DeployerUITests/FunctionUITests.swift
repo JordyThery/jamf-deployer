@@ -274,6 +274,50 @@ final class FunctionUITests: DeployerUITestCase {
         sleep(3)
     }
 
+    /// Captures the Sandbox's test categories as a building block, deploys
+    /// it to the Demo, then removes it from the Demo again.
+    func test17bCaptureBlockAndDeployElsewhere() throws {
+        exportCategories(from: Self.sandbox, kind: "Building block")
+        XCTAssertTrue(anyContaining("selected)").waitForExistence(timeout: 600), "Export did not finish")
+        tap(app.buttons.matching(NSPredicate(format: "label == 'None'")).element(boundBy: 1))
+        let targets = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH 'UIT - '")).allElementsBoundByIndex
+        XCTAssertEqual(targets.count, 4)
+        for target in targets where (target.value as? Int) != 1 { target.click() }
+        // The "Save into" menu has no label of its own: it is the one beside that text.
+        let saveInto = app.staticTexts.matching(NSPredicate(format: "value == 'Save into'")).firstMatch
+        XCTAssertTrue(saveInto.waitForExistence(timeout: 5))
+        let source = app.popUpButtons.allElementsBoundByIndex
+            .min { abs($0.frame.midY - saveInto.frame.midY) < abs($1.frame.midY - saveInto.frame.midY) }
+        if let source, (source.value as? String) != "Cloned" {
+            source.click()
+            tap(app.menuItems["Cloned"], timeout: 5)
+        }
+        replaceText(with: "uit-captured-categories", in: app.textFields.matching(NSPredicate(format: "placeholderValue == 'Block ID (lowercase-with-dashes)'")).firstMatch)
+        replaceText(with: "UIT Captured Categories", in: app.textFields.matching(NSPredicate(format: "placeholderValue == 'Block name'")).firstMatch)
+        tap(app.buttons["Capture Building Block"])
+        XCTAssertTrue(anyContaining("into “Cloned”").waitForExistence(timeout: 120), "The block was not captured")
+
+        openTenant(Self.demo)
+        let block = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH 'UIT Captured Categories,'")).firstMatch
+        XCTAssertTrue(block.waitForExistence(timeout: 30), "The captured block is not in the Demo's library")
+        block.click()
+        previewAndDeploy()
+        XCTAssertTrue(anyContaining("4 succeeded").waitForExistence(timeout: 15), "The captured categories did not deploy")
+
+        block.click()
+        tap(dialogButton("Remove from Tenant"), timeout: 10)
+        previewAndDeploy()
+        XCTAssertTrue(anyContaining("0 failed").waitForExistence(timeout: 15))
+    }
+
+    /// Types into a field that already holds a suggested value.
+    private func replaceText(with text: String, in field: XCUIElement) {
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "Missing \(field)")
+        field.click()
+        field.typeKey("a", modifierFlags: .command)
+        field.typeText(text)
+    }
+
     // MARK: Library and settings
 
     func test18BlockDetailsAndSettings() throws {

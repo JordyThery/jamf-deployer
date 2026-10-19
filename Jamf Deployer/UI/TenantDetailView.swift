@@ -29,6 +29,7 @@ struct TenantDetailView: View {
     @State private var keepOutcomes: [String: String] = [:]
     @State private var isUpdatingSecret = false
     @State private var isConfirmingBreakLock = false
+    @State private var unlockError: String?
     @State private var catalog: LoadedCatalog?
     @State private var adoptedSummary: [(label: String, count: Int)] = []
 
@@ -68,26 +69,39 @@ struct TenantDetailView: View {
                     } else {
                     if let lock = deployService.lock(for: tenant.id) {
                         GroupBox {
+                            VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Label(
-                                    "Being \(lock.operation == "check" ? "checked" : "deployed") by \(lock.engineer) on \(lock.host) since \(lock.acquiredAt.formatted(.relative(presentation: .named))).",
+                                    "Being \(lock.activity) by \(lock.engineer)\(lock.host.isEmpty ? "" : " on \(lock.host)")\(lock.created.map { " since \($0.formatted(.relative(presentation: .named)))" } ?? "").",
                                     systemImage: "lock.fill"
                                 )
                                 .font(.callout)
                                 Spacer()
-                                Button("Break Lock…", role: .destructive) {
+                                Button("Force Unlock…", role: .destructive) {
                                     isConfirmingBreakLock = true
                                 }
                                 .controlSize(.small)
-                                .help("Only for stale locks left by a crash")
-                                .confirmationDialog("Break the lock on “\(tenant.name)”?", isPresented: $isConfirmingBreakLock, titleVisibility: .visible) {
-                                    Button("Break Lock", role: .destructive) {
-                                        Task { await deployService.breakLock(tenant: tenant) }
+                                .help("Only for a lock left behind by an interrupted run")
+                                .confirmationDialog("Force unlock “\(tenant.name)”?", isPresented: $isConfirmingBreakLock, titleVisibility: .visible) {
+                                    Button("Force Unlock", role: .destructive) {
+                                        Task {
+                                            do {
+                                                try await deployService.forceUnlock(tenant: tenant, lock: lock)
+                                            } catch {
+                                                unlockError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                                            }
+                                        }
                                     }
                                     Button("Cancel", role: .cancel) {}
                                 } message: {
-                                    Text("Only break a lock left behind by a crash. Breaking a live lock lets two engineers deploy to this tenant at once.")
+                                    Text("Only force-unlock when \(lock.engineer)'s run was interrupted. Unlocking a live run lets two engineers change this tenant at once.")
                                 }
+                            }
+                            if let unlockError {
+                                Label(unlockError, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(4)
@@ -120,7 +134,7 @@ struct TenantDetailView: View {
                                 LabeledContent("Connected through", value: "Jamf Pro API")
                                 LabeledContent("Jamf Pro URL", value: tenant.jamfProURL ?? "")
                                 LabeledContent(tenant.jamfProAuth == .userAccount ? "Username" : "Client ID") {
-                                    Text(tenant.clientID)
+                                    Text(tenant.engineerClientID)
                                         .font(.callout.monospaced())
                                         .textSelection(.enabled)
                                 }
@@ -130,7 +144,7 @@ struct TenantDetailView: View {
                                     Text(tenant.apiScope == .environment ? "Platform environment" : "Tenant (legacy)")
                                 }
                                 LabeledContent("Client ID") {
-                                    Text(tenant.clientID)
+                                    Text(tenant.engineerClientID)
                                         .font(.callout.monospaced())
                                         .textSelection(.enabled)
                                 }
@@ -578,24 +592,37 @@ struct TenantDetailView: View {
 }
 
 /// Replaces the tenant's client secret in the Keychain, for a rotated
-/// secret or a Mac that does not have it yet. When the record's passphrase
-/// is missing too, it can be entered from the recovery sheet. The workspace
+/// secret or a Mac that does not have it yet. In Team Mode each engineer
+/// signs in with their own API client or account, so the client ID or
+/// username can be changed for this Mac too. Outside Team Mode, a missing
+/// record passphrase can be entered from the recovery sheet. The workspace
 /// and its encrypted record are untouched.
 struct UpdateClientSecretSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(TenantDeployService.self) private var deployService
     let tenant: Tenant
+    @State private var clientID = ""
     @State private var secret = ""
     @State private var passphrase = ""
     @State private var message: String?
 
     private var secrets: TenantSecrets { TenantSecrets(tenantID: tenant.id) }
-    private var needsPassphrase: Bool { secrets.statePassphrase.load() == nil }
+    private var needsPassphrase: Bool { !deployService.isTeamMode && secrets.statePassphrase.load() == nil }
     private var usesPassword: Bool { tenant.isJamfPro && tenant.jamfProAuth == .userAccount }
 
     var body: some View {
         SheetFrame(title: usesPassword ? "Update Password" : "Update Client Secret", systemImage: "key") {
             Form {
-                LabeledContent(usesPassword ? "Username" : "Client ID", value: tenant.clientID)
+                if deployService.isTeamMode {
+                    TextField(usesPassword ? "Username" : "Client ID", text: $clientID)
+                    Text(usesPassword
+                        ? "Sign in with your own Jamf Pro account; it is kept in this Mac's Keychain."
+                        : "Use your own API client for this tenant; it is kept in this Mac's Keychain.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LabeledContent(usesPassword ? "Username" : "Client ID", value: tenant.clientID)
+                }
                 SecureField(usesPassword ? "Password" : "Client secret", text: $secret)
                 if needsPassphrase {
                     SecureField("Recovery passphrase", text: $passphrase)
@@ -617,16 +644,29 @@ struct UpdateClientSecretSheet: View {
             Button("Save") { save() }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(secret.isEmpty && passphrase.isEmpty)
+                .disabled(secret.isEmpty && passphrase.isEmpty && clientID == tenant.engineerClientID)
         }
-        .frame(width: 480, height: needsPassphrase ? 340 : 260)
+        .frame(width: 480, height: needsPassphrase || deployService.isTeamMode ? 340 : 260)
+        .onAppear { clientID = tenant.engineerClientID }
     }
 
     private func save() {
         let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
-        let savedSecret = secret.isEmpty || secrets.platformClientSecret.save(secret)
+        let trimmedID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        var savedID = true
+        if deployService.isTeamMode, !trimmedID.isEmpty {
+            // The record's own ID needs no copy on this Mac.
+            if trimmedID == tenant.clientID {
+                secrets.engineerClientID.delete()
+            } else {
+                savedID = secrets.engineerClientID.save(trimmedID)
+            }
+        }
+        // Passwords are kept exactly as typed; secrets are trimmed (pasted).
+        let value = usesPassword ? secret : secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedSecret = value.isEmpty || secrets.platformClientSecret.save(value)
         let savedPassphrase = trimmed.isEmpty || secrets.statePassphrase.save(trimmed)
-        if savedSecret && savedPassphrase {
+        if savedID && savedSecret && savedPassphrase {
             dismiss()
         } else {
             message = "The Keychain did not accept the change."

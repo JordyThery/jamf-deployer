@@ -19,6 +19,7 @@ DerivedData/
 Vendor/opentofu/
 Vendor/jamformer/
 Vendor/providers/
+Vendor/terraform-backend-git/
 
 # Spike artifacts
 Spike/live-sandbox/files/*.pkg

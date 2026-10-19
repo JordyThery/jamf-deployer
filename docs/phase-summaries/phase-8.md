@@ -10,6 +10,7 @@ Date: 2026-10-17 · Builds clean · JamfDeployerCore: 34 tests pass · Design ag
 
 ### Team mode = that repo with a remote
 - **`GitStoreService`** (system git as a child process — HTTPS with gh/credential helper or SSH both work; `GIT_TERMINAL_PROMPT=0` so nothing ever hangs on an auth prompt): init, commit, pull --rebase --autostash, push with rejection detection.
+- *Replaced before 1.0 by the engine's own locking through a Git state backend (see docs/team-mode.md).*
 - **Locking via compare-and-swap**: acquiring = committing `locks/<tenant>.json` and winning the push; losing the race rewinds the lock commit and reports the holder. Releasing commits the run's outcome (state, history, tenant.json) together with the lock removal. Stale locks: **Break Lock…** on the tenant (recorded in the commit message).
 - Deploy service integration: preview acquires the tenant's lock (held through the sheet; closing without deploying releases it), deploy releases with a structured commit + push, drift checks lock/commit too. Locked tenants surface as "This tenant is being worked on by X on Y" before any engine run.
 - **UI**: dashboard rows and the tenant view show "Being deployed by Jamie on Jamie's MacBook" with lock age; a Sync button pulls records + locks; Settings → Team hosts the whole lifecycle.

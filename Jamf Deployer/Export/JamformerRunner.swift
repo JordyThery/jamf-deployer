@@ -104,16 +104,16 @@ actor JamformerRunner {
             environment = ["JAMF_URL": JamfAPIConfiguration.instanceURL(tenant.jamfProURL ?? "")?.absoluteString ?? ""]
             switch tenant.jamfProAuth ?? .apiClient {
             case .apiClient:
-                environment["JAMF_CLIENT_ID"] = tenant.clientID
+                environment["JAMF_CLIENT_ID"] = tenant.engineerClientID
                 environment["JAMF_CLIENT_SECRET"] = clientSecret
             case .userAccount:
-                environment["JAMF_USERNAME"] = tenant.clientID
+                environment["JAMF_USERNAME"] = tenant.engineerClientID
                 environment["JAMF_PASSWORD"] = clientSecret
             }
         } else {
             environment = [
                 "JAMF_URL": tenant.region.gatewayURL.absoluteString,
-                "JAMF_CLIENT_ID": tenant.clientID,
+                "JAMF_CLIENT_ID": tenant.engineerClientID,
                 "JAMF_CLIENT_SECRET": clientSecret,
             ]
             switch tenant.apiScope {

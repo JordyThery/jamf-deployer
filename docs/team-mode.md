@@ -1,51 +1,82 @@
 # Team Mode
 
-Team Mode lets several engineers manage the same tenants from their own Macs, synchronized through a GitHub repository. Solo installs already keep everything in a local Git repository, so switching over is a remote away — nothing is restructured.
+Team Mode lets several engineers manage the same tenants from their own Macs. Tenant records are shared through a private GitHub repository. Engine state is kept in the same repository by a standard remote state backend. Solo installs already keep everything in a local Git repository, so switching over adds a remote; nothing is restructured.
 
 ## How it works
 
-The app's store — tenant records, encrypted state, history and the list of catalog sources — is one Git repository. Block contents travel through Git catalog sources, not the store. In Team Mode that repository has a remote on GitHub:
+The team space repository has two parts:
 
-- **Before a tenant operation** (preview, deploy, drift check) the app pulls, takes a lock on the tenant, and works on the fresh copy.
-- **After the operation** it commits the result with a readable message ("Deploy Acme: 3 added · 1 changed · 0 removed · 0 failed — Jordy"), pushes, and releases the lock.
-- **Locks** are files under `locks/`, acquired through Git's own push atomicity: whoever pushes the lock first holds the tenant; everyone else sees who, on which Mac, since when. A stale lock can be broken from the tenant view.
+- **The `main` branch** holds the app's store: tenant records, baselines, history and the list of catalog sources. Block contents travel through Git catalog sources, not the store. Engine state is never committed here.
+- **The `jamf-deployer-state` branch** holds each tenant's engine state at `tenants/<id>/terraform.tfstate`. The app reads and writes it through [terraform-backend-git](https://github.com/plumber-cd/terraform-backend-git), an open-source HTTP state backend. The app starts its own copy on this Mac when needed; it listens only on the loopback address and is stopped when the app quits.
 
-Everything in the repository is reviewable: tenant records are JSON, history is JSON, state is encrypted but versioned.
+When you run an operation (preview, check for changes, deploy):
 
-## What is — and is not — in the repository
+- **Before it starts**, the app pulls the store, so you work on the latest baseline.
+- **The engine locks the tenant's state** for the length of the run, using the backend's standard locking: a lock is a `locks/tenants/<id>/terraform.tfstate` branch naming the engineer, the Mac and the operation. If a teammate holds the lock, your run stops and the tenant page names them, their Mac, what they're doing and since when.
+- **After it finishes**, the app commits the result with a readable message ("Deploy Acme: 3 added · 1 changed · 0 removed · 0 failed — Jordy") and pushes it. The engine releases the lock.
+
+## Encryption
+
+State is encrypted on this Mac with OpenTofu's native state encryption (PBKDF2 + AES-GCM) before it reaches the backend. The repository never holds readable state. In Team Mode, every tenant uses one **team passphrase**:
+
+- It is generated when the team space is created. Store it in the team's password manager; the app asks you to confirm this before it continues.
+- Each engineer enters it once when joining. It is kept in that Mac's Keychain.
+- **Settings → Team** shows or copies it, and accepts it on a Mac that doesn't have it yet. The tenant recovery sheet in Team Mode holds the team passphrase and the team space URL.
+
+Without the team passphrase, nobody can read the records, including the app.
+
+## What is and isn't in the repository
 
 | In the repository | Never in the repository |
 | --- | --- |
 | Tenant records (names, selected blocks, settings, scope) | API client secrets and Jamf Pro passwords |
-| Engine state — **encrypted** (AES-GCM, per-tenant passphrase) | State passphrases, in the clear |
+| Engine state, **encrypted** with the team passphrase (state branch) | The team passphrase |
 | History, including a readable copy of each applied plan with every sensitive value masked | Secret-typed block settings |
-| Adopted configuration, the list of catalog sources | Private encryption keys |
-| Credential envelopes — **end-to-end encrypted** | |
+| Adopted configuration, the list of catalog sources | Engineers' own client IDs and usernames |
 
-Anyone with repository access can see tenant names, structure and encrypted state, so scope repository access accordingly.
+Anyone with repository access can see tenant names, structure and encrypted state, so limit who can access the repository.
 
-## Sharing credentials, end-to-end encrypted
+## Credentials
 
-So a teammate can work on a tenant without re-entering its credentials:
+Credentials are never shared through the repository. Each engineer signs in to each tenant with their own API client or Jamf Pro account:
 
-1. The first time an engineer runs **Share Credentials with the Team…**, the app creates their Curve25519 identity. The private key stays in their Keychain; only the public key is published to the repository (`team/engineers/`).
-2. The same action seals each tenant's API client secret (or Jamf Pro password), Jamf Protect secret and state passphrase once per published engineer (X25519 key agreement → HKDF-SHA256 → ChaCha20-Poly1305) into `team/secrets/`. The repository only ever carries ciphertext. Secret-typed block settings are not shared — each engineer enters those on their own Mac.
-3. On sync, each Mac decrypts the envelopes addressed to it and stores the secrets in its own Keychain.
-
-A new engineer runs **Share Credentials with the Team…** once to publish their key; an existing member then runs it again to grant them access. GitHub never sees a usable secret.
-
-![Team settings: the team space repository, last sync, and the Sync Now, Leave Team Mode and Share Credentials actions](screenshot-team.png)
+- On a Mac that doesn't have a tenant's credentials yet, use **Update Client Secret…** on the tenant page.
+- In Team Mode the same sheet also takes your own **Client ID** (or **Username**). It is kept in this Mac's Keychain and overrides the one in the shared record, for this Mac only.
+- Jamf's audit logs then show which engineer made each change.
 
 ## Setting up
 
-**Create** (first engineer): Settings, under **Team**: enter the URL of an empty private GitHub repository under **Repository URL** → **Create Team Space…**. The app zips a backup of the local store first, then pushes it as-is.
+**Create** (first engineer): open Settings and go to **Team**.
+1. Enter the URL of an empty private GitHub repository under **Repository URL**, then click **Create Team Space…**.
+2. Copy the team passphrase into the team's password manager, tick **I saved the team passphrase**, then click **Create Team Space**.
 
-**Join** (everyone else): Settings, under **Team**: enter the repository URL → **Join Team Space…**. Local tenants the team space doesn't know yet are copied in; tenants with the same ID are skipped, never overwritten. The team's settings — including its list of catalog sources — replace this Mac's (a backup is kept). Ask a teammate to share credentials, then you're fully operational.
+The app first zips a backup of the local store. It then pushes the store to `main`, creates the state branch and moves each tenant's state there. The state is re-encrypted with the team passphrase.
 
-**Leave**: Settings, under **Team**: **Leave Team Mode…**. This Mac keeps a full local copy with history and stops syncing; the team space itself is untouched.
+**Join** (everyone else): open Settings and go to **Team**.
+1. Enter the repository URL and the team passphrase.
+2. Click **Join Team Space…**.
+
+What happens to this Mac's data:
+- Local tenants the team space doesn't know yet are copied in, and their state moves to the state branch.
+- Tenants with the same ID are skipped, never overwritten.
+- The team's settings, including its list of catalog sources, replace this Mac's. A backup is kept.
+
+**Leave**: open Settings, go to **Team** and click **Leave Team Mode…**. What happens:
+- Each tenant's state is copied back to this Mac and re-encrypted with that tenant's own passphrase. Save a new recovery sheet for each tenant before its next deploy.
+- This Mac keeps a full local copy with history and stops syncing.
+- The team space itself is untouched.
+
+**Removing a tenant** in Team Mode removes its record from `main` and its state from the state branch, so teammates no longer see it. The objects in Jamf are untouched.
+
+## Force Unlock
+
+A run that was interrupted, for example by a crash, a force quit or a lost connection, can leave its lock behind. The tenant page shows the lock with **Force Unlock…**.
+
+Only use Force Unlock when you know the other run has stopped. Unlocking a live run lets two engineers change the tenant at once.
 
 ## Requirements and caveats
 
-- Each Mac needs push access with Git credentials already configured (SSH key or `gh auth login`); the app never prompts for Git passwords.
-- Locks don't expire on their own — the holder, host and age are always shown, and **Break Lock…** is available when a Mac went away mid-operation.
-- Two operations on the same tenant from the same Mac are serialized by the engine itself.
+- Each Mac needs push access to the repository, with Git credentials already set up: an SSH key, or HTTPS credentials in Git's credential helper (for example after `gh auth login`). The app never asks for Git passwords. It hands those credentials only to its own state backend process.
+- Locks don't expire on their own. Force Unlock is the manual way out.
+- A tenant runs one engine operation at a time on a Mac (preview, check or deploy). A second request is refused with a message.
+- When joining, tenants whose ID already exists in the team space are skipped, not merged.

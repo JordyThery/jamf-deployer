@@ -11,6 +11,7 @@ nonisolated enum EngineInfo {
     static let jamfProtectProviderVersion = "0.12.0"
     static let jamfProProviderVersion = "0.42.0"
     static let jamformerVersion = "0.6.0"
+    static let stateBackendVersion = "0.1.12"
 }
 
 struct SettingsView: View {
@@ -116,6 +117,7 @@ struct SupportBundleButton: View {
             jamfprotect provider \(EngineInfo.jamfProtectProviderVersion)
             jamfpro provider \(EngineInfo.jamfProProviderVersion)
             jamformer \(EngineInfo.jamformerVersion)
+            terraform-backend-git \(EngineInfo.stateBackendVersion)
             Team mode: \(deployService.isTeamMode ? "on" : "off")
             Last sync: \(deployService.lastSync?.formatted(.iso8601) ?? "-")
             Sync message: \(deployService.syncMessage ?? "-")

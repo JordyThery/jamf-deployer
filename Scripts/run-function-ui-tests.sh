@@ -17,12 +17,13 @@ B="${ROLLOUT_SERVICE_B:-JamfDeployer-Demo}"
 kc() { security find-generic-password -s "$1" -a "$2" -w }
 WORK="$(mktemp -d /tmp/jamf-deployer-uitest.XXXXXX)"
 
-# A local catalog with exactly two release tags: v1.0.1 changes the categories
-# block, so a catalog-release rollout has something to deploy.
-git clone -q https://github.com/JordyThery/jamf-deployer-catalog "$WORK/work"
-git -C "$WORK/work" checkout -q v1.0.0
-# Only the two test releases: later public tags would be "the latest release".
-git -C "$WORK/work" tag -l | grep -vx v1.0.0 | xargs git -C "$WORK/work" tag -d > /dev/null
+# A local catalog with exactly two release tags: v1.0.0 is the demo catalog
+# (CATALOG_SOURCE, default the public one, at its default branch) and v1.0.1
+# changes the categories block, so a catalog-release rollout has something
+# to deploy. Public tags are dropped: they would be "the latest release".
+git clone -q "${CATALOG_SOURCE:-https://github.com/JordyThery/jamf-deployer-catalog}" "$WORK/work"
+git -C "$WORK/work" tag -l | xargs git -C "$WORK/work" tag -d > /dev/null
+git -C "$WORK/work" tag v1.0.0
 git -C "$WORK/work" checkout -q -b uitest
 sed -i '' 's/"version": "1.0.0"/"version": "1.0.1"/' "$WORK/work/blocks/categories/block.json"
 sed -i '' 's/priority = 9/priority = 8/' "$WORK/work/blocks/categories/main.tf"
@@ -89,7 +90,7 @@ drift 3; run test04DriftRestoreBaseline
 drift 5; run test05DriftKeepChange
 for step in test06DeployDemoBaseline test07RolloutCatalogRelease test08HistoryRollBack test09RemoveBlockFromTenant \
     test10StopManagingBlock test10bDownloadTerraform test11AdoptExistingObjects test11cAppStorePicker test12HandOver \
-    test13DaySetupTab test14ExportAsBuiltDocumentation test15CloneToTenant test16RemoveClone test17SaveSnapshot \
+    test13DaySetupTab test14ExportAsBuiltDocumentation test15CloneToTenant test16RemoveClone test17SaveSnapshot test17bCaptureBlockAndDeployElsewhere \
     test18BlockDetailsAndSettings test19RemoveCatalogSource test20RemoveTenants; do
     run $step
 done
@@ -103,6 +104,6 @@ for c in test:
     print('  deleted', c['name'], 'on $service')"
 done
 rm -f ~/Documents/"Jamf Deployer Recovery — UI Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — UI Demo.txt"
-rm -f ~/Documents/AsBuilt-"UI Sandbox"-*.md ~/Documents/Snapshot-"UI Demo"-*.zip
-rm -rf ~/Library/Application\ Support/Jamf\ Deployer/cloned-blocks/blocks/clone-uisandbox-*
+rm -f ~/Documents/AsBuilt-"UI Sandbox"-*.md(N) ~/Documents/Snapshot-"UI Demo"-*.zip(N)
+rm -rf ~/Library/Application\ Support/Jamf\ Deployer/cloned-blocks/blocks/clone-uisandbox-*(N) ~/Library/Application\ Support/Jamf\ Deployer/cloned-blocks/blocks/uit-captured-categories
 rm -rf "$WORK"

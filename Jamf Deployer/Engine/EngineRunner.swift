@@ -29,11 +29,27 @@ actor EngineRunner {
         var errorDiagnostics: [EngineStreamEvent.Diagnostic]
     }
 
-    enum EngineError: Error {
+    enum EngineError: LocalizedError {
         case alreadyRunning
         /// Carries everything the run produced so partial successes are
         /// never lost (an apply can fail on one object after creating ten).
         case nonZeroExit(RunResult)
+
+        var errorDescription: String? {
+            switch self {
+            case .alreadyRunning:
+                return "Another engine run for this tenant is still in progress."
+            case .nonZeroExit(let result):
+                // The engine's own error summary, else its first error line.
+                if let diagnostic = result.errorDiagnostics.first {
+                    return diagnostic.summary
+                }
+                let line = result.rawLines.first { $0.contains("Error:") }
+                    ?? result.rawLines.last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                return line.map { "The engine stopped: \($0.replacing("│", with: "").trimmingCharacters(in: .whitespaces))" }
+                    ?? "The engine stopped with exit code \(result.exitCode)."
+            }
+        }
     }
 
     private let configuration: Configuration
@@ -146,6 +162,43 @@ actor EngineRunner {
         try process.run()
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
         await Self.awaitTermination(terminated)
+        return data
+    }
+
+    /// stdout of an engine command that must succeed, optionally fed `input`
+    /// on stdin — used to move state between backends without writing it
+    /// to disk (`state pull` / `state push -`).
+    func checkedOutput(arguments: [String], input: Data? = nil) async throws -> Data {
+        let process = Process()
+        process.executableURL = configuration.engineURL
+        process.arguments = arguments
+        process.currentDirectoryURL = configuration.workingDirectory
+        var environment = configuration.environment
+        environment["TF_CLI_CONFIG_FILE"] = configuration.cliConfigURL.path
+        environment["HOME"] = NSHomeDirectory()
+        environment["PATH"] = "/usr/bin:/bin"
+        process.environment = environment
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+        let terminated = Self.installTerminationWait(process)
+        try process.run()
+        if let input {
+            stdin.fileHandleForWriting.write(input)
+            try? stdin.fileHandleForWriting.close()
+        }
+        let errorTask = Task { stderr.fileHandleForReading.readDataToEndOfFile() }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let errors = await errorTask.value
+        await Self.awaitTermination(terminated)
+        guard process.terminationStatus == 0 else {
+            let lines = String(decoding: errors + data, as: UTF8.self).split(separator: "\n").map(String.init)
+            throw EngineError.nonZeroExit(RunResult(
+                exitCode: process.terminationStatus, events: [], rawLines: lines, errorDiagnostics: []))
+        }
         return data
     }
 

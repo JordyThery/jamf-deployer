@@ -31,7 +31,7 @@ nonisolated struct JamfAPIConfiguration: Sendable {
     var hasInvalidInstanceURL = false
 
     init(tenant: Tenant, clientSecret: String) {
-        clientID = tenant.clientID
+        clientID = tenant.engineerClientID
         self.clientSecret = clientSecret
         if tenant.isJamfPro {
             let instance = Self.instanceURL(tenant.jamfProURL ?? "")
