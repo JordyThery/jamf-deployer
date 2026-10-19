@@ -119,10 +119,31 @@ Finding for the guide: Terraform keeps state unencrypted, so with the Git
 backend the repository must stay private; S3 with encryption or OpenTofu with
 client-side encryption are the alternatives, both described in the README.
 
+## Jamf Pro API tenants (2026-10-19)
+
+- **Export proof:** every demo block with a Jamf Pro API version (16 blocks, 26
+  resources) deployed by the app through the Jamf Pro API, exported, state
+  migrated (`replace-provider registry.opentofu.org/deploymenttheory/jamfpro
+  registry.terraform.io/deploymenttheory/jamfpro`), `terraform plan
+  -parallelism=1`: **no changes**. Output: `Fixtures/export-golden-jamfpro/`.
+- **Layout decision:** `modules/<block>/` holds the whole block as the catalog
+  ships it (Platform module at the root, `jamfpro/` inside, shared `files/`
+  beside them); Jamf Pro tenants point at `modules/<block>/jamfpro`. A fleet
+  mixing connections shares one folder per block, and the `../files`
+  references in the Jamf Pro variants keep working unchanged. Both fixtures
+  were rebuilt in this layout and validate.
+- **Workflows:** one set serves both connections. Every job reads
+  `JAMFPLATFORM_*` and `JAMFPRO_*` from the tenant's Environment (the unused
+  set is empty) and `TF_CLI_ARGS_plan/apply/destroy` take
+  `-parallelism=${{ vars.PARALLELISM || '10' }}`, so a Jamf Pro tenant sets
+  `PARALLELISM=1`.
+- **Live CI test** with a temporary, narrowly scoped Jamf Pro API client:
+  plan on the pull request (the retired tenant skipped), apply (6 created),
+  two console changes caught in one issue, restored by the label, destroyed,
+  `-parallelism=1` confirmed in the run. Client, role and Environment deleted.
+
 ## Next steps
 
-1. "Graduating to Terraform" guide built on the mapping table above.
-2. The generator in JamfDeployerCore, tested against `Fixtures/export-golden/`,
-   writing the templates alongside each export.
-3. Jamf Pro API variant of the workflows (`JAMFPRO_*`, `-parallelism=1`), tested
-   the same way.
+1. The generator in JamfDeployerCore, tested against both fixtures, writing the
+   templates alongside each export.
+2. "Graduating to Terraform" guide built on the mapping table above.

@@ -27,15 +27,21 @@ def hcl_type(v):
     if v.startswith('"'): return "string"
     return "number"
 
-# --- modules/: copy each block's module (Platform variant), drop app metadata.
+# --- modules/: each block whole, as the catalog ships it (minus the app's
+# block.json): the Jamf Platform API module at its root, the Jamf Pro API
+# module in jamfpro/, shared files beside them. A fleet mixing connections
+# shares one folder per block; each tenant points at the variant it uses.
+def block_of(source):                                  # ./modules/<id>[/jamfpro]
+    parts = source.strip('"').split("/")
+    return parts[2], len(parts) > 3 and parts[3] == "jamfpro"
+
 os.makedirs(os.path.join(out, "modules"), exist_ok=True)
 for name, attrs in modules:
-    src = dict(attrs)["source"].strip('"')            # ./modules/<id>
-    block_id = os.path.basename(src)
+    block_id, _ = block_of(dict(attrs)["source"])
     dest = os.path.join(out, "modules", block_id)
     shutil.rmtree(dest, ignore_errors=True)
-    shutil.copytree(os.path.join(gen, src), dest,
-                    ignore=shutil.ignore_patterns("block.json", "jamfpro"))
+    shutil.copytree(os.path.join(gen, "modules", block_id), dest,
+                    ignore=shutil.ignore_patterns("block.json"))
 
 # --- tenants/<slug>/
 tdir = os.path.join(out, "tenants", slug)
@@ -53,7 +59,8 @@ for name, attrs in modules:
     lines = []
     for k, v in attrs:
         if k == "source":
-            lines.append(f'  source = "../../modules/{os.path.basename(v.strip(chr(34)))}"')
+            block_id, jamfpro = block_of(v)
+            lines.append(f'  source = "../../modules/{block_id}{"/jamfpro" if jamfpro else ""}"')
         elif k == "name_prefix":
             lines.append("  name_prefix = var.name_prefix")
         elif is_literal(v):
@@ -85,6 +92,8 @@ open(os.path.join(tdir, "terraform.tf"), "w").write(f'''terraform {{
   }}
 }}
 ''')
-prov = providers[providers.index("# Credentials"):] if "# Credentials" in providers else providers
+# Everything after the terraform block: the provider blocks and their notes.
+end = re.search(r"^terraform \{.*?^\}\n", providers, re.S | re.M).end()
+prov = providers[end:]
 open(os.path.join(tdir, "providers.tf"), "w").write(prov.strip() + "\n")
 print(f"exported {len(modules)} blocks to {out}")

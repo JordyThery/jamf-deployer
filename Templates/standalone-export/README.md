@@ -5,7 +5,8 @@ exported from Jamf Deployer: every tenant the app managed is here, with the
 same objects and the same state, so nothing is recreated.
 
 ```
-modules/<block>/          one module per building block
+modules/<block>/          one folder per building block: the Jamf Platform API
+                          module, and its Jamf Pro API version in jamfpro/
 tenants/<tenant>/         one directory per tenant
   main.tf                 the tenant's blocks and how they connect
   variables.tf            typed inputs
@@ -77,11 +78,22 @@ gh secret   set JAMFPLATFORM_CLIENT_SECRET  --env <tenant>
 ```
 
 `gh secret set` without `--body` reads the value from standard input, so it
-never appears in your shell history. Tenants connected through the Jamf Pro
-API use `JAMFPRO_INSTANCE_FQDN`, `JAMFPRO_AUTH_METHOD`, `JAMFPRO_CLIENT_ID`
-and `JAMFPRO_CLIENT_SECRET` instead (set the same names in the workflows'
-`env:` blocks), and must plan and apply with `-parallelism=1`. Secret block
-settings arrive the same way, as `TF_VAR_<name>` secrets.
+never appears in your shell history.
+
+Tenants connected through the **Jamf Pro API** use these instead. The Jamf Pro
+API plugin needs one operation at a time, which `PARALLELISM` sets:
+
+```bash
+gh variable set JAMFPRO_INSTANCE_FQDN --env <tenant> --body "https://yourorg.jamfcloud.com"
+gh variable set JAMFPRO_AUTH_METHOD   --env <tenant> --body "oauth2"   # or "basic"
+gh variable set PARALLELISM           --env <tenant> --body "1"
+gh secret   set JAMFPRO_CLIENT_ID     --env <tenant>   # basic: JAMFPRO_BASIC_USERNAME
+gh secret   set JAMFPRO_CLIENT_SECRET --env <tenant>   # basic: JAMFPRO_BASIC_PASSWORD
+```
+
+The workflows read both sets; the one a tenant does not use stays empty.
+Secret block settings arrive as `TF_VAR_<name>` secrets, added to the
+workflows' `env:` blocks.
 
 ### 4. Protect `main`
 
