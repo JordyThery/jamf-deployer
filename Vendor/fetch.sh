@@ -10,6 +10,7 @@ JAMFPLATFORM_VERSION="1.5.0"
 JAMFPROTECT_VERSION="0.12.0"
 JAMFPRO_VERSION="0.42.0"
 JAMFORMER_VERSION="0.6.0"
+BACKEND_GIT_VERSION="0.1.12"
 
 echo "== OpenTofu $OPENTOFU_VERSION =="
 mkdir -p "$HERE/opentofu/bin"
@@ -57,5 +58,16 @@ cd "$HERE/jamformer"
 [[ -f "jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz" ]] || \
   curl -sL -O "https://github.com/Jamf-Concepts/jamformer/releases/download/v${JAMFORMER_VERSION}/jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz"
 tar -xzf "jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz" jamformer
+
+echo "== terraform-backend-git $BACKEND_GIT_VERSION (plumber-cd, Apache-2.0) =="
+mkdir -p "$HERE/terraform-backend-git"
+cd "$HERE/terraform-backend-git"
+BASE="https://github.com/plumber-cd/terraform-backend-git/releases/download/v${BACKEND_GIT_VERSION}"
+curl -sL -o terraform-backend-git-darwin-arm64 "$BASE/terraform-backend-git-darwin-arm64"
+curl -sL -O "$BASE/SHA256SUMS"
+shasum -a 256 -c <(grep "darwin-arm64$" SHA256SUMS)
+mv -f terraform-backend-git-darwin-arm64 terraform-backend-git
+chmod +x terraform-backend-git
+curl -sL -o LICENSE "https://raw.githubusercontent.com/plumber-cd/terraform-backend-git/v${BACKEND_GIT_VERSION}/LICENSE"
 
 echo "All vendored binaries fetched and verified."

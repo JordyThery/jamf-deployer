@@ -265,6 +265,24 @@ struct GeneratorTests {
         #expect(platform.first?.modulePath == "")
     }
 
+    @Test func teamWorkspacesUseTheHTTPStateBackend() throws {
+        for connection in [ConnectionKind.platform, .jamfPro] {
+            let solo = try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "JD - ", selections: [], providerVersion: "1.5.0", connection: connection))
+            #expect(solo.providersTF.contains(#"backend "local""#))
+            #expect(solo.providersTF.contains(#"path = "../state/terraform.tfstate""#))
+
+            let team = try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "JD - ", selections: [], providerVersion: "1.5.0",
+                connection: connection, stateBackend: .http))
+            #expect(team.providersTF.contains(#"backend "http""#))
+            #expect(!team.providersTF.contains("backend \"local\""))
+            // Address and password come from TF_HTTP_* only.
+            #expect(!team.providersTF.contains("address ="))
+            #expect(!team.providersTF.contains("password ="))
+        }
+    }
+
     @Test func emitsProtectProviderForProtectBlocks() throws {
         let catalog = try Self.catalog()
         let input = WorkspaceInput(
@@ -1113,56 +1131,6 @@ struct DriftBindingTests {
         )
         #expect(objectDiffs.count == 1)
         #expect(!objectDiffs.contains { $0.before.contains("old") || $0.after.contains("new") })
-    }
-}
-
-@Suite("Team secret encryption")
-struct TeamCryptoTests {
-    @Test func sealsForMultipleRecipientsAndOpensWithEach() throws {
-        let alice = TeamCrypto.generateIdentity()
-        let bob = TeamCrypto.generateIdentity()
-        let payload = try JSONEncoder().encode(TenantSecretPayload(
-            platformClientSecret: "s3cret",
-            statePassphrase: "passphrase"
-        ))
-
-        let envelope = try TeamCrypto.seal(
-            payload: payload,
-            recipientPublicKeys: [alice.publicKey, bob.publicKey]
-        )
-        #expect(envelope.boxes.count == 2)
-        // The repository only ever sees ciphertext.
-        for box in envelope.boxes {
-            #expect(!box.ciphertext.contains("s3cret"))
-        }
-
-        for identity in [alice, bob] {
-            let opened = try TeamCrypto.open(envelope, identity: identity)
-            let decoded = try JSONDecoder().decode(TenantSecretPayload.self, from: opened)
-            #expect(decoded.platformClientSecret == "s3cret")
-            #expect(decoded.statePassphrase == "passphrase")
-        }
-    }
-
-    @Test func rejectsUnaddressedIdentity() throws {
-        let alice = TeamCrypto.generateIdentity()
-        let mallory = TeamCrypto.generateIdentity()
-        let envelope = try TeamCrypto.seal(
-            payload: Data("secret".utf8),
-            recipientPublicKeys: [alice.publicKey]
-        )
-        #expect(throws: TeamCrypto.CryptoError.self) {
-            try TeamCrypto.open(envelope, identity: mallory)
-        }
-    }
-
-    @Test func envelopeRoundTripsThroughJSON() throws {
-        let alice = TeamCrypto.generateIdentity()
-        let envelope = try TeamCrypto.seal(payload: Data("x".utf8), recipientPublicKeys: [alice.publicKey])
-        let encoded = try JSONEncoder().encode(envelope)
-        let decoded = try JSONDecoder().decode(TeamCrypto.Envelope.self, from: encoded)
-        let opened = try TeamCrypto.open(decoded, identity: alice)
-        #expect(opened == Data("x".utf8))
     }
 }
 

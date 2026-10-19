@@ -214,8 +214,14 @@ class DeployerUITestCase: XCTestCase {
     /// remembered save folder at ~/Documents before running.
     func saveInDocuments() {
         tap(app.buttons["OKButton"].firstMatch, timeout: 15)
-        let replace = app.buttons["Replace"].firstMatch
-        if replace.waitForExistence(timeout: 2) { replace.click() }
+        // The confirmation's own button, never its Touch Bar copy.
+        let inSheet = app.sheets.buttons["Replace"].firstMatch
+        let inDialog = app.dialogs.buttons["Replace"].firstMatch
+        if inSheet.waitForExistence(timeout: 2) {
+            inSheet.click()
+        } else if inDialog.exists {
+            inDialog.click()
+        }
     }
 
     /// Saves the recovery sheet when asked (first deploy), then deploys.

@@ -106,10 +106,13 @@ Protect deployment sync, under the Platform client above.
 
 - Each engineer's Mac needs **push access** to the team's GitHub repository,
   with Git credentials already configured (SSH key or `gh auth login`) — the
-  app never asks for Git passwords.
+  app never asks for Git passwords. The engine state lives on the
+  repository's `jamf-deployer-state` branch and its locks on `locks/…`
+  branches, so engineers must be allowed to create and delete branches.
 - Repository access is tenant-record access: names, baselines, scope IDs and
-  encrypted state are visible to every collaborator. Credentials are not —
-  they are end-to-end encrypted per engineer (see [Team Mode](team-mode.md)).
+  encrypted state are visible to every collaborator. Credentials are not in
+  the repository — each engineer uses their own Jamf API client or account
+  (see [Team Mode](team-mode.md)).
 
 ## On the Mac
 

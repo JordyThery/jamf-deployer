@@ -108,5 +108,5 @@ for c in test:
 done
 rm -f ~/Documents/"Jamf Deployer Recovery — JP Sandbox.txt" ~/Documents/"Jamf Deployer Recovery — JP Demo.txt" \
     ~/Documents/"Jamf Deployer Recovery — JP Sandbox API Client.txt"
-rm -f ~/Documents/Snapshot-"JP Sandbox"-*.zip
+rm -f ~/Documents/Snapshot-"JP Sandbox"-*.zip(N)
 rm -rf "$WORK"

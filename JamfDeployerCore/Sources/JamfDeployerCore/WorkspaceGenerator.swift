@@ -54,6 +54,8 @@ public nonisolated struct WorkspaceInput: Sendable {
     /// and each block's module.
     public var connection: ConnectionKind
     public var jamfProProviderVersion: String
+    /// Where the engine keeps the tenant's state.
+    public var stateBackend: StateBackend
     /// Blocks leaving the baseline. `keepInJamf` removals become
     /// "Stop managing": the objects leave the tenant record untouched.
     public var removals: [BlockRemoval]
@@ -65,7 +67,8 @@ public nonisolated struct WorkspaceInput: Sendable {
         protectProviderVersion: String = "0.12.0",
         removals: [BlockRemoval] = [],
         connection: ConnectionKind = .platform,
-        jamfProProviderVersion: String = "0.42.0"
+        jamfProProviderVersion: String = "0.42.0",
+        stateBackend: StateBackend = .local
     ) {
         self.namePrefix = namePrefix
         self.selections = selections
@@ -74,7 +77,15 @@ public nonisolated struct WorkspaceInput: Sendable {
         self.removals = removals
         self.connection = connection
         self.jamfProProviderVersion = jamfProProviderVersion
+        self.stateBackend = stateBackend
     }
+}
+
+/// Solo tenants keep state in their workspace; Team Mode tenants use the
+/// engine's HTTP backend, configured entirely through TF_HTTP_* variables.
+public nonisolated enum StateBackend: Sendable {
+    case local
+    case http
 }
 
 /// A block being removed from the baseline.
@@ -335,11 +346,7 @@ public nonisolated enum WorkspaceGenerator {
             }\(protectRequirement)
           }
 
-          # The tenant record lives next to the generated configuration,
-          # encrypted via TF_ENCRYPTION, with automatic backups.
-          backend "local" {
-            path = "../state/terraform.tfstate"
-          }
+        \(backendBlock(input))
         }
 
         # Credentials come from JAMFPLATFORM_* environment variables at run
@@ -361,11 +368,7 @@ public nonisolated enum WorkspaceGenerator {
             }\(protectRequirement)
           }
 
-          # The tenant record lives next to the generated configuration,
-          # encrypted via TF_ENCRYPTION, with automatic backups.
-          backend "local" {
-            path = "../state/terraform.tfstate"
-          }
+        \(backendBlock(input))
         }
 
         # The instance URL and credentials come from JAMFPRO_* environment
@@ -422,6 +425,30 @@ public nonisolated enum WorkspaceGenerator {
             let destination = modulesURL.appending(path: selection.block.id)
             try fileManager.copyItem(at: source, to: destination)
         }
+    }
+
+    /// The state backend block, placed inside the terraform block of
+    /// providers.tf (whose interpolation sits at 8 spaces of indentation).
+    static func backendBlock(_ input: WorkspaceInput) -> String {
+        let lines: [String] = switch input.stateBackend {
+        case .local: [
+            "# The tenant record lives next to the generated configuration,",
+            "# encrypted via TF_ENCRYPTION, with automatic backups.",
+            "backend \"local\" {",
+            "  path = \"../state/terraform.tfstate\"",
+            "}",
+        ]
+        case .http: [
+            "# Team Mode: the state backend on this Mac stores the encrypted",
+            "# record in the team repository and locks it while in use.",
+            "# Its address and password come from TF_HTTP_* variables.",
+            "backend \"http\" {",
+            "}",
+        ]
+        }
+        return lines.enumerated()
+            .map { index, line in (index == 0 ? "  " : "          ") + line }
+            .joined(separator: "\n")
     }
 
     // MARK: Helpers

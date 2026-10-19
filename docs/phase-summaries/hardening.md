@@ -15,7 +15,9 @@ review with fixes.
    X25519 → HKDF-SHA256 → ChaCha20-Poly1305); the repository carries only
    ciphertext envelopes under `team/secrets/`, identities under
    `team/engineers/*.pub`. Private keys never leave each engineer's Keychain.
-   Live-verified across two store checkouts.
+   Live-verified across two store checkouts. *Replaced before 1.0: team
+   state now lives in a Git state backend encrypted with a team passphrase,
+   and each engineer uses their own credentials (see docs/team-mode.md).*
 3. **"Keep this change" made real** — blocks declare `driftBindings`
    (resource type + field path → setting key). Keeping a bound drifted field
    writes the value back into the block's setting, so the next deploy keeps

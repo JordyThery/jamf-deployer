@@ -207,6 +207,11 @@ final class CatalogUITests: DeployerUITestCase {
         expectation(for: finished, evaluatedWith: check)
         waitForExpectations(timeout: 1200)
         sleep(2)
+        let failure = anyContaining("The last check for changes failed")
+        if failure.exists {
+            XCTFail("The check failed: \(failure.label.isEmpty ? (failure.value as? String ?? "") : failure.label)")
+            return
+        }
         let changed = any("Changed in Jamf")
         if expectingChanges {
             XCTAssertTrue(changed.waitForExistence(timeout: 30), "No changes were detected")

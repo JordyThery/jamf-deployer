@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import DeployerKit
 import JamfDeployerCore
 
@@ -33,7 +34,7 @@ final class TenantDeployService {
     private let activityLog: ActivityLog
     private let catalogSources: CatalogSourceStore
     let gitStore = GitStoreService()
-    let teamSecrets: TeamSecretsService
+    let stateBackend = StateBackendService()
     private var runners: [UUID: EngineRunner] = [:]
 
     /// Tenants with an open preview; a drift check would regenerate the
@@ -43,13 +44,12 @@ final class TenantDeployService {
     /// Tenants with an engine run in progress (preview, check or deploy):
     /// one run per tenant workspace at a time.
     private var busyTenants: Set<UUID> = []
-    /// Team locks this Mac acquired and has not released yet.
-    private var heldLocks: Set<UUID> = []
 
     /// Team-space state the UI shows.
     private(set) var isTeamMode = false
     private(set) var teamRemoteURL: String?
-    private(set) var locks: [UUID: GitStoreService.LockInfo] = [:]
+    /// The engine's state locks in the team space, by tenant.
+    private(set) var locks: [UUID: StateBackendService.StateLock] = [:]
     private(set) var lastSync: Date?
     private(set) var syncMessage: String?
 
@@ -57,7 +57,15 @@ final class TenantDeployService {
         self.tenantStore = tenantStore
         self.activityLog = activityLog
         self.catalogSources = catalogSources ?? CatalogSourceStore()
-        self.teamSecrets = TeamSecretsService(tenantStore: tenantStore, gitStore: gitStore)
+        // A backend left behind by a crash or force-quit is stopped.
+        StateBackendService.stopLeftoverBackend()
+        // The state backend is a child process; it must not outlive the app.
+        let backend = stateBackend
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { backend.stop() }
+        }
     }
 
     var isBusy: Bool {
@@ -77,14 +85,10 @@ final class TenantDeployService {
                 try await gitStore.pull()
                 tenantStore.reload()
                 catalogSources.reload()
-            }
-            let lockList = await gitStore.allLocks()
-            locks = Dictionary(uniqueKeysWithValues: lockList.map { ($0.tenantID, $0) })
-            if isTeamMode {
-                // Shared credentials this Mac is missing decrypt straight
-                // into the Keychain.
-                teamSecrets.refresh()
-                teamSecrets.absorbSecrets()
+                locks = await gitStore.stateLocks()
+            } else {
+                locks = [:]
+                stateBackend.stop()
             }
             lastSync = .now
             syncMessage = nil
@@ -93,33 +97,139 @@ final class TenantDeployService {
         }
     }
 
-    func lock(for tenantID: UUID) -> GitStoreService.LockInfo? {
+    func lock(for tenantID: UUID) -> StateBackendService.StateLock? {
         locks[tenantID]
     }
 
-    /// Releases a preview lock when the sheet closes without deploying.
-    /// Only a lock this preview acquired is released.
+    /// The preview sheet closed without deploying.
     func abandonPreview(tenant: Tenant) {
         activePreviewTenants.remove(tenant.id)
-        guard isTeamMode, heldLocks.remove(tenant.id) != nil else { return }
-        Task {
-            try? await gitStore.releaseLock(
-                tenantID: tenant.id,
-                engineer: engineerName,
-                message: "Preview \(tenant.name) (no deploy) — \(engineerName)"
-            )
+    }
+
+    /// Releases a lock left behind by an interrupted run on another Mac,
+    /// with the engine's own force-unlock.
+    func forceUnlock(tenant: Tenant, lock: StateBackendService.StateLock) async throws {
+        guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
+        busyTenants.insert(tenant.id)
+        defer { busyTenants.remove(tenant.id) }
+        let catalog = try loadCatalog(for: tenant)
+        try generateWorkspace(for: tenant, catalog: catalog)
+        let runner = try await makeRunner(for: tenant)
+        try await runner.run(arguments: ["init", "-input=false"])
+        try await runner.run(arguments: ["force-unlock", "-force", lock.lockID])
+        activityLog.append(ActivityLogEntry(
+            category: "Team", operation: "force-unlock", detail: tenant.name,
+            status: 200, duration: nil, note: "Lock held by \(lock.who)"))
+        await syncTeamState()
+    }
+
+    // MARK: Moving state between this Mac and the team space
+
+    /// Moves the given tenants' state from their workspaces into the team
+    /// space, re-encrypted with the team passphrase. Runs with Team Mode on.
+    /// State is piped from `state pull` into `state push` and never written
+    /// to disk decrypted; the local copy is kept as an encrypted backup.
+    func moveStateToTeam(tenants: [Tenant]) async throws {
+        for tenant in tenants where isManaged(tenant) {
+            let stateURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
+            guard FileManager.default.fileExists(atPath: stateURL.path) else { continue }
+            let catalog = try loadCatalog(for: tenant)
+
+            try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .local)
+            let local = try await makeRunner(for: tenant, stateBackend: .local, passphrase: try ownStatePassphrase(for: tenant))
+            try await runEngine(local, ["init", "-input=false"])
+            let state = try await local.checkedOutput(arguments: ["state", "pull"])
+
+            try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .http)
+            let team = try await makeRunner(for: tenant, stateBackend: .http)
+            try await runEngine(team, ["init", "-input=false"])
+            _ = try await team.checkedOutput(arguments: ["state", "push", "-"], input: state)
+
+            let backups = stateURL.deletingLastPathComponent().appending(path: "backups")
+            try? FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(
+                at: stateURL, to: backups.appending(path: "before-team-space-\(DeployHistoryEntry.makeID()).tfstate"))
+        }
+    }
+
+    /// Moves every tenant's state from the team space back into its
+    /// workspace, encrypted with the tenant's own passphrase (a new one when
+    /// the tenant was created in the team space). Runs before leaving.
+    func moveStateToLocal() async throws {
+        for tenant in tenantStore.tenants where isManaged(tenant) {
+            let catalog = try loadCatalog(for: tenant)
+            try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .http)
+            let team = try await makeRunner(for: tenant, stateBackend: .http)
+            try await runEngine(team, ["init", "-input=false"])
+            let state = try await team.checkedOutput(arguments: ["state", "pull"])
+            guard !state.isEmpty else { continue }
+
+            let hadPassphrase = TenantSecrets(tenantID: tenant.id).statePassphrase.load() != nil
+            let passphrase = try ownStatePassphrase(for: tenant)
+            if !hadPassphrase {
+                // A new passphrase needs a new recovery sheet.
+                UserDefaults.standard.removeObject(forKey: recoveryEscrowKey(tenant))
+            }
+            try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .local)
+            let local = try await makeRunner(for: tenant, stateBackend: .local, passphrase: passphrase)
+            try await runEngine(local, ["init", "-input=false"])
+            _ = try await local.checkedOutput(arguments: ["state", "push", "-"], input: state)
+        }
+    }
+
+    /// Whether the team passphrase on this Mac opens the team space's
+    /// records: reads the first tenant with state. True when there is none.
+    func teamPassphraseOpensRecords() async -> Bool {
+        for tenant in tenantStore.tenants where isManaged(tenant) && tenant.lastDeploy != nil {
+            guard let catalog = try? loadCatalog(for: tenant),
+                  (try? generateWorkspace(for: tenant, catalog: catalog, stateBackend: .http)) != nil,
+                  let runner = try? await makeRunner(for: tenant, stateBackend: .http),
+                  (try? await runEngine(runner, ["init", "-input=false"])) != nil
+            else { continue }
+            return (try? await runner.checkedOutput(arguments: ["state", "pull"])) != nil
+        }
+        return true
+    }
+
+    /// Removes a tenant from the app — and, in Team Mode, from the team
+    /// space, state included. Nothing in Jamf is touched.
+    func removeTenant(_ tenant: Tenant) async {
+        if isTeamMode, let remote = teamRemoteURL {
+            do {
+                try await stateBackend.deleteState(tenantID: tenant.id, remote: remote)
+            } catch {
+                syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
+        tenantStore.remove(tenant)
+        await recordInStore("Remove tenant \(tenant.name) — \(engineerName)")
+    }
+
+    /// Commits the store and, in Team Mode, publishes it.
+    private func recordInStore(_ message: String) async {
+        _ = try? await gitStore.commitAll(message: message)
+        if isTeamMode {
+            do {
+                try await gitStore.pushRebasing()
+            } catch {
+                syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
             await syncTeamState()
         }
     }
 
-    func breakLock(tenant: Tenant) async {
+    /// Runs an engine command, turning "state is locked" into a message
+    /// naming who holds the lock.
+    @discardableResult
+    private func runEngine(_ runner: EngineRunner, _ arguments: [String]) async throws -> EngineRunner.RunResult {
         do {
-            try await gitStore.breakLock(tenantID: tenant.id, by: engineerName)
-        } catch {
-            syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            return
+            return try await runner.run(arguments: arguments)
+        } catch EngineRunner.EngineError.nonZeroExit(let result) {
+            if let lock = StateBackendService.lock(fromEngineOutput: result.rawLines) {
+                throw DeployError.locked(lock)
+            }
+            throw EngineRunner.EngineError.nonZeroExit(result)
         }
-        await syncTeamState()
     }
 
     // MARK: Workspace
@@ -217,7 +327,11 @@ final class TenantDeployService {
     }
 
     @discardableResult
-    private func generateWorkspace(for tenant: Tenant, catalog: LoadedCatalog) throws -> WorkspaceGenerator.Output {
+    private func generateWorkspace(
+        for tenant: Tenant,
+        catalog: LoadedCatalog,
+        stateBackend backend: StateBackend? = nil
+    ) throws -> WorkspaceGenerator.Output {
         let selections = try WorkspaceGenerator.resolveModules(
             generatedSelections(for: tenant, catalog: catalog),
             catalog: catalog,
@@ -228,7 +342,8 @@ final class TenantDeployService {
             providerVersion: EngineInfo.jamfPlatformProviderVersion,
             removals: tenant.pendingRemovals,
             connection: tenant.connection,
-            jamfProProviderVersion: EngineInfo.jamfProProviderVersion
+            jamfProProviderVersion: EngineInfo.jamfProProviderVersion,
+            stateBackend: backend ?? (isTeamMode ? .http : .local)
         ))
         try WorkspaceGenerator.materialize(
             output,
@@ -404,6 +519,15 @@ final class TenantDeployService {
     /// record yet. A missing passphrase for an existing record is an error:
     /// a new one could never decrypt it.
     func statePassphrase(for tenant: Tenant) throws -> String {
+        if isTeamMode {
+            guard let team = TeamPassphrase.item.load(), !team.isEmpty else { throw DeployError.missingTeamPassphrase }
+            return team
+        }
+        return try ownStatePassphrase(for: tenant)
+    }
+
+    /// The tenant's own passphrase, used outside Team Mode.
+    private func ownStatePassphrase(for tenant: Tenant) throws -> String {
         let item = TenantSecrets(tenantID: tenant.id).statePassphrase
         if let existing = item.load() {
             return existing
@@ -432,7 +556,28 @@ final class TenantDeployService {
     }
 
     func recoverySheetText(for tenant: Tenant) -> String {
-        """
+        if isTeamMode {
+            return """
+            Jamf Deployer — Team Space Recovery Sheet
+            =========================================
+
+            Team space: \(teamRemoteURL ?? "")
+            Tenant:     \(tenant.name)
+            Identifier: \(tenant.id.uuidString)
+            Created:    \(Date.now.formatted(.iso8601))
+
+            Team passphrase:
+
+                \(TeamPassphrase.item.load() ?? "(not available on this Mac)")
+
+            The team passphrase encrypts every tenant record in this team
+            space; the records are stored on the \(StateBackendService.stateBranch)
+            branch of the team repository. Keep this sheet in your team's
+            password manager. Without the passphrase the records cannot be
+            read and the tenants would have to be adopted again.
+            """
+        }
+        return """
         Jamf Deployer — Tenant Record Recovery Sheet
         =============================================
 
@@ -454,10 +599,10 @@ final class TenantDeployService {
     // MARK: Engine plumbing
 
     /// Encrypts the tenant record and saved plans with the tenant's passphrase.
-    private func encryptionConfiguration(for tenant: Tenant) throws -> String {
+    private func encryptionConfiguration(for tenant: Tenant, passphrase: String? = nil) throws -> String {
         """
         key_provider "pbkdf2" "passphrase" {
-          passphrase = "\(try statePassphrase(for: tenant))"
+          passphrase = "\(try passphrase ?? statePassphrase(for: tenant))"
         }
         method "aes_gcm" "default" {
           keys = key_provider.pbkdf2.passphrase
@@ -486,11 +631,11 @@ final class TenantDeployService {
         switch tenant.jamfProAuth ?? .apiClient {
         case .apiClient:
             environment["JAMFPRO_AUTH_METHOD"] = "oauth2"
-            environment["JAMFPRO_CLIENT_ID"] = tenant.clientID
+            environment["JAMFPRO_CLIENT_ID"] = tenant.engineerClientID
             environment["JAMFPRO_CLIENT_SECRET"] = secret
         case .userAccount:
             environment["JAMFPRO_AUTH_METHOD"] = "basic"
-            environment["JAMFPRO_BASIC_USERNAME"] = tenant.clientID
+            environment["JAMFPRO_BASIC_USERNAME"] = tenant.engineerClientID
             environment["JAMFPRO_BASIC_PASSWORD"] = secret
         }
         try environment.merge(protectEnvironment(for: tenant)) { $1 }
@@ -528,7 +673,7 @@ final class TenantDeployService {
         }
         var environment: [String: String] = [
             "JAMFPLATFORM_BASE_URL": tenant.region.gatewayURL.absoluteString,
-            "JAMFPLATFORM_CLIENT_ID": tenant.clientID,
+            "JAMFPLATFORM_CLIENT_ID": tenant.engineerClientID,
             "JAMFPLATFORM_CLIENT_SECRET": secret,
         ]
         switch tenant.apiScope {
@@ -542,12 +687,28 @@ final class TenantDeployService {
         return environment
     }
 
-    private func makeRunner(for tenant: Tenant, extraEnvironment: [String: String] = [:]) throws -> EngineRunner {
+    /// The engine for one tenant. In Team Mode its state goes through the
+    /// state backend; `backend` and `passphrase` override that for moving
+    /// state between the two.
+    private func makeRunner(
+        for tenant: Tenant,
+        extraEnvironment: [String: String] = [:],
+        stateBackend backend: StateBackend? = nil,
+        passphrase: String? = nil
+    ) async throws -> EngineRunner {
+        var environment = try environment(for: tenant).merging(extraEnvironment) { _, new in new }
+        if let passphrase {
+            environment["TF_ENCRYPTION"] = try encryptionConfiguration(for: tenant, passphrase: passphrase)
+        }
+        if backend ?? (isTeamMode ? .http : .local) == .http {
+            guard let remote = teamRemoteURL else { throw DeployError.noTeamSpace }
+            try environment.merge(await stateBackend.environment(tenantID: tenant.id, remote: remote)) { $1 }
+        }
         let runner = EngineRunner(configuration: EngineRunner.Configuration(
             engineURL: EngineLocator.tofuURL,
             workingDirectory: generatedURL(for: tenant),
             cliConfigURL: try EngineLocator.ensureCLIConfig(),
-            environment: try environment(for: tenant).merging(extraEnvironment) { _, new in new }
+            environment: environment
         ))
         runners[tenant.id] = runner
         return runner
@@ -573,18 +734,7 @@ final class TenantDeployService {
         }
 
         if isTeamMode {
-            switch try await gitStore.acquireLock(
-                tenantID: original.id,
-                engineer: engineerName,
-                operation: "deploy"
-            ) {
-            case .acquired:
-                heldLocks.insert(original.id)
-                tenantStore.reload()
-                await syncTeamState()
-            case .heldByOther(let holder):
-                throw DeployError.lockedByOther(holder.engineer, holder.host)
-            }
+            await syncTeamState()
         }
         // Read after the pull: a teammate may have changed the baseline.
         let tenant = tenantStore.tenant(id: original.id) ?? original
@@ -594,19 +744,19 @@ final class TenantDeployService {
         let output = try generateWorkspace(for: tenant, catalog: catalog)
 
         // Rebuilt per preview: the environment can change between runs.
-        let runner = try makeRunner(
+        let runner = try await makeRunner(
             for: tenant,
             extraEnvironment: try secretSettingEnvironment(for: tenant, output: output)
         )
 
         phase = .initializing
         logEngine("init", tenant: tenant)
-        try await runner.run(arguments: ["init", "-input=false"])
+        try await runEngine(runner, ["init", "-input=false"])
 
         phase = .planning
         logEngine("plan", tenant: tenant)
-        let planRun = try await runner.run(
-            arguments: ["plan", "-input=false", "-out=plan.bin", "-json"] + Self.readParallelism(for: tenant)
+        let planRun = try await runEngine(
+            runner, ["plan", "-input=false", "-out=plan.bin", "-json"] + Self.readParallelism(for: tenant)
         )
         let plan = try await runner.showPlan(planFileName: "plan.bin")
 
@@ -687,6 +837,14 @@ final class TenantDeployService {
                 text += "\n\(detail)"
             }
             return text
+        }
+        // A teammate deployed after this preview: the engine refuses the
+        // saved plan, and nothing was changed.
+        if errors.contains(where: { $0.contains("Saved plan is stale") }) {
+            errors = ["Another engineer changed this tenant after your preview, so nothing was deployed. Preview the changes again."]
+        }
+        if let lock = StateBackendService.lock(fromEngineOutput: result.rawLines) {
+            errors = [DeployError.locked(lock).errorDescription ?? ""]
         }
         // A non-zero exit without a reported error (a crash or a kill) is
         // still a failed deploy.
@@ -777,16 +935,8 @@ final class TenantDeployService {
         }
         tenantStore.update(updated)
 
-        // Record the outcome in the store's history: a commit either way,
-        // a push + lock release in team mode.
-        let commitMessage = "Deploy \(tenant.name): \(entry.added) added · \(entry.changed) changed · \(entry.removed) removed · \(errors.count) failed — \(entry.engineerName)"
-        if isTeamMode {
-            heldLocks.remove(tenant.id)
-            try? await gitStore.releaseLock(tenantID: tenant.id, engineer: engineerName, message: commitMessage)
-            await syncTeamState()
-        } else {
-            _ = try? await gitStore.commitAll(message: commitMessage)
-        }
+        // Record the outcome in the store's history, published in Team Mode.
+        await recordInStore("Deploy \(tenant.name): \(entry.added) added · \(entry.changed) changed · \(entry.removed) removed · \(errors.count) failed — \(entry.engineerName)")
 
         return DeployOutcome(
             succeeded: succeeded,
@@ -860,51 +1010,26 @@ final class TenantDeployService {
         defer { busyTenants.remove(original.id) }
 
         if isTeamMode {
-            switch try await gitStore.acquireLock(
-                tenantID: original.id,
-                engineer: engineerName,
-                operation: "check"
-            ) {
-            case .acquired:
-                heldLocks.insert(original.id)
-                tenantStore.reload()
-            case .heldByOther(let holder):
-                throw DeployError.lockedByOther(holder.engineer, holder.host)
-            }
+            await syncTeamState()
         }
         // Read after the pull: a teammate may have changed the baseline.
         let tenant = tenantStore.tenant(id: original.id) ?? original
         defer {
-            let name = tenant.name
-            let id = tenant.id
-            if isTeamMode {
-                heldLocks.remove(id)
-                Task {
-                    try? await self.gitStore.releaseLock(
-                        tenantID: id,
-                        engineer: self.engineerName,
-                        message: "Check \(name) for changes — \(self.engineerName)"
-                    )
-                    await self.syncTeamState()
-                }
-            } else {
-                Task {
-                    _ = try? await self.gitStore.commitAll(message: "Check \(name) for changes")
-                }
-            }
+            let message = "Check \(tenant.name) for changes — \(engineerName)"
+            Task { await self.recordInStore(message) }
         }
 
         try await ensureCatalogCheckouts(for: tenant)
         let catalog = try loadCatalog(for: tenant)
         let output = try generateWorkspace(for: tenant, catalog: catalog)
-        let runner = try makeRunner(
+        let runner = try await makeRunner(
             for: tenant,
             extraEnvironment: try secretSettingEnvironment(for: tenant, output: output)
         )
 
         logEngine("check", tenant: tenant)
-        try await runner.run(arguments: ["init", "-input=false"])
-        try await runner.run(arguments: ["plan", "-refresh-only", "-input=false", "-out=drift.bin", "-json"] + Self.readParallelism(for: tenant))
+        try await runEngine(runner, ["init", "-input=false"])
+        try await runEngine(runner, ["plan", "-refresh-only", "-input=false", "-out=drift.bin", "-json"] + Self.readParallelism(for: tenant))
         let plan = try await runner.showPlan(planFileName: "drift.bin")
 
         var blockNames: [String: String] = ["tenant": "Adopted objects"]
@@ -1126,6 +1251,8 @@ final class TenantDeployService {
     }
 
     private func backUpState(for tenant: Tenant, entryID: String) {
+        // Team state is versioned on the state branch instead.
+        guard !isTeamMode else { return }
         let stateURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
         guard FileManager.default.fileExists(atPath: stateURL.path) else { return }
         let backupsURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/backups")
@@ -1153,7 +1280,9 @@ final class TenantDeployService {
         case blockMissingFromCatalog(String)
         case noSnapshot
         case missingProtectConnection
-        case lockedByOther(String, String)
+        case locked(StateBackendService.StateLock)
+        case missingTeamPassphrase
+        case noTeamSpace
         case missingSecretSetting(block: String, setting: String)
         case previewInProgress
         case tenantBusy
@@ -1168,17 +1297,21 @@ final class TenantDeployService {
             case .blockMissingFromCatalog(let id):
                 "The building block \"\(id)\" is selected on this tenant, but it is not in any catalog this Mac follows. Add the catalog it comes from (Building Blocks library), or remove it from the baseline."
             case .noSnapshot:
-                "This history entry is from before baseline snapshots existed, so it can't be rolled back to."
+                "This history entry has no baseline snapshot, so it can't be rolled back to."
             case .missingProtectConnection:
                 "This baseline includes Jamf Protect blocks, but the tenant has no Protect connection. Add the Protect console URL and API client in the Day 0 Setup tab first."
-            case .lockedByOther(let engineer, let host):
-                "This tenant is being worked on by \(engineer) on \(host). Try again when they finish, or break the lock from the tenant view if it is stale."
+            case .locked(let lock):
+                "This tenant is being \(lock.activity) by \(lock.engineer)\(lock.host.isEmpty ? "" : " on \(lock.host)")\(lock.created.map { " since \($0.formatted(date: .omitted, time: .shortened))" } ?? ""). Try again when they finish; if their Mac stopped mid-run, use Force Unlock… on the tenant page."
+            case .missingTeamPassphrase:
+                "This Mac does not have the team passphrase. Enter it under Settings → Team."
+            case .noTeamSpace:
+                "Team Mode is on, but this Mac has no team space connected. Check Settings → Team."
             case .missingSecretSetting(let block, let setting):
                 "The \"\(block)\" block needs its \"\(setting)\" secret on this Mac. Enter it in the block's settings — secrets stay in each engineer's Keychain."
             case .previewInProgress:
                 "A preview is open for this tenant. Finish or close it before checking for changes."
             case .missingStatePassphrase:
-                "This tenant's record is encrypted with a passphrase this Mac does not have. Enter the passphrase from the tenant's recovery sheet with Update Client Secret… on the tenant page; in Team Mode, Sync Now fetches shared credentials."
+                "This tenant's record is encrypted with a passphrase this Mac does not have. Enter the passphrase from the tenant's recovery sheet with Update Client Secret… on the tenant page."
             case .tenantBusy:
                 "This tenant is already being previewed, checked or deployed. Try again when that finishes."
             }

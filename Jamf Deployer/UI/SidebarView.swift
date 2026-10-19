@@ -19,6 +19,7 @@ nonisolated enum TourAnchor: Hashable, Sendable {
 
 struct SidebarView: View {
     @Environment(TenantStore.self) private var tenantStore
+    @Environment(TenantDeployService.self) private var deployService
     @Binding var selection: SidebarSelection?
     @Binding var isConnectingTenant: Bool
     @State private var tenantPendingRemoval: Tenant?
@@ -82,12 +83,14 @@ struct SidebarView: View {
                     if case .tenant(tenant.id) = selection {
                         selection = .fleet
                     }
-                    tenantStore.remove(tenant)
+                    Task { await deployService.removeTenant(tenant) }
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Nothing in Jamf is changed. The tenant record kept by this app and its stored credentials are deleted.")
+            Text(deployService.isTeamMode
+                ? "Nothing in Jamf is changed. The tenant record and its state are deleted from the team space for everyone, and its credentials from this Mac."
+                : "Nothing in Jamf is changed. The tenant record kept by this app and its stored credentials are deleted.")
         }
     }
 }

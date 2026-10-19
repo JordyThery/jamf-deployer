@@ -56,9 +56,9 @@ struct FleetDashboardView: View {
                     }
                     TableColumn("Status") { tenant in
                         if let lock = deployService.lock(for: tenant.id) {
-                            Label("\(lock.operation == "check" ? "Being checked" : "Being deployed") by \(lock.engineer) on \(lock.host)", systemImage: "lock.fill")
+                            Label("Being \(lock.activity) by \(lock.engineer)", systemImage: "lock.fill")
                                 .foregroundStyle(.orange)
-                                .help("Since \(lock.acquiredAt.formatted(.relative(presentation: .named)))")
+                                .help(lock.created.map { "Since \($0.formatted(.relative(presentation: .named)))" } ?? "Locked in the team space")
                         } else {
                             statusLabel(for: tenant)
                         }

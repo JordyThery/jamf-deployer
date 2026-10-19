@@ -27,6 +27,7 @@ final class ComponentUpdateChecker {
         Component(name: "Jamf Protect provider", repository: "Jamf-Concepts/terraform-provider-jamfprotect", pinned: EngineInfo.jamfProtectProviderVersion),
         Component(name: "Jamf Pro provider (Deployment Theory)", repository: "deploymenttheory/terraform-provider-jamfpro", pinned: EngineInfo.jamfProProviderVersion),
         Component(name: "Exporter (jamformer)", repository: "Jamf-Concepts/jamformer", pinned: EngineInfo.jamformerVersion),
+        Component(name: "Team state backend (terraform-backend-git)", repository: "plumber-cd/terraform-backend-git", pinned: EngineInfo.stateBackendVersion),
     ]
 
     var updatesAvailable: [Component] {

@@ -1,6 +1,6 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-10-18 (1.0.4). Consolidates the open items from every phase report.
+As of 2026-10-19 (1.0). Consolidates the open items from every phase report.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - **protect-baseline block** — no non-production Jamf Protect tenant exists to apply it to. The provider wiring itself *is* live-verified read-only (auth + all four data sources against production).
@@ -31,18 +31,18 @@ As of 2026-10-18 (1.0.4). Consolidates the open items from every phase report.
 
 ## Team mode caveats
 - Git auth assumes the Mac has gh/SSH credentials configured; an in-app PAT flow is designed, not built.
-- Lock expiry is manual (age shown + Break Lock); no auto-TTL.
+- Engine state lives on the repository's `jamf-deployer-state` branch through terraform-backend-git (bundled, run on demand on the loopback address); locks are the backend's `locks/…` branches. Lock expiry is manual (Force Unlock); no auto-TTL.
 - Join-time tenant ID conflicts are skipped, not merged.
-- Repo access = access to all tenant records (names, scope IDs, encrypted state). Secrets are never in the repo in the clear: Share Credentials seals them per engineer (Curve25519 + ChaCha20-Poly1305) into `team/secrets/`, and private keys stay in each engineer's Keychain.
+- Repo access = access to all tenant records (names, scope IDs, encrypted state). State is encrypted with one team passphrase (kept in each Mac's Keychain); credentials are never in the repo — each engineer uses their own API client or account.
+- Live-verified with Scripts/run-team-ui-tests.sh against a private test repository: create (no state on main, encrypted state on the state branch), check and restore through the backend, a teammate's lock reported and force-unlocked, leave (state back on the Mac), join with the passphrase, and tenant removal clearing record and state.
 - A tenant runs one engine operation at a time on a Mac (preview, check or deploy); a second request is refused with a message.
-- A lost lock race undoes only the lock commit; releasing never removes another engineer's lock.
 
 ## Ejecting to plain OpenTofu
 Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFORM_*`, `TF_ENCRYPTION` with the recovery-sheet passphrase) run under vanilla OpenTofu ≥ 1.13 with providers from the public registry once the copied lock file is removed (it records the bundled, re-signed provider checksums). After a one-time decrypt with OpenTofu, HashiCorp Terraform 1.16 plans the same state with "No changes". The ejector owns the HCL from then on. A one-click "Export as standalone configuration" bundle is planned.
 
 ## Packaging and release
-- 1.0 shipped signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
-- No app-target unit tests; JamfDeployerCore carries 88 tests, DeployerKit 4. The Jamf DeployerUITests target runs live against two test tenants: a fleet rollout (Scripts/run-rollout-ui-tests.sh), a walk through every main function — connect, catalog sources, deploys, drift, removals, adoption, App Store picker, hand-over, Day 0, export, clone, snapshot, history and settings (Scripts/run-function-ui-tests.sh) — the Jamf Pro API connection (Scripts/run-jamfpro-ui-tests.sh), and every catalog block through either connection (Scripts/run-catalog-ui-tests.sh). All scripts clean up after themselves.
+- Releases are signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
+- No app-target unit tests; JamfDeployerCore carries 87 tests, DeployerKit 4. The Jamf DeployerUITests target runs live against two test tenants: a fleet rollout (Scripts/run-rollout-ui-tests.sh), a walk through every main function — connect, catalog sources, deploys, drift, removals, adoption, App Store picker, hand-over, Day 0, export, clone, snapshot, history and settings (Scripts/run-function-ui-tests.sh) — the Jamf Pro API connection (Scripts/run-jamfpro-ui-tests.sh), every catalog block through either connection (Scripts/run-catalog-ui-tests.sh), custom scripts and extension attributes through both connections (Scripts/run-custom-object-ui-tests.sh), a Mac App Store app deploy (Scripts/run-app-store-ui-tests.sh) and Team Mode against a private test repository (Scripts/run-team-ui-tests.sh). All scripts clean up after themselves.
 - App Sandbox is off by design (child-process engine); Developer ID + notarisation is the distribution model.
 
 ## Adopting an existing tenant

@@ -3,25 +3,13 @@ import DeployerKit
 import os
 
 /// The store on disk is a Git repository — always, remote or not. Solo use
-/// gets free local versioning; team mode is the same repo with a GitHub
-/// remote. Locking rides on Git's atomic push: a push only lands if the
-/// remote hasn't moved, which makes committing a lock file a compare-and-swap.
+/// gets free local versioning of tenant records, history and catalog
+/// sources; Team Mode is the same repository with a remote. Engine state is
+/// never part of it: solo state stays in each workspace, team state goes
+/// through the state backend (see `StateBackendService`), which also locks.
 actor GitStoreService {
     nonisolated static var storeURL: URL {
         URL.applicationSupportDirectory.appending(path: "Jamf Deployer/store")
-    }
-
-    nonisolated struct LockInfo: Codable, Sendable {
-        var tenantID: UUID
-        var engineer: String
-        var host: String
-        var operation: String
-        var acquiredAt: Date
-    }
-
-    enum LockResult: Sendable {
-        case acquired
-        case heldByOther(LockInfo)
     }
 
     enum GitError: LocalizedError {
@@ -61,14 +49,15 @@ actor GitStoreService {
         try fileManager.createDirectory(at: storeURL, withIntermediateDirectories: true)
 
         let ignoreURL = storeURL.appending(path: ".gitignore")
-        if !fileManager.fileExists(atPath: ignoreURL.path) {
-            try Data("""
-            # Regenerated on every run — never shared.
-            tenants/*/generated/
-            tenants/*/exports/
-            .DS_Store
-            """.utf8).write(to: ignoreURL)
-        }
+        try Data("""
+        # Regenerated on every run — never shared.
+        tenants/*/generated/
+        tenants/*/exports/
+        # Engine state never goes into this repository: solo state stays on
+        # this Mac, team state lives in the state backend.
+        tenants/*/state/
+        .DS_Store
+        """.utf8).write(to: ignoreURL)
 
         let manifestURL = storeURL.appending(path: "store.json")
         if !fileManager.fileExists(atPath: manifestURL.path) {
@@ -85,6 +74,11 @@ actor GitStoreService {
             try run("config", "user.name", "Jamf Deployer")
             try run("config", "user.email", "jamf-deployer@localhost")
             _ = try? commitAll(message: "Initialize Jamf Deployer store")
+        }
+        // State files committed before the ignore rule leave the index.
+        if !((try? run("ls-files", "--", "tenants/*/state/*")) ?? "").isEmpty {
+            try run("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", "tenants/*/state")
+            _ = try? commitAll(message: "Keep engine state out of the store repository")
         }
     }
 
@@ -143,95 +137,73 @@ actor GitStoreService {
         }
     }
 
-    // MARK: Locks (compare-and-swap via push)
-
-    private func lockURL(_ tenantID: UUID) -> URL {
-        storeURL.appending(path: "locks/\(tenantID.uuidString).json")
-    }
-
-    func currentLock(for tenantID: UUID) -> LockInfo? {
-        try? JSONFile.load(LockInfo.self, from: lockURL(tenantID))
-    }
-
-    func allLocks() -> [LockInfo] {
-        let locksURL = storeURL.appending(path: "locks")
-        let files = (try? FileManager.default.contentsOfDirectory(at: locksURL, includingPropertiesForKeys: nil)) ?? []
-        return files.compactMap { try? JSONFile.load(LockInfo.self, from: $0) }
-    }
-
-    /// This Mac's name as recorded in lock files.
-    private var hostName: String { Host.current().localizedName ?? "this Mac" }
-
-    /// Acquire = commit the lock file and win the push race. Only the lock
-    /// file is committed, so a lost race never touches other work.
-    func acquireLock(tenantID: UUID, engineer: String, operation: String, attempt: Int = 0) throws -> LockResult {
-        guard isTeamMode() else { return .acquired }
-        try pull()
-        if let existing = currentLock(for: tenantID), existing.host != hostName || existing.engineer != engineer {
-            return .heldByOther(existing)
-        }
-        let info = LockInfo(
-            tenantID: tenantID,
-            engineer: engineer,
-            host: hostName,
-            operation: operation,
-            acquiredAt: .now
-        )
-        try JSONFile.save(info, to: lockURL(tenantID))
-        let lockPath = "locks/\(tenantID.uuidString).json"
-        try run("add", "--", lockPath)
-        try run("commit", "-m", "Lock \(tenantID.uuidString.prefix(8)) — \(engineer) (\(operation))", "--", lockPath)
-        do {
-            try push()
-            return .acquired
-        } catch GitError.pushRejected {
-            // Lost the race: undo only the lock commit, then take theirs.
-            try run("reset", "--soft", "HEAD~1")
-            try run("reset", "-q", "--", lockPath)
-            try? FileManager.default.removeItem(at: lockURL(tenantID))
-            try pull()
-            if let holder = currentLock(for: tenantID) {
-                return .heldByOther(holder)
-            }
-            // The race was about something else: retry a couple of times.
-            guard attempt < 2 else { throw GitError.pushRejected }
-            return try acquireLock(tenantID: tenantID, engineer: engineer, operation: operation, attempt: attempt + 1)
-        }
-    }
-
-    /// Release = commit the workspace outcome plus the lock removal, push.
-    /// A lock held by someone else is left in place.
-    func releaseLock(tenantID: UUID, engineer: String, message: String) throws {
-        guard isTeamMode() else { return }
-        if let existing = currentLock(for: tenantID), existing.engineer == engineer, existing.host == hostName {
-            try? FileManager.default.removeItem(at: lockURL(tenantID))
-        }
-        try commitAll(message: message)
+    /// Publishes local commits, rebasing onto what teammates pushed first.
+    func pushRebasing() throws {
         do {
             try push()
         } catch GitError.pushRejected {
-            // Under the lock nothing conflicting can land for this tenant;
-            // rebase whatever else arrived and push again.
             try pull()
             try push()
         }
     }
 
-    /// Force-remove a stale lock (crash recovery) — recorded in history.
-    func breakLock(tenantID: UUID, by engineer: String) throws {
-        try pull()
-        try? FileManager.default.removeItem(at: lockURL(tenantID))
-        try commitAll(message: "Break stale lock \(tenantID.uuidString.prefix(8)) — \(engineer)")
-        try push()
+    // MARK: State branch
+
+    /// Creates the state branch on the remote when it does not exist yet:
+    /// the state backend only writes to an existing branch.
+    func ensureStateBranch() throws {
+        let branch = StateBackendService.stateBranch
+        let existing = try run("ls-remote", "--heads", "origin", branch)
+        guard existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // A one-file root commit, made with plumbing so the store's working
+        // tree and main branch are untouched.
+        let readme = "# Jamf Deployer state\n\nEngine state for this team space, written by the state backend. Do not edit by hand.\n"
+        let blob = try runWithInput(readme, "hash-object", "-w", "--stdin").trimmingCharacters(in: .whitespacesAndNewlines)
+        let tree = try runWithInput("100644 blob \(blob)\tREADME.md\n", "mktree").trimmingCharacters(in: .whitespacesAndNewlines)
+        let commit = try runWithInput("Create the state branch", "commit-tree", tree).trimmingCharacters(in: .whitespacesAndNewlines)
+        try run("push", "origin", "\(commit):refs/heads/\(branch)")
+    }
+
+    /// The engine's current state locks, one per locked tenant.
+    func stateLocks() -> [UUID: StateBackendService.StateLock] {
+        guard let heads = try? run("ls-remote", "--heads", "origin", "locks/tenants/*") else { return [:] }
+        var locks: [UUID: StateBackendService.StateLock] = [:]
+        for line in heads.split(separator: "\n") {
+            guard let ref = line.split(separator: "\t").last.map(String.init),
+                  let match = ref.firstMatch(of: /locks\/tenants\/([0-9A-Fa-f-]{36})\//),
+                  let tenantID = UUID(uuidString: String(match.1))
+            else { continue }
+            let localRef = "refs/jamf-deployer/locks/\(tenantID.uuidString)"
+            let path = "tenants/\(tenantID.uuidString)/terraform.tfstate.lock"
+            guard (try? run("fetch", "-q", "--depth", "1", "origin", "+\(ref):\(localRef)")) != nil,
+                  let text = try? run("show", "\(localRef):\(path)"),
+                  let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+            else { continue }
+            locks[tenantID] = StateBackendService.StateLock(
+                lockID: object["ID"] as? String ?? "",
+                who: object["Who"] as? String ?? "another engineer",
+                operation: object["Operation"] as? String ?? "",
+                created: (object["Created"] as? String).flatMap(StateBackendService.parseLockDate))
+        }
+        return locks
     }
 
     // MARK: Plumbing
 
     @discardableResult
     private func run(_ arguments: String...) throws -> String {
+        try execute(arguments, input: nil)
+    }
+
+    private func runWithInput(_ input: String, _ arguments: String...) throws -> String {
+        try execute(arguments, input: input)
+    }
+
+    private func execute(_ arguments: [String], input: String?) throws -> String {
         guard Self.isGitAvailable else { throw GitError.gitUnavailable }
         let process = Process()
-        process.standardInput = FileHandle.nullDevice
+        let stdin = Pipe()
+        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
         process.executableURL = URL(filePath: "/usr/bin/git")
         process.arguments = Array(arguments)
         process.currentDirectoryURL = storeURL
@@ -243,6 +215,10 @@ actor GitStoreService {
         process.standardOutput = output
         process.standardError = output
         try process.run()
+        if let input {
+            stdin.fileHandleForWriting.write(Data(input.utf8))
+            try? stdin.fileHandleForWriting.close()
+        }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         let text = String(decoding: data, as: UTF8.self)
