@@ -22,7 +22,7 @@ Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jam
 - **Export** — turn an existing tenant's objects into reusable building blocks that keep their wiring — one export can become several blocks, or a full tenant clone — plus documentation or a point-in-time snapshot; adopt hand-configured objects into management without recreating them.
 - **Maintain** — on-demand checks (one tenant, or the whole fleet from the dashboard) show changes made directly in Jamf; keep a change or restore the baseline. Baseline updates are reviewed and opted into per block, and **Roll Out…** takes a change across the fleet tenant by tenant, test tenants first, with a preview and your approval for each. Every deploy is recorded in History, and **Roll Back…** restores an earlier baseline.
 - **Work as a team** — a shared GitHub repository synchronizes tenants and catalogs across engineers; engine state lives in the same repository through a standard Git state backend with locking, encrypted with a team passphrase. See [Team Mode](docs/team-mode.md).
-- **Graduate to Terraform** — every preview can show the commands and configuration behind it, and **Export as Terraform…** writes tenants as a plain Terraform repository (a module per block, a folder per tenant, GitHub workflows for plan, apply and change checks) or moves them there for good, with nothing recreated. See [Graduating to Terraform](docs/graduating.md).
+- **Graduate to Terraform** — the app is a way in, not a place to stay. Every preview can show the commands and configuration behind it, and run in Terminal with `./plan.sh`; **Export as Terraform…** writes tenants as a plain Terraform repository (a module per block, a folder per tenant, GitHub workflows for reviewed changes, change checks and objects made outside the code) or moves them there for good, with nothing recreated. [Graduating to Terraform](docs/graduating.md) is the path, stage by stage, to running it all without the app.
 
 ![A tenant in sync: connection details, preflight, what is managed in the tenant, and building blocks to add from the catalog](docs/screenshot.png)
 
@@ -36,8 +36,7 @@ The fleet dashboard keeps every tenant's sync state, baseline size and Apple tok
 - **[Building Blocks](docs/building-blocks.md)** — what each block does, settings and scope, presets, making your own blocks and catalogs
 - **[Permissions](docs/permissions.md)** — the API client privileges each block and feature needs, scoped to least privilege
 - **[Team Mode](docs/team-mode.md)** — the shared repository, state backend and locks, the team passphrase, per-engineer credentials, joining and leaving
-- **[Graduating to Terraform](docs/graduating.md)** — how the app maps onto Terraform, and Export as Terraform: tenants to a plain repository with GitHub workflows
-- **[Switching to plain Terraform](docs/ejecting.md)** — the same move by hand, for one tenant; there is no lock-in
+- **[Graduating to Terraform](docs/graduating.md)** — the path from the app to running Terraform yourself: reading plans, one tenant on the command line, a Git repository with reviewed changes, and running a fleet. There is no lock-in
 
 ## Requirements
 

@@ -715,7 +715,67 @@ final class TenantDeployService {
                 }
             }
         }
+        writeTerminalScript(
+            for: tenant, catalog: catalog, output: output,
+            teamMode: (backend ?? (isTeamMode ? .http : .local)) == .http)
         return output
+    }
+
+    /// `plan.sh` beside the generated configuration: the preview's plan, to
+    /// run yourself in Terminal. Plain values are written in; secrets are
+    /// Keychain references the script reads when it runs.
+    private func writeTerminalScript(
+        for tenant: Tenant, catalog: LoadedCatalog, output: WorkspaceGenerator.Output, teamMode: Bool
+    ) {
+        let secrets = TenantSecrets(tenantID: tenant.id)
+        func ref(_ item: KeychainItem) -> TerminalScript.KeychainRef {
+            TerminalScript.KeychainRef(service: item.service, account: item.account)
+        }
+        var environment: [String: String] = [:]
+        var secretRefs: [String: TerminalScript.KeychainRef] = [:]
+        if tenant.isJamfPro {
+            environment["JAMFPRO_INSTANCE_FQDN"] = JamfAPIConfiguration.instanceURL(tenant.jamfProURL ?? "")?.absoluteString ?? ""
+            environment["JAMFPRO_AUTH_PROVIDER"] = "direct"
+            if tenant.jamfProAuth == .userAccount {
+                environment["JAMFPRO_AUTH_METHOD"] = "basic"
+                environment["JAMFPRO_BASIC_USERNAME"] = tenant.engineerClientID
+                secretRefs["JAMFPRO_BASIC_PASSWORD"] = ref(secrets.platformClientSecret)
+            } else {
+                environment["JAMFPRO_AUTH_METHOD"] = "oauth2"
+                environment["JAMFPRO_CLIENT_ID"] = tenant.engineerClientID
+                secretRefs["JAMFPRO_CLIENT_SECRET"] = ref(secrets.platformClientSecret)
+            }
+        } else {
+            environment["JAMFPLATFORM_BASE_URL"] = tenant.region.gatewayURL.absoluteString
+            environment["JAMFPLATFORM_CLIENT_ID"] = tenant.engineerClientID
+            environment[tenant.apiScope == .environment ? "JAMFPLATFORM_ENVIRONMENT_ID" : "JAMFPLATFORM_TENANT_ID"] = tenant.scopeID
+            secretRefs["JAMFPLATFORM_CLIENT_SECRET"] = ref(secrets.platformClientSecret)
+        }
+        let needsProtect = tenant.blockSelections.contains {
+            catalog.block(id: $0.blockID)?.products.contains("jamf-protect") == true
+        }
+        if needsProtect, let protectURL = tenant.protectURL, let protectClientID = tenant.protectClientID {
+            environment["JAMFPROTECT_URL"] = protectURL
+            environment["JAMFPROTECT_CLIENT_ID"] = protectClientID
+            secretRefs["JAMFPROTECT_CLIENT_SECRET"] = ref(secrets.protectClientSecret)
+        }
+        for (reference, variableName) in output.secretVariableNames {
+            let parts = reference.split(separator: "/").map(String.init)
+            guard parts.count == 2 else { continue }
+            secretRefs["TF_VAR_\(variableName)"] = ref(secrets.blockSetting(blockID: parts[0], key: parts[1]))
+        }
+        guard let cliConfig = try? EngineLocator.ensureCLIConfig() else { return }
+        let script = TerminalScript.render(TerminalScript.Input(
+            enginePath: EngineLocator.tofuURL.path,
+            cliConfigPath: cliConfig.path,
+            environment: environment,
+            secrets: secretRefs,
+            statePassphrase: ref(secrets.statePassphrase),
+            planArguments: Self.readParallelism(for: tenant),
+            isTeamMode: teamMode))
+        let url = generatedURL(for: tenant).appending(path: TerminalScript.fileName)
+        try? Data(script.utf8).write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
     }
 
     /// TF_VAR_* values for the workspace's secret settings, resolved from

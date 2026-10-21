@@ -124,6 +124,14 @@ Protect deployment sync, under the Platform client above.
   tenant's GitHub Environment holds its own API client, and only `main` may
   use it. Pull request plans use the tenant's `<tenant>-plan` Environment,
   which any branch can reach; a read-only API client is enough there.
+- The **Not in code** workflow lists objects with the read privileges plans
+  already use; it changes nothing.
+- `scripts/new-tenant.sh` and `scripts/hand-over.sh` run on your Mac with
+  your own GitHub CLI sign-in: creating Environments needs admin access to
+  the repository.
+- **`plan.sh`** in a tenant's workspace reads the tenant's credentials from
+  your login Keychain while it runs; macOS asks the first time whether
+  `security` may read them.
 
 ## On the Mac
 

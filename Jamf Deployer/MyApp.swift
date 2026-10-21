@@ -110,6 +110,7 @@ struct MyApp: App {
                 Button("Guided Tour") {
                     tour.start()
                 }
+                Link("Graduating to Terraform", destination: DocsLinks.graduating)
             }
         }
     }

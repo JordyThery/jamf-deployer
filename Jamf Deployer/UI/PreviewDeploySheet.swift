@@ -327,8 +327,19 @@ struct PreviewDeploySheet: View {
                         .padding(.vertical, 4)
                     }
                 }
-                Button("Show Workspace in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([workspace.appending(path: "main.tf")])
+                Text("Run the same plan yourself: in the workspace, ./plan.sh runs it in Terminal with your Keychain credentials. A plan only reads, so nothing in Jamf changes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Show Workspace in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([workspace.appending(path: "main.tf")])
+                    }
+                    Button("Open in Terminal") {
+                        let terminal = URL(filePath: "/System/Applications/Utilities/Terminal.app")
+                        NSWorkspace.shared.open([workspace], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
+                    }
+                    Link("Learn more", destination: DocsLinks.stage(1))
                 }
             }
         }

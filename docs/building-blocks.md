@@ -106,6 +106,13 @@ Three ways:
 
 Custom blocks are managed from their detail view: **Edit Details…** changes the name, summary, version and category; **Reveal in Finder** opens the folder for deeper changes; **Delete Block…** removes it (the app warns when tenants still select it); **Mark as Reviewed** clears a captured block's review flag. Capturing never replaces an existing block: choose a new block ID, or delete the old block first. Sources themselves are managed under **Manage Sources…** in the library's toolbar: **Add Folder…** uses a new or existing folder for your own blocks and presets, **Add Git Catalog…** follows a published catalog, and **Remove…** detaches a source without deleting anything.
 
+## Using blocks from plain Terraform
+
+Every block is an ordinary Terraform module, so a catalog keeps working after
+you stop using the app: Terraform can call a block straight from its Git
+repository, pinned to a release. [Graduating to Terraform, stage 2b](graduating.md#2b-start-from-scratch)
+shows how.
+
 ## Catalog sources
 
 Blocks come from catalog sources. Besides the built-in catalog:

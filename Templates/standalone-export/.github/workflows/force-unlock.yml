@@ -1,0 +1,76 @@
+name: Force unlock
+
+# Manual: releases a tenant's state lock that a cancelled or crashed run left
+# behind. Every run takes the lock and releases it when it ends; a run that
+# never ended keeps it, and the next run waits and then fails with "Error
+# acquiring the state lock", naming the lock ID. Make sure that run is really
+# gone (Actions tab) before unlocking: two runs at once can corrupt the state.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: Tenant (directory name under tenants/)
+        required: true
+      lock_id:
+        description: Lock ID from the "Error acquiring the state lock" message
+        required: true
+
+permissions:
+  contents: write   # the state backend writes state and lock branches
+
+jobs:
+  unlock:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.tenant }}
+    # Waits for any run still working on this tenant, so a live lock is never taken away.
+    concurrency:
+      group: tenant-${{ inputs.tenant }}
+      cancel-in-progress: false
+    env:
+      TENANT: ${{ inputs.tenant }}
+      LOCK_ID: ${{ inputs.lock_id }}
+      # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
+      # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
+      # The set a tenant does not use stays empty.
+      JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
+      JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
+      JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
+      JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
+      JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
+      JAMFPRO_AUTH_PROVIDER: direct
+      JAMFPRO_AUTH_METHOD: ${{ vars.JAMFPRO_AUTH_METHOD }}
+      JAMFPRO_CLIENT_ID: ${{ secrets.JAMFPRO_CLIENT_ID }}
+      JAMFPRO_CLIENT_SECRET: ${{ secrets.JAMFPRO_CLIENT_SECRET }}
+      JAMFPRO_BASIC_USERNAME: ${{ secrets.JAMFPRO_BASIC_USERNAME }}
+      JAMFPRO_BASIC_PASSWORD: ${{ secrets.JAMFPRO_BASIC_PASSWORD }}
+      # Tenants with Jamf Protect blocks also need these.
+      JAMFPROTECT_URL: ${{ vars.JAMFPROTECT_URL }}
+      JAMFPROTECT_CLIENT_ID: ${{ secrets.JAMFPROTECT_CLIENT_ID }}
+      JAMFPROTECT_CLIENT_SECRET: ${{ secrets.JAMFPROTECT_CLIENT_SECRET }}
+      # The Jamf Pro API plugin needs one operation at a time: those tenants
+      # set PARALLELISM to 1 in their Environment.
+      TF_CLI_ARGS_plan: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_apply: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_destroy: -parallelism=${{ vars.PARALLELISM || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the inputs
+        shell: bash
+        run: |
+          [[ "$TENANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }
+          [[ "$LOCK_ID" =~ ^[A-Za-z0-9-]+$ ]] || { echo "That does not look like a lock ID"; exit 1; }
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - uses: ./.github/actions/state-backend
+        with:
+          tenant: ${{ env.TENANT }}
+      - name: Init
+        run: terraform -chdir="tenants/$TENANT" init -input=false
+      - name: Unlock
+        run: terraform -chdir="tenants/$TENANT" force-unlock -force "$LOCK_ID"
