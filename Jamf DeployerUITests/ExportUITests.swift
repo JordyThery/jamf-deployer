@@ -70,7 +70,7 @@ final class ExportUITests: DeployerUITestCase {
         stageCustomCategory(on: Self.tenant, objectName: "export_custom", name: "UIT EX - Custom", priority: "5")
         previewAndDeploy()
         let created = ProcessInfo.processInfo.environment["EXPORT_UEM_CONNECT"] == "create"
-        XCTAssertTrue(anyContaining(extras ? (created ? "14 succeeded" : "13 succeeded") : "7 succeeded").waitForExistence(timeout: 15),
+        XCTAssertTrue(anyContaining(extras ? (created ? "15 succeeded" : "14 succeeded") : "8 succeeded").waitForExistence(timeout: 15),
                       "The baseline did not deploy")
     }
 

@@ -43,11 +43,9 @@ As of 2026-10-22 (1.0.3). Consolidates the open items from every phase report.
 ## Ejecting to plain OpenTofu
 Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFORM_*`, `TF_ENCRYPTION` with the recovery-sheet passphrase) run under vanilla OpenTofu ≥ 1.13 with providers from the public registry once the copied lock file is removed (it records the bundled, re-signed provider checksums). After a one-time decrypt with OpenTofu, HashiCorp Terraform 1.16 plans the same state with "No changes". The ejector owns the HCL from then on. Export as Terraform does the same in one step for any number of tenants (see below).
 
-## Known gaps from the 2026-10-22 review (fixes pending)
-- **The App Catalog block's Jamf Pro API variant declares no `jamfProPermissions`**, so its detail view lists none; add the verified privilege names to the built-in and demo catalogs.
-- **An always-on catalog block (`alwaysOn: true`) deploys only after one of its settings is edited** (the edit now materializes its selection); untouched it stays out of the generated configuration. No shipped block uses `alwaysOn` yet.
-- **`restore.yml` keeps workflow-level write permissions**: narrowing them to job level needs a live check that the authorize job's collaborator-permission lookup still works with a read-only token. The other workflows now grant write only to the jobs that use it.
-- **The support-bundle ditto runs on the main actor** — accepted: it compresses a few text files.
+## Accepted from the 2026-10-22 review
+- **The support-bundle ditto runs on the main actor**: it compresses a few text files.
+- Every block's Jamf Pro API privileges were verified live (Sandbox, 2026-10-22) with an API client holding only the listed privileges: deploy, a second plan with no changes, destroy. App Installers come under the Mac Applications privileges.
 
 ## Packaging and release
 - Releases are signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.

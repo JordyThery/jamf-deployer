@@ -175,6 +175,35 @@ nonisolated struct BlockSelection: Codable, Sendable, Equatable {
         self.settings = settings
         self.sourceTag = sourceTag
     }
+
+    /// A new selection of `block` with its defaults: setting defaults, and
+    /// the scope or category it declares when the block providing them is
+    /// among `selectedIDs`.
+    static func defaults(for block: BlockMetadata, catalog: LoadedCatalog, selectedIDs: Set<String>) -> BlockSelection {
+        var settings: [String: String] = [:]
+        for setting in block.settings where !setting.default.isEmpty {
+            settings[setting.key] = setting.default
+        }
+        var selection = BlockSelection(
+            blockID: block.id,
+            sourceID: catalog.sourceIDByBlockID[block.id] ?? "official",
+            settings: settings
+        )
+        if block.scope.kind != .none,
+           let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)),
+           selectedIDs.contains(provided.blockID) {
+            selection.providedScope = provided
+        }
+        if block.acceptsCategory {
+            if let provided = block.defaultCategory.flatMap(ProvidedObject.init(reference:)),
+               selectedIDs.contains(provided.blockID) {
+                selection.providedCategory = provided
+            } else {
+                selection.existingCategory = .noCategory
+            }
+        }
+        return selection
+    }
 }
 
 /// An object that already exists in the tenant, referenced by its Jamf ID.

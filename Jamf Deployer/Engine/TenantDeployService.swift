@@ -755,7 +755,7 @@ final class TenantDeployService {
             environment[tenant.apiScope == .environment ? "JAMFPLATFORM_ENVIRONMENT_ID" : "JAMFPLATFORM_TENANT_ID"] = tenant.scopeID
             secretRefs["JAMFPLATFORM_CLIENT_SECRET"] = ref(secrets.platformClientSecret)
         }
-        let needsProtect = tenant.blockSelections.contains {
+        let needsProtect = effectiveSelections(for: tenant, catalog: catalog).contains {
             catalog.block(id: $0.blockID)?.products.contains("jamf-protect") == true
         }
         if needsProtect, let protectURL = tenant.protectURL, let protectClientID = tenant.protectClientID {
@@ -803,8 +803,24 @@ final class TenantDeployService {
         return environment
     }
 
+    /// The tenant's selections plus every always-on block the catalog has
+    /// for its connection and it has not selected, with the block's
+    /// defaults. Nothing is saved: an always-on block is part of every
+    /// baseline, so a tenant without a record of it still deploys it. A
+    /// hand-over releases everything, always-on blocks included.
+    func effectiveSelections(for tenant: Tenant, catalog: LoadedCatalog) -> [BlockSelection] {
+        guard !tenant.handOverPending, !tenant.isHandedOver else { return tenant.blockSelections }
+        var selections = tenant.blockSelections
+        let selectedIDs = Set(selections.map(\.blockID))
+        for block in catalog.blocks
+        where block.alwaysOn && !selectedIDs.contains(block.id) && catalog.supports(blockID: block.id, connection: tenant.connection) {
+            selections.append(.defaults(for: block, catalog: catalog, selectedIDs: selectedIDs))
+        }
+        return selections
+    }
+
     private func generatedSelections(for tenant: Tenant, catalog: LoadedCatalog) throws -> [GeneratedSelection] {
-        try tenant.blockSelections.map { selection in
+        try effectiveSelections(for: tenant, catalog: catalog).map { selection in
             // Selections from a custom source resolve from that source at
             // the selection's tag (falling back to the tenant's pin). The
             // merged catalog keeps "official wins" on ID conflicts, so a
@@ -1029,7 +1045,7 @@ final class TenantDeployService {
     /// JAMFPROTECT_* for baselines with Jamf Protect blocks; empty otherwise.
     private func protectEnvironment(for tenant: Tenant) throws -> [String: String] {
         let needsProtect = (try? loadCatalog()).map { catalog in
-            tenant.blockSelections.contains { selection in
+            effectiveSelections(for: tenant, catalog: catalog).contains { selection in
                 catalog.block(id: selection.blockID)?.products.contains("jamf-protect") == true
             }
         } ?? false
@@ -1419,7 +1435,7 @@ final class TenantDeployService {
         let plan = try await runner.showPlan(planFileName: "drift.bin")
 
         var blockNames: [String: String] = ["tenant": "Adopted objects"]
-        for selection in tenant.blockSelections {
+        for selection in effectiveSelections(for: tenant, catalog: catalog) {
             if let block = catalog.block(id: selection.blockID) {
                 blockNames[block.id] = block.name
             }

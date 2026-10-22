@@ -9,6 +9,7 @@
   "products": ["jamf-pro"],
   "minJamfProVersion": "11.31.0",
   "permissions": ["applications:create", "applications:read", "applications:update", "applications:delete", "smart-computer-groups:read"],
+  "jamfProPermissions": ["Create Mac Applications", "Read Mac Applications", "Update Mac Applications", "Delete Mac Applications", "Read Smart Computer Groups"],
   "risk": "medium",
   "alwaysOn": false,
   "acceptsCategory": true,

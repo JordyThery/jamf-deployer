@@ -84,7 +84,8 @@ on those object types); the preflight names any
 that are missing. Adopting, checking for changes and deploying need read —
 and for deploys create, update and delete — on the object types you manage.
 A block's detail view lists the Jamf Pro API privileges its Jamf Pro API
-version declares.
+version declares. App Catalog deployments (Jamf Pro's App Installers) have no
+privileges of their own: they come under **Mac Applications**.
 Day 0 actions need the same privileges as listed above, in their Jamf Pro
 API role form.
 

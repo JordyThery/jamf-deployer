@@ -401,29 +401,7 @@ struct BaselineEditorView: View {
     /// declared defaults when the block creating them is selected too;
     /// otherwise the user picks (an existing group, no category).
     private func defaultSelection(for block: BlockMetadata, selectedIDs: Set<String>) -> BlockSelection {
-        var settings: [String: String] = [:]
-        for setting in block.settings where !setting.default.isEmpty {
-            settings[setting.key] = setting.default
-        }
-        var selection = BlockSelection(
-            blockID: block.id,
-            sourceID: catalog.sourceIDByBlockID[block.id] ?? "official",
-            settings: settings
-        )
-        if block.scope.kind != .none,
-           let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)),
-           selectedIDs.contains(provided.blockID) {
-            selection.providedScope = provided
-        }
-        if block.acceptsCategory {
-            if let provided = block.defaultCategory.flatMap(ProvidedObject.init(reference:)),
-               selectedIDs.contains(provided.blockID) {
-                selection.providedCategory = provided
-            } else {
-                selection.existingCategory = .noCategory
-            }
-        }
-        return selection
+        BlockSelection.defaults(for: block, catalog: catalog, selectedIDs: selectedIDs)
     }
 
     /// Fills an unchosen scope, or the "no category" placeholder, with the
