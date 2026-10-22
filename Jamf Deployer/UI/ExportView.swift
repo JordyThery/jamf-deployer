@@ -113,8 +113,11 @@ struct ExportView: View {
                 if !tenant.isJamfPro {
                     Picker("From", selection: $exportProvider) {
                         Text("Jamf Pro and Platform").tag("jamfplatform")
-                        Text("Jamf Protect").tag("jamfprotect")
-                            .selectionDisabled(tenant.protectURL == nil)
+                        // Offered only with a Protect connection; a disabled
+                        // option inside a menu picker stays clickable.
+                        if tenant.protectURL != nil {
+                            Text("Jamf Protect").tag("jamfprotect")
+                        }
                     }
                     .fixedSize()
                     .disabled(kind == .clone)

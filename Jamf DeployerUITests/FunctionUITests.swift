@@ -153,7 +153,9 @@ final class FunctionUITests: DeployerUITestCase {
         openTenant(Self.sandbox, tab: "Export")
         let download = app.buttons["Download Terraform"]
         if download.waitForExistence(timeout: 10) { download.click() }
-        XCTAssertTrue(anyContaining("Exports read the tenant").waitForExistence(timeout: 600), "Terraform download did not finish")
+        // "Discovery engine ready" shows only once the binary is installed;
+        // the tab header alone would end the test mid-download.
+        XCTAssertTrue(anyContaining("Discovery engine ready").waitForExistence(timeout: 600), "Terraform download did not finish")
     }
 
     /// Adopts the categories left behind by test 10.

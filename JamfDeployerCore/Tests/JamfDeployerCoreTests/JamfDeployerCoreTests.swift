@@ -2138,19 +2138,19 @@ struct TerminalScriptTests {
     @Test func escapesThePassphraseForHCL() throws {
         // The script's escaping lines, run in zsh on a passphrase with every
         // character HCL treats specially: the result matches the app's own
-        // escaping (backslash, quote, ${, %{, newline).
+        // escaping (backslash, quote, ${, %{, newline, carriage return, tab).
         let lines = TerminalScript.render(input()).split(separator: "\n")
             .filter { $0.hasPrefix("passphrase=${passphrase//") }
-        #expect(lines.count == 5)
+        #expect(lines.count == 7)
         let process = Process()
         process.executableURL = URL(filePath: "/bin/zsh")
-        process.arguments = ["-c", "passphrase=$'a\\\\b\"c${x}d%{y}e\\nf'\n" + lines.joined(separator: "\n") + "\nprint -r -- \"$passphrase\""]
+        process.arguments = ["-c", "passphrase=$'a\\\\b\"c${x}d%{y}e\\nf\\rg\\th'\n" + lines.joined(separator: "\n") + "\nprint -r -- \"$passphrase\""]
         let output = Pipe()
         process.standardOutput = output
         try process.run()
         process.waitUntilExit()
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        #expect(text == #"a\\b\"c$${x}d%%{y}e\nf"# + "\n")
+        #expect(text == #"a\\b\"c$${x}d%%{y}e\nf\rg\th"# + "\n")
     }
 
     @Test func teamModeExplainsInsteadOfRunning() {
