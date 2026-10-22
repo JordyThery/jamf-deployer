@@ -527,6 +527,7 @@ struct BlockSettingsForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            TerraformTerm("input variables of the block's module; values in tenant.auto.tfvars")
             if block.scope.kind != .none {
                 scopePicker
             }

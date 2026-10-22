@@ -293,7 +293,7 @@ public nonisolated enum StandaloneExport {
 
     /// Writes the repository: modules/, tenants/ and the pipeline templates
     /// (the contents of `templatesURL`, copied as they are).
-    public static func write(_ tenants: [Tenant], templatesURL: URL?, to destination: URL) throws {
+    public static func write(_ tenants: [Tenant], templatesURL: URL?, to destination: URL, repository: String? = nil) throws {
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: destination.path),
            !((try? fileManager.contentsOfDirectory(atPath: destination.path)) ?? []).filter({ $0 != ".DS_Store" }).isEmpty {
@@ -311,6 +311,8 @@ public nonisolated enum StandaloneExport {
                 try fileManager.copyItem(at: templatesURL.appending(path: item), to: destination.appending(path: item))
             }
         }
+
+        try fillStatusBadges(in: destination.appending(path: "README.md"), repository: repository)
 
         let modulesURL = destination.appending(path: "modules")
         try fileManager.createDirectory(at: modulesURL, withIntermediateDirectories: true)
@@ -357,6 +359,27 @@ public nonisolated enum StandaloneExport {
         for script in (try? fileManager.contentsOfDirectory(atPath: scripts.path)) ?? [] where script.hasSuffix(".sh") {
             try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scripts.appending(path: script).path)
         }
+    }
+
+    /// The README line the workflow status badges go on.
+    static let badgeMarker = "<!-- status badges -->"
+
+    /// The workflows' status badges, on the README's marker line, when the
+    /// repository is on GitHub; without one (an export to review), the line
+    /// goes.
+    static func fillStatusBadges(in readme: URL, repository: String?) throws {
+        guard let text = try? String(contentsOf: readme, encoding: .utf8), text.contains(badgeMarker) else { return }
+        let badges = repository.flatMap(GitHubRepository.init(remote:)).map { github in
+            [
+                github.badge(title: "Apply", workflow: "apply.yml"),
+                github.badge(title: "Check for changes", workflow: "drift.yml"),
+                github.badge(title: "Not in code", workflow: "reconcile.yml"),
+            ].joined(separator: " ") + "\n"
+        } ?? ""
+        let filled = badges.isEmpty
+            ? text.replacingOccurrences(of: badgeMarker + "\n\n", with: "")
+            : text.replacingOccurrences(of: badgeMarker + "\n", with: badges)
+        try Data(filled.utf8).write(to: readme, options: .atomic)
     }
 
     /// The scaffold directory under tenants/ that workflows skip.
