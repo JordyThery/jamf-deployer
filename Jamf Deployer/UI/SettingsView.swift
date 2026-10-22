@@ -43,9 +43,12 @@ struct SettingsView: View {
             } header: {
                 Text("Interface")
             } footer: {
-                Text("Reveals generated configuration, raw change plans and engine logs for troubleshooting and support. Everyday use never needs them.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Reveals generated configuration, raw change plans and engine logs. Previews then show the commands behind them, which is the first step to running Terraform yourself.")
+                    Link("Graduating to Terraform", destination: DocsLinks.stage(1))
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Section("Diagnostics") {

@@ -190,6 +190,16 @@ actor GitStoreService {
         return locks
     }
 
+    /// Releases a tenant's state lock by deleting its lock branch, when it
+    /// still holds `lockID`. terraform-backend-git keeps each lock on a
+    /// `locks/<state path>` branch; while one is left behind, a backend
+    /// started fresh cannot even read the state, so the engine's own
+    /// force-unlock (which needs init first) cannot release it.
+    func deleteStateLock(tenantID: UUID, lockID: String) throws {
+        guard stateLocks()[tenantID]?.lockID == lockID else { return }
+        try run("push", "-q", "origin", "--delete", "locks/tenants/\(tenantID.uuidString)/terraform.tfstate")
+    }
+
     // MARK: Plumbing
 
     @discardableResult

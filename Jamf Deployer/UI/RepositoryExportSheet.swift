@@ -176,6 +176,7 @@ struct RepositoryExportSheet: View {
                 } else {
                     Text("Read README.md for how the repository works. Each tenant's folder under tenants/ holds its settings in tenant.auto.tfvars.")
                 }
+                Link("Continue with Graduating to Terraform", destination: DocsLinks.stage(3))
             }
             .fixedSize(horizontal: false, vertical: true)
             Section {

@@ -1,0 +1,54 @@
+name: Force unlock
+
+# Manual: releases a tenant's state lock that a cancelled or crashed run left
+# behind. Every run locks the tenant's state and unlocks it when it ends; a
+# run that never ended keeps the lock, and every later run for the tenant then
+# fails at Init with "Error loading state: Failed to get state … giving up".
+# The lock is a branch, locks/tenants/<tenant>/terraform.tfstate; this
+# workflow shows who held it and when, then deletes it. Make sure that run is
+# really gone (Actions tab) first: two runs at once can damage the state.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: Tenant (directory name under tenants/)
+        required: true
+      confirm:
+        description: Type the tenant name again to confirm
+        required: true
+
+permissions:
+  contents: write   # deletes the lock branch
+
+jobs:
+  unlock:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Waits for any run still working on this tenant, so a lock in use is never taken away.
+    concurrency:
+      group: tenant-${{ inputs.tenant }}
+      cancel-in-progress: false
+    env:
+      TENANT: ${{ inputs.tenant }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release the lock
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          [ "$TENANT" = "$CONFIRM" ] || { echo "The two names differ; nothing was unlocked."; exit 1; }
+          [[ "$TENANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }
+          branch="locks/tenants/$TENANT/terraform.tfstate"
+          if ! git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "$TENANT is not locked."
+            exit 0
+          fi
+          git fetch -q --depth 1 origin "+refs/heads/$branch:refs/remotes/origin/lock"
+          echo "The lock being released:"
+          git show "origin/lock:tenants/$TENANT/terraform.tfstate.lock" \
+            | python3 -c 'import json, sys; lock = json.load(sys.stdin); [print(f"  {key}: {lock.get(key)}") for key in ("Who", "Operation", "Created", "ID")]'
+          git push -q origin --delete "$branch"
+          echo "Unlocked. The next run for $TENANT works normally."

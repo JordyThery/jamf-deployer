@@ -65,6 +65,11 @@ jobs:
         tenant: ${{ fromJson(needs.detect.outputs.tenants) }}
     environment:
       name: ${{ matrix.tenant }}-plan
+    # One run per tenant at a time, like every other workflow: a plan holds
+    # the tenant's state lock while it runs.
+    concurrency:
+      group: tenant-${{ matrix.tenant }}
+      cancel-in-progress: false
     env:
       TENANT: ${{ matrix.tenant }}
       # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants

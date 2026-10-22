@@ -3,7 +3,9 @@ name: Apply
 # A merge into main applies the tenants it changed. The pull request review is
 # the approval: nothing reaches main without a reviewed plan. One job per
 # tenant, in that tenant's GitHub Environment, which only main may use; one run
-# per tenant at a time.
+# per tenant at a time. A merge that removes a tenant's directory (see
+# scripts/hand-over.sh) hands the tenant over instead: its state moves to
+# handed-over/ on the state branch and its objects stay in Jamf.
 
 on:
   push:
@@ -96,3 +98,48 @@ jobs:
         run: terraform -chdir="tenants/$TENANT" init -input=false
       - name: Apply
         run: terraform -chdir="tenants/$TENANT" apply -input=false -no-color -auto-approve -lock-timeout=120s
+
+  hand-over:
+    # Tenants whose directory this push removed: the code no longer manages
+    # them. Their state is archived, not deleted, so adding the directory back
+    # and restoring the file brings them back under management.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: state-branch-archive
+      cancel-in-progress: false
+    env:
+      BASE: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive the state of removed tenants
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE}^{commit}" 2> /dev/null || exit 0
+          # --no-renames: a renamed tenant directory is a removal here, never a move.
+          removed=$(git diff --no-renames --name-only --diff-filter=D "$BASE" HEAD -- 'tenants/*/main.tf' \
+            | cut -d/ -f2 | while read -r t; do [ -d "tenants/$t" ] || echo "$t"; done)
+          [ -n "$removed" ] || { echo "No tenant was removed."; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch -q origin terraform-state
+            rm -rf "$RUNNER_TEMP/state"; git worktree prune
+            git worktree add -q --detach "$RUNNER_TEMP/state" origin/terraform-state
+            moved=""
+            for t in $removed; do
+              if [ -f "$RUNNER_TEMP/state/tenants/$t/terraform.tfstate" ]; then
+                mkdir -p "$RUNNER_TEMP/state/handed-over"
+                git -C "$RUNNER_TEMP/state" mv "tenants/$t/terraform.tfstate" "handed-over/$t-$(date -u +%Y%m%dT%H%M%SZ).tfstate"
+                moved="$moved $t"
+              fi
+            done
+            [ -n "$moved" ] || { echo "No state to archive for:$removed"; exit 0; }
+            git -C "$RUNNER_TEMP/state" commit -q -m "Hand over$moved: state archived"
+            git -C "$RUNNER_TEMP/state" push -q origin HEAD:terraform-state && { echo "Archived:$moved"; exit 0; }
+            echo "The state branch moved on; trying again."
+          done
+          exit 1

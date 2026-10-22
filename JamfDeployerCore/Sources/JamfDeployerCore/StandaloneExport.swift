@@ -138,11 +138,23 @@ public nonisolated enum StandaloneExport {
                 case .secret(let variable): pairs.append((argument.key, "var.\(variable.lowercased())"))
                 }
             }
-            return "module \"\(call.name)\" {\n\(WorkspaceGenerator.aligned(pairs))\n}\n"
+            var comment = "# \(names[call.blockID] ?? call.blockID)"
+            let used = Set(call.arguments.compactMap { argument -> String? in
+                guard case .reference(let expression) = argument.value,
+                      let match = expression.firstMatch(of: /module\.([A-Za-z0-9_]+)\./) else { return nil }
+                return String(match.1)
+            }).sorted()
+            if !used.isEmpty {
+                comment += "\n# Uses \(used.map { "module.\($0)" }.joined(separator: " and "))'s outputs, so Terraform creates that block first."
+            }
+            return "\(comment)\nmodule \"\(call.name)\" {\n\(WorkspaceGenerator.aligned(pairs))\n}\n"
         }
         let mainTF = """
-        # This tenant's baseline: one module call per building block, and how
-        # the blocks connect. Setting values live in tenant.auto.tfvars.
+        # This tenant's baseline. Each module block calls one building block from
+        # ../../modules: `source` says which, the other arguments are its inputs.
+        # `var.<block>.<setting>` values come from tenant.auto.tfvars, and
+        # `module.<block>.<output>` connects one block to another. Every tenant
+        # calls the same modules, so a change to a module reaches them all.
 
 
         """ + modules.joined(separator: "\n")
@@ -191,10 +203,12 @@ public nonisolated enum StandaloneExport {
         # Secret settings are not here: they arrive as TF_VAR_<name> secrets
         # in the tenant's GitHub Environment (\(secrets.map(\.name).joined(separator: ", "))).
         """
-        let variablesTF = "# Inputs for this tenant. Values live in tenant.auto.tfvars.\(secretNote)\n\n"
+        let variablesTF = "# The inputs main.tf uses, with their types: Terraform checks every value in\n# tenant.auto.tfvars against them before planning.\(secretNote)\n\n"
             + variables.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n"
         let tfvars = """
-        # The only file that differs in substance between tenants. No secrets:
+        # This tenant's settings: the file that differs between tenants. To change
+        # one, edit it on a branch and open a pull request; the plan on the pull
+        # request shows exactly what would change in Jamf. No secrets here:
         # credentials arrive as environment variables at run time.
 
 
@@ -322,7 +336,31 @@ public nonisolated enum StandaloneExport {
                 try fileManager.copyItem(at: file, to: directory.appending(path: file.lastPathComponent))
             }
         }
+
+        // A starting point for the next tenant (scripts/new-tenant.sh copies
+        // it): the first tenant's blocks and values, without its adopted
+        // objects. The workflows skip it.
+        if let (first, files) = rendered.first {
+            let directory = destination.appending(path: "tenants/\(templateDirectory)")
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            for (name, contents) in files {
+                let text = name == "tenant.auto.tfvars"
+                    ? "# A starting point for a new tenant: scripts/new-tenant.sh copies this directory.\n"
+                        + "# The values are \(first.slug)'s; set the new tenant's own before opening the pull request.\n"
+                        + contents
+                    : contents
+                try Data(text.utf8).write(to: directory.appending(path: name), options: .atomic)
+            }
+        }
+        // Git keeps the executable bit, so the scripts run straight after cloning.
+        let scripts = destination.appending(path: "scripts")
+        for script in (try? fileManager.contentsOfDirectory(atPath: scripts.path)) ?? [] where script.hasSuffix(".sh") {
+            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scripts.appending(path: script).path)
+        }
     }
+
+    /// The scaffold directory under tenants/ that workflows skip.
+    public static let templateDirectory = "_template"
 
     /// State as the engine wrote it, ready for plain Terraform: each
     /// resource's provider address moves from OpenTofu's registry to

@@ -1994,7 +1994,11 @@ struct StandaloneExportTests {
           users          = ["a", "b"]
         }
         """))
-        #expect(tfvars.hasPrefix("# The only file") && tfvars.contains("name_prefix = \"JD - \""))
+        #expect(tfvars.hasPrefix("# This tenant's settings") && tfvars.contains("name_prefix = \"JD - \""))
+        // Teaching comments: what a module call is, and the block each call runs.
+        let main = files["main.tf"]!
+        #expect(main.hasPrefix("# This tenant's baseline. Each module block calls one building block"))
+        #expect(main.contains("# FileVault\nmodule \"file_vault\" {") || main.contains("\nmodule \"file_vault\" {"))
     }
 
     @Test func secretSettingsAreSensitiveVariablesNeverValues() throws {
@@ -2079,6 +2083,8 @@ struct StandaloneExportTests {
         let templates = root.appending(path: "templates")
         try FileManager.default.createDirectory(at: templates.appending(path: ".github"), withIntermediateDirectories: true)
         try Data("# readme\n".utf8).write(to: templates.appending(path: "README.md"))
+        try FileManager.default.createDirectory(at: templates.appending(path: "scripts"), withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: templates.appending(path: "scripts/new-tenant.sh"))
 
         let cats = try Self.metadata(#"{"id": "cats", "name": "Categories", "version": "1.0.0"}"#)
         let tenant = StandaloneExport.Tenant(
@@ -2097,8 +2103,60 @@ struct StandaloneExportTests {
         }
         #expect(fm.fileExists(atPath: out.appending(path: "README.md").path))
         #expect(fm.fileExists(atPath: out.appending(path: ".github").path))
+        // The scaffold for the next tenant, and its script ready to run.
+        let template = try String(contentsOf: out.appending(path: "tenants/_template/tenant.auto.tfvars"), encoding: .utf8)
+        #expect(template.hasPrefix("# A starting point for a new tenant") && template.contains("The values are acme's"))
+        #expect(fm.isExecutableFile(atPath: out.appending(path: "scripts/new-tenant.sh").path))
         #expect(throws: StandaloneExport.ExportError.self) {
             try StandaloneExport.write([tenant], templatesURL: templates, to: out)
         }
+    }
+}
+
+@Suite("Terminal script")
+struct TerminalScriptTests {
+    private func input(teamMode: Bool = false) -> TerminalScript.Input {
+        TerminalScript.Input(
+            enginePath: "/Applications/Jamf Deployer.app/Contents/Resources/Vendor/opentofu/bin/tofu",
+            cliConfigPath: "/Users/x/Library/Application Support/Jamf Deployer/engine/tofu.tfrc",
+            environment: ["JAMFPLATFORM_CLIENT_ID": "o'brien"],
+            secrets: ["JAMFPLATFORM_CLIENT_SECRET": .init(service: "svc.secret", account: "UUID")],
+            statePassphrase: .init(service: "svc.pass", account: "UUID"),
+            planArguments: ["-parallelism=1"],
+            isTeamMode: teamMode)
+    }
+
+    @Test func readsSecretsFromTheKeychainAtRunTime() {
+        let script = TerminalScript.render(input())
+        #expect(script.contains("JAMFPLATFORM_CLIENT_SECRET=\"$(secret 'svc.secret' 'UUID')\"; export JAMFPLATFORM_CLIENT_SECRET"))
+        #expect(script.contains("passphrase=\"$(secret 'svc.pass' 'UUID')\""))
+        #expect(script.contains("export JAMFPLATFORM_CLIENT_ID='o'\\''brien'"))
+        #expect(script.contains("exec \"$engine\" plan -input=false '-parallelism=1' \"$@\""))
+        #expect(!script.contains(" apply"))
+    }
+
+    @Test func escapesThePassphraseForHCL() throws {
+        // The script's escaping lines, run in zsh on a passphrase with every
+        // character HCL treats specially: the result matches the app's own
+        // escaping (backslash, quote, ${, %{, newline).
+        let lines = TerminalScript.render(input()).split(separator: "\n")
+            .filter { $0.hasPrefix("passphrase=${passphrase//") }
+        #expect(lines.count == 5)
+        let process = Process()
+        process.executableURL = URL(filePath: "/bin/zsh")
+        process.arguments = ["-c", "passphrase=$'a\\\\b\"c${x}d%{y}e\\nf'\n" + lines.joined(separator: "\n") + "\nprint -r -- \"$passphrase\""]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(text == #"a\\b\"c$${x}d%%{y}e\nf"# + "\n")
+    }
+
+    @Test func teamModeExplainsInsteadOfRunning() {
+        let script = TerminalScript.render(input(teamMode: true))
+        #expect(script.contains("exit 1"))
+        #expect(!script.contains("secret "))
+        #expect(!script.contains("plan -input"))
     }
 }

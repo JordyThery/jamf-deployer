@@ -4,6 +4,11 @@ This repository manages Jamf tenants with Terraform (or OpenTofu). It was
 exported from Jamf Deployer: the tenants chosen in the app are here, with the
 same objects and the same state, so nothing is recreated.
 
+This README is how to set the repository up and run it. Why it is laid out
+this way, and how to grow into it, is
+[Graduating to Terraform](https://github.com/JordyThery/jamf-deployer/blob/main/docs/graduating.md#stage-3--many-tenants-git-and-reviews)
+(stages 3 and 4).
+
 ```
 modules/<block>/          one folder per building block: the Jamf Platform API
                           module, and its Jamf Pro API version in jamfpro/
@@ -13,8 +18,13 @@ tenants/<tenant>/         one directory per tenant
   tenant.auto.tfvars      every setting: the file that differs between tenants
   terraform.tf            versions and the state backend
   providers.tf            provider settings (credentials come from the environment)
-.github/workflows/        plan, apply, check for changes, restore, destroy
+  not-in-code.ignore      (optional) objects the Not in code check leaves alone
+tenants/_template/        the starting point scripts/new-tenant.sh copies
+scripts/                  new-tenant.sh and hand-over.sh, run on your Mac
+.github/workflows/        plan, apply, check for changes, not in code, restore,
+                          force unlock, destroy
 .github/actions/          the state backend, tenant detection and secret settings the workflows share
+.github/scripts/          the Not in code comparison
 ```
 
 ## How changes flow
@@ -31,7 +41,17 @@ tenants/<tenant>/         one directory per tenant
    with the plan. Keep the change by putting it in code with a pull request, or
    add the `restore-baseline` label to put the baseline back. Resolved issues
    close on the next check.
-4. **Destroy** is manual: run the workflow and type the tenant name twice.
+4. **Objects made outside the code are listed weekly.** The Not in code
+   workflow (Monday, after the change check) lists the object types each
+   tenant's code manages and opens `Not in code: <tenant>` for objects in Jamf
+   the code does not know. The issue holds their configuration (a
+   `resource` and an `import` block each) to paste into a new file in the
+   tenant's directory in a pull request, and lines for the tenant's
+   `not-in-code.ignore` to leave them alone. That configuration includes
+   what the objects contain, such as script bodies and profile payloads, one
+   more reason to keep the repository private. It uses `terraform query` (Terraform 1.14 or later) and skips
+   tenants on the Jamf Pro API, whose plugin cannot list objects.
+5. **Destroy** is manual: run the workflow and type the tenant name twice.
 
 ## Setting up
 
@@ -129,17 +149,49 @@ away from other branches.
 
 | Variable | Purpose |
 | --- | --- |
-| `TERRAFORM_VERSION` | Pin the Terraform version the workflows use (default: latest). |
+| `TERRAFORM_VERSION` | Pin the Terraform version the workflows use (default: latest; Not in code needs 1.14 or later). |
 
 ## Adding a tenant
 
-Copy an existing tenant directory, change `tenant.auto.tfvars`, create the
-tenant's two Environments, and open a pull request. The plan shows everything the
-new tenant gets before anything is created.
+```bash
+scripts/new-tenant.sh contoso-production
+```
+
+The script copies `tenants/_template` (the first exported tenant's blocks and
+values), creates the tenant's two Environments, asking for each secret with
+typing hidden, waits while you set its values in `tenant.auto.tfvars`, and
+opens a pull request. Its plan shows everything the new tenant gets before
+anything is created. It needs git and the GitHub CLI, signed in. The template
+uses the first tenant's connection; for a tenant on the other API, copy a
+tenant directory of that kind instead.
+
+The directory name ties a tenant to its state, Environments and issues.
+Renaming the directory alone looks like a new, empty tenant, whose first
+apply would create everything again: to rename one, also move
+`tenants/<old>/terraform.tfstate` to the new name on the `terraform-state`
+branch and create its two Environments under the new name (GitHub cannot
+rename them), before merging.
 
 ## Stopping managing a tenant
 
-To leave a tenant's objects in Jamf and stop managing them, delete its
-directory in a pull request and remove its state object
-(`tenants/<tenant>/terraform.tfstate` on the `terraform-state` branch, or in
-your bucket). To delete its objects as well, run the Destroy workflow first.
+```bash
+scripts/hand-over.sh contoso-production
+```
+
+The script opens a pull request that removes the tenant's directory. When it
+is merged, the Apply workflow moves the tenant's state to `handed-over/` on
+the `terraform-state` branch: nothing plans against the tenant again, and its
+objects stay in Jamf exactly as they are. Delete its two Environments
+afterwards. To delete the objects as well, run the Destroy workflow first.
+(With another backend, remove the tenant's state object there yourself.)
+
+## A stuck lock
+
+Every run locks the tenant's state and unlocks it when it ends. A cancelled
+or crashed run can leave the lock behind, as a branch named
+`locks/tenants/<tenant>/terraform.tfstate`. Every later run for that tenant
+then fails at Init with "Error loading state: Failed to get state … giving
+up". Check under Actions that no run is still working on the tenant, then run
+the **Force unlock** workflow with the tenant's name, typed twice. It shows
+who held the lock and when, deletes it, and waits for any run still in
+progress on the tenant first, so a lock in use is never taken away.

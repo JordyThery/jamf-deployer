@@ -1,0 +1,136 @@
+name: Not in code
+
+# Weekly (and on demand): lists the objects in each Jamf tenant that this
+# repository does not manage, such as a policy someone created by hand. Only
+# the object types a tenant's code manages are compared. When something turns
+# up, an issue titled "Not in code: <tenant>" lists it, with import blocks to
+# bring it under management and ignore lines to leave it alone. The issue
+# closes when a later run finds nothing. Uses `terraform query` (Terraform
+# 1.14 or later); tenants on the Jamf Pro API are skipped, because their
+# plugin cannot list objects.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC, after the change check
+  workflow_dispatch:
+
+permissions:
+  contents: write   # the state backend writes lock branches
+  issues: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      tenants: ${{ steps.detect.outputs.tenants }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        uses: ./.github/actions/detect-tenants
+        with:
+          all: "true"
+
+  check:
+    needs: detect
+    if: needs.detect.outputs.tenants != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tenant: ${{ fromJson(needs.detect.outputs.tenants) }}
+    environment:
+      name: ${{ matrix.tenant }}
+    concurrency:
+      group: tenant-${{ matrix.tenant }}
+      cancel-in-progress: false
+    env:
+      TENANT: ${{ matrix.tenant }}
+      # Credentials from the tenant's Environment: JAMFPLATFORM_* for tenants
+      # on the Jamf Platform API, JAMFPRO_* for tenants on the Jamf Pro API.
+      # The set a tenant does not use stays empty.
+      JAMFPLATFORM_BASE_URL: ${{ vars.JAMFPLATFORM_BASE_URL }}
+      JAMFPLATFORM_ENVIRONMENT_ID: ${{ vars.JAMFPLATFORM_ENVIRONMENT_ID }}
+      JAMFPLATFORM_TENANT_ID: ${{ vars.JAMFPLATFORM_TENANT_ID }}   # older tenant-scope clients
+      JAMFPLATFORM_CLIENT_ID: ${{ secrets.JAMFPLATFORM_CLIENT_ID }}
+      JAMFPLATFORM_CLIENT_SECRET: ${{ secrets.JAMFPLATFORM_CLIENT_SECRET }}
+      JAMFPRO_INSTANCE_FQDN: ${{ vars.JAMFPRO_INSTANCE_FQDN }}
+      JAMFPRO_AUTH_PROVIDER: direct
+      JAMFPRO_AUTH_METHOD: ${{ vars.JAMFPRO_AUTH_METHOD }}
+      JAMFPRO_CLIENT_ID: ${{ secrets.JAMFPRO_CLIENT_ID }}
+      JAMFPRO_CLIENT_SECRET: ${{ secrets.JAMFPRO_CLIENT_SECRET }}
+      JAMFPRO_BASIC_USERNAME: ${{ secrets.JAMFPRO_BASIC_USERNAME }}
+      JAMFPRO_BASIC_PASSWORD: ${{ secrets.JAMFPRO_BASIC_PASSWORD }}
+      # Tenants with Jamf Protect blocks also need these.
+      JAMFPROTECT_URL: ${{ vars.JAMFPROTECT_URL }}
+      JAMFPROTECT_CLIENT_ID: ${{ secrets.JAMFPROTECT_CLIENT_ID }}
+      JAMFPROTECT_CLIENT_SECRET: ${{ secrets.JAMFPROTECT_CLIENT_SECRET }}
+      # The Jamf Pro API plugin needs one operation at a time: those tenants
+      # set PARALLELISM to 1 in their Environment.
+      TF_CLI_ARGS_plan: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_apply: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_destroy: -parallelism=${{ vars.PARALLELISM || '10' }}
+      GH_TOKEN: ${{ github.token }}
+      TITLE: "Not in code: ${{ matrix.tenant }}"
+    steps:
+      - uses: actions/checkout@v4
+      - id: connection
+        run: |
+          if grep -q '"jamf/jamfplatform"' "tenants/$TENANT/terraform.tf"; then
+            echo "listable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "listable=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$TENANT connects through the Jamf Pro API, whose plugin cannot list objects; skipped."
+          fi
+      - if: steps.connection.outputs.listable == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TERRAFORM_VERSION || 'latest' }}
+          terraform_wrapper: false
+      - if: steps.connection.outputs.listable == 'true'
+        uses: ./.github/actions/state-backend
+        with:
+          tenant: ${{ env.TENANT }}
+      - if: steps.connection.outputs.listable == 'true'
+        uses: ./.github/actions/secret-settings
+        with:
+          secrets: ${{ toJSON(secrets) }}
+      - name: Init
+        if: steps.connection.outputs.listable == 'true'
+        run: terraform -chdir="tenants/$TENANT" init -input=false
+      - name: List objects and compare
+        id: compare
+        if: steps.connection.outputs.listable == 'true'
+        working-directory: tenants/${{ env.TENANT }}
+        run: |
+          python3 "$GITHUB_WORKSPACE/.github/scripts/not_in_code.py"
+          cat "$RUNNER_TEMP/not-in-code.md"
+      - name: Keep the full report
+        if: steps.compare.outputs.found != '' && steps.compare.outputs.found != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: not-in-code-${{ matrix.tenant }}
+          path: ${{ runner.temp }}/not-in-code.md
+      - name: Open or update the issue
+        if: steps.compare.outputs.found != '' && steps.compare.outputs.found != '0'
+        run: |
+          gh label create not-in-code --color FBCA04 --description "In Jamf, not in this repository" 2>/dev/null || true
+          {
+            echo "These objects are in Jamf for \`$TENANT\`, but this repository does not manage them."
+            echo
+            cat "$RUNNER_TEMP/not-in-code-issue.md"
+          } > "$RUNNER_TEMP/body.md"
+          number=$(gh issue list --state open --label not-in-code --search "\"$TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --title "$TITLE" --label not-in-code --body-file "$RUNNER_TEMP/body.md"
+          fi
+      - name: Close a resolved issue
+        if: steps.compare.outputs.found == '0'
+        run: |
+          number=$(gh issue list --state open --label not-in-code --search "\"$TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue close "$number" --comment "The latest run found every object managed or ignored."
+          fi
