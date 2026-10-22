@@ -345,6 +345,46 @@ README.md               how to set it up and run it
   tenant's plan on the pull request; a reviewer approves a diff, not a
   description of one; merging applies exactly that.
 
+### Where Terraform runs
+
+There is no Terraform server to install or keep running. Terraform is a
+command-line program: every workflow run starts a fresh GitHub-hosted machine
+(`ubuntu-latest`), installs Terraform on it (`hashicorp/setup-terraform`, the
+version in the repository's `TERRAFORM_VERSION` variable, else the latest),
+reads the tenant's state, plans or applies, and the machine is thrown away.
+Nothing about your tenants lives on it between runs.
+
+Two choices are separate: **where Terraform runs** and **where the state
+lives**. The export answers both with GitHub alone:
+
+| | The export's default | Alternatives |
+| --- | --- | --- |
+| **Where it runs** | GitHub-hosted runners | Your own Mac (stage 2); [self-hosted runners](https://docs.github.com/en/actions/concepts/runners/self-hosted-runners) on a machine you manage; [HCP Terraform](https://developer.hashicorp.com/terraform/tutorials/cloud-get-started), which runs plans and applies for you; GitLab CI or Azure DevOps Pipelines, with the workflows rewritten; pull request runners such as [Atlantis](https://www.runatlantis.io/) |
+| **Where the state lives** | The repository's `terraform-state` branch | S3 with encryption, HCP Terraform, or any [backend](https://developer.hashicorp.com/terraform/language/backend) Terraform supports; see [Growing up](#growing-up) |
+
+- **Cost:** GitHub-hosted runners are billed in
+  [Actions minutes](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+  on private repositories; GitHub Free includes 2,000 a month, Team 3,000.
+  A run takes a minute or two, so a fleet's plans, applies and weekly checks
+  usually stay inside that.
+- **Self-hosted runners** are for networks GitHub's machines cannot reach.
+  Jamf Cloud instances and the Jamf Platform API are on the internet, so most
+  setups never need one; an on-premises Jamf Pro behind a firewall does.
+- **HCP Terraform** is the closest thing to hosted Terraform: it keeps the
+  state, locks it, runs plans and shows them in its own interface. GitHub
+  then only triggers runs, and credentials move from GitHub Environments
+  into HCP Terraform workspaces, one per tenant.
+- **Another Git host** works the same way in principle, but the exported
+  workflows and Environments are GitHub's; Jamf's
+  [GitLab CI/CD walkthrough](https://www.jamf.com/blog/automate-apple-endpoints-terraform-gitlab-cicd-jamf-pro/)
+  shows the equivalent pipeline there.
+
+HashiCorp's [Running Terraform in automation](https://developer.hashicorp.com/terraform/tutorials/automation/automate-terraform)
+covers the general practice behind all of these, and
+[Automate Terraform with GitHub Actions](https://developer.hashicorp.com/terraform/tutorials/automation/github-actions)
+builds the same plan-on-pull-request, apply-on-merge pipeline with HCP
+Terraform instead of the state branch.
+
 **From the app:** on the dashboard, choose **Export as Terraform…**, tick the
 tenants and an empty folder. **Keep managing here** writes the repository to
 read and run `terraform validate` against; nothing moves. **Move to a

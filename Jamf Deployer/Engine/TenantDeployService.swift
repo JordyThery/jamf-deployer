@@ -282,7 +282,7 @@ final class TenantDeployService {
         let script = environmentScript(for: tenants, exports: exports, folders: folders)
         let templates = EngineLocator.exportTemplatesURL
         try await Task.detached {
-            try StandaloneExport.write(exports, templatesURL: templates, to: folder)
+            try StandaloneExport.write(exports, templatesURL: templates, to: folder, repository: remote)
             let url = folder.appending(path: "create-environments.sh")
             try Data(script.utf8).write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)

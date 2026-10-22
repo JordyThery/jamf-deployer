@@ -1,5 +1,7 @@
 # Jamf tenants as code
 
+<!-- status badges -->
+
 This repository manages Jamf tenants with Terraform (or OpenTofu). It was
 exported from Jamf Deployer: the tenants chosen in the app are here, with the
 same objects and the same state, so nothing is recreated.
@@ -25,6 +27,7 @@ scripts/                  new-tenant.sh and hand-over.sh, run on your Mac
                           force unlock, destroy
 .github/actions/          the state backend, tenant detection and secret settings the workflows share
 .github/scripts/          the Not in code comparison
+.github/pull_request_template.md   the questions every pull request answers
 ```
 
 ## How changes flow

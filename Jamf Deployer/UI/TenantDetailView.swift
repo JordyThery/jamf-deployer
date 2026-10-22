@@ -119,6 +119,11 @@ struct TenantDetailView: View {
                             .font(.callout)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(4)
+                            if let url = tenant.exportedTo.flatMap(Self.repositoryPage) {
+                                Link("Open Repository", destination: url)
+                                    .padding(.horizontal, 4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
 
@@ -132,6 +137,9 @@ struct TenantDetailView: View {
 
                     GroupBox("Connection") {
                         VStack(alignment: .leading, spacing: 6) {
+                            TerraformTerm(tenant.isJamfPro
+                                ? "the deploymenttheory/jamfpro provider, credentials from environment variables"
+                                : "the jamf/jamfplatform provider, credentials from environment variables")
                             if tenant.isJamfPro {
                                 LabeledContent("Connected through", value: "Jamf Pro API")
                                 LabeledContent("Jamf Pro URL", value: tenant.jamfProURL ?? "")
@@ -251,11 +259,13 @@ struct TenantDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(4)
                     } label: {
-                        Text("Add from the catalog")
+                        TermLabel(title: "Add from the catalog", term: "one module block per building block in main.tf")
                     }
 
                     if let deploy = tenant.lastDeploy {
                         GroupBox("Last deploy") {
+                            TerraformTerm("the last apply")
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             HStack(spacing: 8) {
                                 (deploy.failed == 0 ? StatusIndicator.success : .warning).icon
                                 Text("\(deploy.date.formatted(.relative(presentation: .named))) by \(deploy.engineerName) — \(deploy.succeeded) succeeded, \(deploy.failed) failed")
@@ -411,8 +421,18 @@ struct TenantDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
         } label: {
-            Text("Managed in this tenant")
+            TermLabel(title: "Managed in this tenant", term: "resources in the state; adopted objects arrive through import blocks")
         }
+    }
+
+    /// The web page of the repository a tenant moved to: its GitHub page for
+    /// any GitHub remote form, otherwise the remote itself when it is a web URL.
+    private static func repositoryPage(_ remote: String) -> URL? {
+        if let github = GitHubRepository(remote: remote) {
+            return github.webURL
+        }
+        guard let url = URL(string: remote), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
     }
 
     private func handOverMessage(_ tenant: Tenant) -> String {
@@ -522,8 +542,8 @@ struct TenantDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(4)
             } label: {
-                HStack {
-                    Text("Changes made in Jamf")
+                HStack(alignment: .firstTextBaseline) {
+                    TermLabel(title: "Changes made in Jamf", term: "a refresh-only plan against what is in Jamf")
                     if let checked = tenant.lastDriftCheck {
                         Text("· checked \(checked.formatted(.relative(presentation: .named)))")
                             .foregroundStyle(.secondary)

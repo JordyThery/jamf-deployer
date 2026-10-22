@@ -2160,3 +2160,33 @@ struct TerminalScriptTests {
         #expect(!script.contains("plan -input"))
     }
 }
+
+@Suite("GitHub repository")
+struct GitHubRepositoryTests {
+    @Test func readsEveryRemoteForm() {
+        for remote in ["https://github.com/acme/jamf-tenants.git", "https://github.com/acme/jamf-tenants",
+                       "git@github.com:acme/jamf-tenants.git", "ssh://git@github.com/acme/jamf-tenants.git"] {
+            let repository = GitHubRepository(remote: remote)
+            #expect(repository?.owner == "acme" && repository?.name == "jamf-tenants", "\(remote)")
+            #expect(repository?.webURL.absoluteString == "https://github.com/acme/jamf-tenants")
+        }
+        #expect(GitHubRepository(remote: "https://gitlab.com/acme/jamf-tenants.git") == nil)
+        #expect(GitHubRepository(remote: "https://github.com/acme") == nil)
+    }
+
+    @Test func fillsOrRemovesTheBadgeLine() throws {
+        let readme = FileManager.default.temporaryDirectory.appending(path: "readme-\(UUID().uuidString).md")
+        defer { try? FileManager.default.removeItem(at: readme) }
+        let template = "# Jamf tenants as code\n\n<!-- status badges -->\n\nThis repository\n"
+
+        try Data(template.utf8).write(to: readme)
+        try StandaloneExport.fillStatusBadges(in: readme, repository: "git@github.com:acme/fleet.git")
+        let filled = try String(contentsOf: readme, encoding: .utf8)
+        #expect(filled.contains("[![Apply](https://github.com/acme/fleet/actions/workflows/apply.yml/badge.svg)](https://github.com/acme/fleet/actions/workflows/apply.yml)"))
+        #expect(filled.contains("reconcile.yml/badge.svg") && !filled.contains("<!--"))
+
+        try Data(template.utf8).write(to: readme)
+        try StandaloneExport.fillStatusBadges(in: readme, repository: nil)
+        #expect(try String(contentsOf: readme, encoding: .utf8) == "# Jamf tenants as code\n\nThis repository\n")
+    }
+}

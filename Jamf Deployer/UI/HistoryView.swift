@@ -70,6 +70,12 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("History")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            TerraformTerm("each entry is one apply; in a repository, the Git history of main")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+        }
         .task {
             reload()
         }
