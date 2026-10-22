@@ -47,7 +47,9 @@ scripts/                  new-tenant.sh and hand-over.sh, run on your Mac
    the code does not know. The issue holds their configuration (a
    `resource` and an `import` block each) to paste into a new file in the
    tenant's directory in a pull request, and lines for the tenant's
-   `not-in-code.ignore` to leave them alone. It uses `terraform query` (Terraform 1.14 or later) and skips
+   `not-in-code.ignore` to leave them alone. That configuration includes
+   what the objects contain, such as script bodies and profile payloads, one
+   more reason to keep the repository private. It uses `terraform query` (Terraform 1.14 or later) and skips
    tenants on the Jamf Pro API, whose plugin cannot list objects.
 5. **Destroy** is manual: run the workflow and type the tenant name twice.
 
@@ -162,6 +164,13 @@ opens a pull request. Its plan shows everything the new tenant gets before
 anything is created. It needs git and the GitHub CLI, signed in. The template
 uses the first tenant's connection; for a tenant on the other API, copy a
 tenant directory of that kind instead.
+
+The directory name ties a tenant to its state, Environments and issues.
+Renaming the directory alone looks like a new, empty tenant, whose first
+apply would create everything again: to rename one, also move
+`tenants/<old>/terraform.tfstate` to the new name on the `terraform-state`
+branch and create its two Environments under the new name (GitHub cannot
+rename them), before merging.
 
 ## Stopping managing a tenant
 

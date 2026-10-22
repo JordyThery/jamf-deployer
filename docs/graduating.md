@@ -386,6 +386,10 @@ locals {
 }
 ```
 
+A block comes in two versions, one per plugin: tenants on the Jamf Pro API
+use the one in `modules/categories/jamfpro/`. Make the same change there,
+or those tenants plan no changes.
+
 Open the pull request. Because a module changed, the Plan workflow plans
 **every** tenant, and posts one comment per tenant: each should read
 `1 to add`. A tenant whose plan says something else is worth a look before
@@ -439,6 +443,13 @@ tenant's `not-in-code.ignore`. It needs Terraform 1.14 or later,
 and skips tenants on the Jamf Pro API, whose plugin cannot list objects.
 
 ### Tenants come and go
+
+A tenant's directory name is how the repository knows it: its state, its
+Environments and its issues all use it. Renaming the directory alone looks
+like a new, empty tenant, whose first apply would create everything again.
+To rename one, also move its state file to the new name on the
+`terraform-state` branch and create its two Environments under the new name
+(GitHub cannot rename them), before merging.
 
 - **Add one:** `scripts/new-tenant.sh contoso-production` copies
   `tenants/_template`, creates the tenant's two Environments (asking for each

@@ -119,7 +119,8 @@ jobs:
         run: |
           set -euo pipefail
           git cat-file -e "${BASE}^{commit}" 2> /dev/null || exit 0
-          removed=$(git diff --name-only --diff-filter=D "$BASE" HEAD -- 'tenants/*/main.tf' \
+          # --no-renames: a renamed tenant directory is a removal here, never a move.
+          removed=$(git diff --no-renames --name-only --diff-filter=D "$BASE" HEAD -- 'tenants/*/main.tf' \
             | cut -d/ -f2 | while read -r t; do [ -d "tenants/$t" ] || echo "$t"; done)
           [ -n "$removed" ] || { echo "No tenant was removed."; exit 0; }
           git config user.name "github-actions[bot]"

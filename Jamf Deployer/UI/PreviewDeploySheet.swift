@@ -327,7 +327,9 @@ struct PreviewDeploySheet: View {
                         .padding(.vertical, 4)
                     }
                 }
-                Text("Run the same plan yourself: in the workspace, ./plan.sh runs it in Terminal with your Keychain credentials. A plan only reads, so nothing in Jamf changes.")
+                Text(deployService.isTeamMode
+                     ? "In Team Mode the state sits behind the app's own state backend, so ./plan.sh cannot run it outside the app; Export as Terraform takes a tenant to a repository you run yourself."
+                     : "Run the same plan yourself: in the workspace, ./plan.sh runs it in Terminal with your Keychain credentials. A plan only reads, so nothing in Jamf changes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

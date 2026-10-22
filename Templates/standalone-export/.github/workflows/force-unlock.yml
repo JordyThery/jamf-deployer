@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   unlock:
-    if: github.ref == 'refs/heads/main' && inputs.tenant == inputs.confirm
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Waits for any run still working on this tenant, so a lock in use is never taken away.
     concurrency:
@@ -35,8 +35,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Release the lock
         shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm }}
         run: |
           set -euo pipefail
+          [ "$TENANT" = "$CONFIRM" ] || { echo "The two names differ; nothing was unlocked."; exit 1; }
           [[ "$TENANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -d "tenants/$TENANT" ] || { echo "No tenant named $TENANT"; exit 1; }
           branch="locks/tenants/$TENANT/terraform.tfstate"
           if ! git ls-remote --exit-code --heads origin "$branch" > /dev/null; then

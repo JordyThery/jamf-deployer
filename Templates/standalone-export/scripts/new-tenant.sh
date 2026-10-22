@@ -20,6 +20,11 @@ cd "$(git rev-parse --show-toplevel)"
 [ ! -e "tenants/$NAME" ] || die "tenants/$NAME already exists."
 command -v gh > /dev/null || die "Install the GitHub CLI first: https://cli.github.com"
 REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+# Checked before anything is created on GitHub, so a rerun starts clean.
+BRANCH="new-tenant/$NAME"
+if git rev-parse -q --verify "refs/heads/$BRANCH" > /dev/null || git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+  die "The branch $BRANCH already exists from an earlier attempt; delete it (git branch -D $BRANCH; git push origin --delete $BRANCH) and run this again."
+fi
 trap 'stty echo 2> /dev/null || true' EXIT INT TERM
 
 ask() { printf '%s: ' "$1" >&2; read -r value; [ -n "$value" ] || value="${2:-}"; printf '%s' "$value"; }
@@ -68,7 +73,7 @@ for name in $(grep -ho 'variable "[a-z0-9_]*"' tenants/_template/variables.tf | 
 done
 
 git fetch -q origin main
-git switch -q -c "new-tenant/$NAME" origin/main
+git switch -q -c "$BRANCH" origin/main
 cp -R tenants/_template "tenants/$NAME"
 echo
 echo "tenants/$NAME is ready. Set its values in tenants/$NAME/tenant.auto.tfvars"
@@ -77,6 +82,6 @@ echo "not get from tenants/$NAME/main.tf. Press Return when done."
 read -r _
 git add "tenants/$NAME"
 git commit -q -m "Add tenant $NAME"
-git push -q -u origin "new-tenant/$NAME"
-gh pr create --base main --head "new-tenant/$NAME" --title "Add tenant $NAME" \
+git push -q -u origin "$BRANCH"
+gh pr create --base main --head "$BRANCH" --title "Add tenant $NAME" \
   --body "Adds the tenant \`$NAME\`. Its plan below shows everything it would get; nothing is created in Jamf until this is merged."

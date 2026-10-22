@@ -5,8 +5,9 @@ Run by .github/workflows/reconcile.yml from a tenant's directory, after
 plugin can list, keeps the types this tenant's code manages, lists them with
 `terraform query`, and compares what Jamf has with the state.
 
-Output: a Markdown report in $RUNNER_TEMP/not-in-code.md and `found=<count>`
-in $GITHUB_OUTPUT. Objects listed in not-in-code.ignore are skipped (one per
+Output: a Markdown report in $RUNNER_TEMP/not-in-code.md, the same report cut
+to fit a GitHub issue in $RUNNER_TEMP/not-in-code-issue.md, and
+`found=<count>` in $GITHUB_OUTPUT. Objects listed in not-in-code.ignore are skipped (one per
 line: `<resource type> <id or name>`; `#` starts a comment).
 """
 import json
@@ -17,6 +18,8 @@ import sys
 
 QUERY_FILE = "not-in-code.tfquery.hcl"
 IGNORE_FILE = "not-in-code.ignore"
+# GitHub caps issue bodies and comments at 65,536 characters.
+ISSUE_LIMIT = 60000
 # Objects every Jamf Pro instance comes with.
 BUILT_IN = {
     "All Managed Clients", "All Managed Servers", "All Managed iPads", "All Managed iPhones",
@@ -97,7 +100,11 @@ def configuration(generated, found):
         body = "\n".join(line for line in body.splitlines() if not line.endswith("= null"))
         text.append(body)
         text.append(f'import {{\n  to       = {kind}.{resource}\n  identity = {{ id = "{object_id}" }}\n}}')
-    return "\n\n".join(text) + "\n"
+    hcl = "\n\n".join(text) + "\n"
+    # Dropping null attributes leaves the alignment off; terraform fmt puts it
+    # back, so the pasted file passes the Plan workflow's format check.
+    formatted = subprocess.run(["terraform", "fmt", "-"], input=hcl, capture_output=True, text=True)
+    return formatted.stdout if formatted.returncode == 0 else hcl
 
 
 def main():
@@ -151,6 +158,17 @@ def main():
             for kind, object_id, name, _ in found:
                 out.write(f"{kind} {object_id}   # {name}\n")
             out.write("```\n")
+    full = open(report).read()
+    with open(os.path.join(os.path.dirname(report), "not-in-code-issue.md"), "w") as issue:
+        if len(full) <= ISSUE_LIMIT:
+            issue.write(full)
+        else:
+            cut = full[:ISSUE_LIMIT].rsplit("\n", 1)[0]
+            if cut.count("```") % 2:
+                cut += "\n```"
+            issue.write(cut + "\n\n**The report is longer than an issue can hold.** The full report, with the "
+                        "configuration of every object, is attached to this workflow run as the "
+                        "`not-in-code-<tenant>` artifact.\n")
     print(f"found={len(found)}", file=open(os.environ["GITHUB_OUTPUT"], "a"))
 
 

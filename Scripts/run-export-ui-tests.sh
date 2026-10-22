@@ -287,12 +287,14 @@ latest_comment() { gh pr view "$1" --repo "$REPO" --json comments --jq '.comment
 
 echo "Stage 4: one change to every tenant (a shared module), merged and applied"
 G checkout -q -b uitest-fleet
-/usr/bin/python3 - "$WORK/clone/modules/categories/main.tf" <<'EDIT'
+# Both versions of the block, as the guide says: Jamf Pro API tenants use jamfpro/.
+/usr/bin/python3 - "$WORK/clone/modules/categories/main.tf" "$WORK/clone/modules/categories/jamfpro/main.tf" <<'EDIT'
 import sys
-p = sys.argv[1]; s = open(p).read()
-old = '"Maintenance", "Security"]'
-assert old in s, "categories list not found"
-open(p, "w").write(s.replace(old, '"Maintenance", "Printers", "Security"]'))
+for p in sys.argv[1:]:
+    s = open(p).read()
+    old = '"Maintenance", "Security"]'
+    assert old in s, "categories list not found in " + p
+    open(p, "w").write(s.replace(old, '"Maintenance", "Printers", "Security"]'))
 EDIT
 G commit -qam "Add a Printers category everywhere"
 G push -q origin uitest-fleet
@@ -318,7 +320,12 @@ answers() {
     if [[ "$CONNECTION" == jamfpro ]]; then
         printf '%s\n' "https://$(kc $A jamfpro-fqdn)" basic "$(kc $A jamfpro-username)" "" "$(kc $A jamfpro-password)" "" ""
     else
-        printf '%s\n' "$(kc $A base-url)" "$(kc $A environment-id)" "$(kc $A client-id)" "" "$(kc $A client-secret)" "" ""
+        printf '%s\n' "$(kc $A base-url)" "$(kc $A environment-id)" "$(kc $A client-id)" "" "$(kc $A client-secret)" ""
+        if [[ "$EXTRAS" == 1 ]]; then
+            printf '%s\n' "$(kc $A protect-url)" "$(kc $A protect-client-id)" "" "$(kc $A protect-client-secret)" ""
+            printf '%s\n' "$TEST_RUNNER_EXPORT_SECRET" ""
+        fi
+        printf '\n'
     fi
 }
 NEW_PR=$(cd "$WORK/clone" && answers | scripts/new-tenant.sh uit-second 2> "$WORK/new-tenant.log" | grep -o 'https://github.com/[^ ]*/pull/[0-9]*')

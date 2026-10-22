@@ -94,7 +94,12 @@ public nonisolated enum TerminalScript {
             "",
             "# The state is encrypted with the passphrase on the tenant's recovery sheet.",
             "passphrase=\"$(secret \(quoted(input.statePassphrase.service)) \(quoted(input.statePassphrase.account)))\"",
-            "passphrase=\"${passphrase//\\\\/\\\\\\\\}\"; passphrase=\"${passphrase//\\\"/\\\\\\\"}\"",
+            // Escaped for an HCL string, as the app's own hclEscaped does.
+            #"passphrase=${passphrase//\\/\\\\}"#,
+            #"passphrase=${passphrase//\"/\\\"}"#,
+            #"passphrase=${passphrase//\$\{/\$\$\{}"#,
+            #"passphrase=${passphrase//\%\{/\%\%\{}"#,
+            #"passphrase=${passphrase//$'\n'/\\n}"#,
             "export TF_ENCRYPTION=\"",
             "key_provider \\\"pbkdf2\\\" \\\"passphrase\\\" {",
             "  passphrase = \\\"$passphrase\\\"",

@@ -104,6 +104,12 @@ jobs:
         run: |
           python3 "$GITHUB_WORKSPACE/.github/scripts/not_in_code.py"
           cat "$RUNNER_TEMP/not-in-code.md"
+      - name: Keep the full report
+        if: steps.compare.outputs.found != '' && steps.compare.outputs.found != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: not-in-code-${{ matrix.tenant }}
+          path: ${{ runner.temp }}/not-in-code.md
       - name: Open or update the issue
         if: steps.compare.outputs.found != '' && steps.compare.outputs.found != '0'
         run: |
@@ -111,7 +117,7 @@ jobs:
           {
             echo "These objects are in Jamf for \`$TENANT\`, but this repository does not manage them."
             echo
-            cat "$RUNNER_TEMP/not-in-code.md"
+            cat "$RUNNER_TEMP/not-in-code-issue.md"
           } > "$RUNNER_TEMP/body.md"
           number=$(gh issue list --state open --label not-in-code --search "\"$TITLE\" in:title" --json number,title \
             --jq "map(select(.title == env.TITLE)) | .[0].number // empty")
