@@ -1,6 +1,6 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-10-22 (1.0.3). Consolidates the open items from every phase report.
+As of 2026-10-22 (1.0.4). Consolidates the open items from every phase report.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - ADE `.p7m` / VPP `.vpptoken` uploads and Protect registration in Day 0 — wired and spec-verified, needing real Apple/Protect artifacts to fire for the first time.
