@@ -246,6 +246,8 @@ echo "  tenant files: $(ls "$REVIEW/tenants/$TENANT" 2> /dev/null | tr '\n' ' ')
 echo "  modules: $(ls "$REVIEW/modules" 2> /dev/null | tr '\n' ' ')"
 echo "  workflows: $(ls "$REVIEW/.github/workflows" 2> /dev/null | tr '\n' ' ')"
 echo "  not a Git repository: $([[ -d "$REVIEW/.git" ]] && echo no || echo yes)"
+echo "  pull request template: $([[ -f "$REVIEW/.github/pull_request_template.md" ]] && echo yes || echo no)"
+echo "  README without badges or marker: $(grep -qE 'badge.svg|<!-- status badges -->' "$REVIEW/README.md" && echo no || echo yes)"
 if [[ -x "$TF" ]]; then
     "$TF" fmt -check -recursive "$REVIEW" > /dev/null && echo "  terraform fmt: clean" || { echo "  terraform fmt: NOT clean"; "$TF" fmt -check -recursive "$REVIEW" | sed 's/^/    /'; }
     "$TF" -chdir="$REVIEW/tenants/$TENANT" init -backend=false -input=false > /dev/null 2>&1
@@ -257,6 +259,9 @@ run test03MoveToRepository
 echo "Repository after the move:"
 echo "  branches: $(gh api "repos/$REPO/branches" --jq '[.[].name] | join(", ")')"
 echo "  tenant files on main: $(gh api "repos/$REPO/contents/tenants/$TENANT?ref=main" --jq '[.[].name] | join(", ")' 2> /dev/null)"
+README_MAIN="$(gh api "repos/$REPO/contents/README.md?ref=main" --jq .content 2> /dev/null | base64 -d)"
+echo "  status badges on main: $(grep -o "github.com/$REPO/actions/workflows/[a-z-]*.yml/badge.svg" <<< "$README_MAIN" | sed 's|.*/workflows/||; s|/badge.svg||' | tr '\n' ' ')"
+echo "  pull request template on main: $(gh api "repos/$REPO/contents/.github/pull_request_template.md?ref=main" --jq .name 2> /dev/null || echo no)"
 echo "  create-environments.sh committed: $(gh api "repos/$REPO/contents/create-environments.sh?ref=main" --jq .name 2> /dev/null || echo no)"
 gh api "repos/$REPO/contents/tenants/$TENANT/terraform.tfstate?ref=terraform-state" --jq .content 2> /dev/null | base64 -d \
     | /usr/bin/python3 -c "import json,sys; s=json.load(sys.stdin); print('  state resources:', len(s['resources']), '| providers:', sorted({r['provider'] for r in s['resources']}))"

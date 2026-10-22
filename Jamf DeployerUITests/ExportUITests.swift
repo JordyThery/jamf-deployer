@@ -74,10 +74,15 @@ final class ExportUITests: DeployerUITestCase {
                       "The baseline did not deploy")
     }
 
-    /// With technical details on (set by the script), a preview shows the
-    /// commands it ran and the generated configuration.
+    /// With technical details on (set by the script), the tenant page names
+    /// each section's Terraform equivalent, and a preview shows the commands
+    /// it ran and the generated configuration.
     func test01bPreviewShowsTheEngineWork() throws {
         openTenant(Self.tenant)
+        for term in ["Terraform: the jamf", "Terraform: one module block per building block",
+                     "Terraform: resources in the state", "Terraform: the last apply"] {
+            XCTAssertTrue(anyContaining(term).waitForExistence(timeout: 10), "The tenant page does not show \"\(term)\"")
+        }
         tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
         XCTAssertTrue(anyContaining("Behind this preview").waitForExistence(timeout: 300), "The preview shows no engine details")
         XCTAssertTrue(anyContaining("tofu plan -input=false -out=plan.bin -json").exists, "The plan command is not shown")
@@ -122,6 +127,8 @@ final class ExportUITests: DeployerUITestCase {
         openTenant(Self.tenant)
         XCTAssertTrue(anyContaining("moved to the Terraform repository").waitForExistence(timeout: 10),
                       "The tenant is not shown as moved")
+        XCTAssertTrue(app.links["Open Repository"].exists || app.buttons["Open Repository"].exists,
+                      "The moved tenant has no Open Repository link")
     }
 
     func test04RemoveTenantAndCatalog() throws {
