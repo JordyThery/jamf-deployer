@@ -14,7 +14,7 @@ The app ships the blocks that carry **no configuration opinions of their own** �
 | **Jamf Protect Baseline** | Endpoint security to a safe starting point: telemetry, alert forwarding, an exception set, and a plan in report-only mode. Needs a connected Jamf Protect tenant. | High |
 | **Security Cloud** | Connects Jamf Security Cloud to the tenant (UEM Connect), or uses the connection it already has, and creates a Mac activation profile. Security Cloud holds one UEM Connect per tenant: when it is already linked to Jamf Pro, set **UEM Connect** to *Use the existing connection*. Needs a Security Cloud entitlement. | Medium |
 
-Every block deploys through the Jamf Platform API. App Catalog and Jamf Protect Baseline also deploy to tenants connected through the Jamf Pro API; the App Store blocks and Security Cloud need the Platform API.
+Blocks deploy through the Jamf Platform API — except Jamf Protect Baseline, which deploys through the Jamf Protect API. App Catalog and Jamf Protect Baseline also work on tenants connected through the Jamf Pro API; the App Store blocks and Security Cloud need the Platform API.
 
 Opinionated configuration — what your FileVault, enrollment or update policy should look like — comes from catalogs you follow: capture blocks from a tenant, or publish a catalog repository for your team. Tenants pin the release tag they use, so a published update never changes a tenant until you opt in. The **[demo catalog](https://github.com/JordyThery/jamf-deployer-catalog)** is a worked example and the template for publishing your own.
 

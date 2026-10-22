@@ -1,0 +1,36 @@
+{
+  "alwaysOn": true,
+  "category": "Core",
+  "conflicts": [],
+  "id": "uit-always-on",
+  "minJamfProVersion": "11.31.0",
+  "name": "UIT Always On",
+  "objectsCreated": [
+    "1 category"
+  ],
+  "permissions": [
+    "categories:create",
+    "categories:read",
+    "categories:update",
+    "categories:delete"
+  ],
+  "jamfProPermissions": [
+    "Create Categories",
+    "Read Categories",
+    "Update Categories",
+    "Delete Categories"
+  ],
+  "products": [
+    "jamf-pro",
+    "jamf-platform"
+  ],
+  "provides": {},
+  "requires": [],
+  "risk": "low",
+  "scope": {
+    "kind": "none"
+  },
+  "settings": [],
+  "summary": "Test block: always on, so every tenant deploys its one category without selecting it.",
+  "version": "1.0.0"
+}

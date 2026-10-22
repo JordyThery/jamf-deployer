@@ -57,7 +57,7 @@ public nonisolated enum StandaloneExport {
             }
         }
         base = base.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        if base.isEmpty || base == "_template" { base = "tenant" }
+        if base.isEmpty { base = "tenant" }
         var candidate = base
         var number = 2
         while taken.contains(candidate) {
@@ -88,10 +88,13 @@ public nonisolated enum StandaloneExport {
             }
             var taken: Set<String> = []
             for key in keys.sorted() {
-                var name = "\(id)-v\(versions[key] ?? "")"
+                // The version lands in a folder name; catalogs are not
+                // trusted to keep path separators out of it.
+                let version = (versions[key] ?? "").filter { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" }
+                var name = "\(id)-v\(version)"
                 var number = 2
                 while taken.contains(name) {
-                    name = "\(id)-v\(versions[key] ?? "")-\(number)"
+                    name = "\(id)-v\(version)-\(number)"
                     number += 1
                 }
                 taken.insert(name)
@@ -138,7 +141,9 @@ public nonisolated enum StandaloneExport {
                 case .secret(let variable): pairs.append((argument.key, "var.\(variable.lowercased())"))
                 }
             }
-            var comment = "# \(names[call.blockID] ?? call.blockID)"
+            let title = (names[call.blockID] ?? call.blockID)
+                .components(separatedBy: .newlines).joined(separator: " ")
+            var comment = "# \(title)"
             let used = Set(call.arguments.compactMap { argument -> String? in
                 guard case .reference(let expression) = argument.value,
                       let match = expression.firstMatch(of: /module\.([A-Za-z0-9_]+)\./) else { return nil }

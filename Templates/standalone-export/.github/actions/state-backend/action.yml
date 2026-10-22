@@ -58,6 +58,11 @@ runs:
           (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && break
           sleep 0.2
         done
+        if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+          echo "The state backend did not start:"
+          cat "$dir/backend.log"
+          exit 1
+        fi
 
         address="http://127.0.0.1:$port/?type=git&repository=https://github.com/${GITHUB_REPOSITORY}.git&ref=${STATE_BRANCH}&state=tenants/${TENANT}/terraform.tfstate"
         {

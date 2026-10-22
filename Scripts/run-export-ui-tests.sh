@@ -139,9 +139,13 @@ export TEST_RUNNER_EXPORT_REPOSITORY="https://github.com/$REPO.git"
 export TEST_RUNNER_EXPORT_REVIEW_DIR="$REVIEW"
 export TEST_RUNNER_EXPORT_MOVE_DIR="$MOVE"
 
-# The demo catalog as a local release.
+# The demo catalog as a local release, plus an always-on test block that
+# every tenant deploys without selecting it.
 git clone -q "${CATALOG_SOURCE:-https://github.com/JordyThery/jamf-deployer-catalog}" "$WORK/work"
 git -C "$WORK/work" tag -l | xargs git -C "$WORK/work" tag -d > /dev/null
+cp -R "$HELPERS/uit-always-on" "$WORK/work/blocks/"
+git -C "$WORK/work" add blocks/uit-always-on
+git -C "$WORK/work" -c user.name=uitest -c user.email=uitest@localhost commit -qm "UIT always-on block"
 if [[ "$EXTRAS" == 1 ]]; then
     cp -R "$HELPERS/uit-secret-marker" "$WORK/work/blocks/"
     git -C "$WORK/work" add blocks/uit-secret-marker
@@ -188,6 +192,7 @@ TOFU="$(find ~/Library/Developer/Xcode/DerivedData/Jamf_Deployer-*/Build/Product
 set +e
 run test01ConnectAndDeploy
 jp "print('  in Jamf:', len(cats), 'categories,', len(eas), 'attributes')"
+jp "print('  always-on block deployed without being selected:', any(c['name'] == 'UIT EX - Always On' for c in cats))"
 run test01bPreviewShowsTheEngineWork
 echo "  plan.sh written next to main.tf: $(ls "$HOME/Library/Application Support/Jamf Deployer/store/tenants/"*/generated/plan.sh 2> /dev/null | wc -l | tr -d ' ')"
 
@@ -310,6 +315,19 @@ echo "  plan Environment deployments: $(gh api "repos/$REPO/deployments?environm
 gh pr merge "$PR_URL" --repo "$REPO" --merge --delete-branch > /dev/null
 wait_run apply.yml
 jp "print('  Printers in Jamf:', any(c['name'] == 'UIT EX - Printers' for c in cats))"
+
+echo "Stage 4: a change made in Jamf, restored by labelling its issue"
+jp "c = next(c for c in cats if c['name'] == 'UIT EX - Always On'); call('PUT', '/api/v1/categories/' + c['id'], {'name': c['name'], 'priority': 3}); print('  changed the always-on category in Jamf')"
+gh workflow run drift.yml --repo "$REPO" --ref main > /dev/null; wait_run drift.yml
+ISSUE=$(gh issue list --repo "$REPO" --state open --label drift --json number,title --jq "map(select(.title == \"Changed in Jamf: $TENANT\")) | .[0].number // empty")
+echo "  change issue opened: ${ISSUE:-no}"
+if [[ -n "$ISSUE" ]]; then
+    gh label create restore-baseline --repo "$REPO" --force > /dev/null 2>&1
+    gh issue edit "$ISSUE" --repo "$REPO" --add-label restore-baseline > /dev/null
+    wait_run restore.yml
+    echo "  issue closed by the restore: $(gh issue view "$ISSUE" --repo "$REPO" --json state --jq '.state == "CLOSED"')"
+    jp "print('  priority back in Jamf:', next(c for c in cats if c['name'] == 'UIT EX - Always On')['priority'] == 9)"
+fi
 
 echo "Stage 4: an object made outside the code"
 jp "call('POST', '/api/v1/categories', {'name': 'UIT EX - Hand made', 'priority': 9}); print('  made a category by hand')"

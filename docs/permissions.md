@@ -83,8 +83,9 @@ Instances** and **Read Volume Purchasing Locations** (for a user account, the Re
 on those object types); the preflight names any
 that are missing. Adopting, checking for changes and deploying need read —
 and for deploys create, update and delete — on the object types you manage.
-Each block's detail view lists the Jamf Pro API privileges its Jamf Pro API
-version needs.
+A block's detail view lists the Jamf Pro API privileges its Jamf Pro API
+version declares. App Catalog deployments (Jamf Pro's App Installers) have no
+privileges of their own: they come under **Mac Applications**.
 Day 0 actions need the same privileges as listed above, in their Jamf Pro
 API role form.
 
@@ -124,8 +125,8 @@ Protect deployment sync, under the Platform client above.
   tenant's GitHub Environment holds its own API client, and only `main` may
   use it. Pull request plans use the tenant's `<tenant>-plan` Environment,
   which any branch can reach; a read-only API client is enough there.
-- The **Not in code** workflow lists objects with the read privileges plans
-  already use; it changes nothing.
+- The **Not in code** workflow runs in the tenant's full-credential
+  Environment, but only lists objects: it changes nothing in Jamf.
 - `scripts/new-tenant.sh` and `scripts/hand-over.sh` run on your Mac with
   your own GitHub CLI sign-in: creating Environments needs admin access to
   the repository.

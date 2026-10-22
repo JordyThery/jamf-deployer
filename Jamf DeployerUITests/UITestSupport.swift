@@ -131,7 +131,7 @@ class DeployerUITestCase: XCTestCase {
         let region = environment["\(prefix)_REGION"] ?? "US"
 
         if app.outlines.staticTexts[name].exists { return }
-        tap(app.toolbars.buttons["Connect a Tenant"])
+        tap(app.toolbars.buttons["Connect a Tenant…"])
 
         type(name, into: field("Contoso Production"))
         tap(app.sheets.popUpButtons.matching(NSPredicate(format: "value == 'EU'")).firstMatch)
@@ -163,7 +163,7 @@ class DeployerUITestCase: XCTestCase {
         let password = try env(apiClient ? "\(prefix)_CLIENT_SECRET" : "\(prefix)_PASSWORD")
 
         if app.outlines.staticTexts[name].exists { return }
-        tap(app.toolbars.buttons["Connect a Tenant"])
+        tap(app.toolbars.buttons["Connect a Tenant…"])
         type(name, into: field("Contoso Production"))
         tap(app.sheets.popUpButtons.matching(NSPredicate(format: "value == 'Jamf Platform API'")).firstMatch)
         tap(app.menuItems["Jamf Pro API"])

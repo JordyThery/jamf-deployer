@@ -16,6 +16,7 @@ actor GitStoreService {
         case gitUnavailable
         case commandFailed(String, output: String)
         case pushRejected
+        case remoteHasCredentials
 
         var errorDescription: String? {
             switch self {
@@ -25,6 +26,8 @@ actor GitStoreService {
                 "Git \(command) failed: \(output.prefix(300))"
             case .pushRejected:
                 "The team space moved while this Mac was working. Sync and try again."
+            case .remoteHasCredentials:
+                "Remove the credentials from the repository URL. Git uses your own sign-in (SSH key or gh auth login)."
             }
         }
     }
@@ -44,7 +47,7 @@ actor GitStoreService {
 
     /// Initializes the repo on first use (idempotent) with the ignore rules
     /// and manifest.
-    func ensureRepo() throws {
+    func ensureRepo() async throws {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: storeURL, withIntermediateDirectories: true)
 
@@ -71,65 +74,68 @@ actor GitStoreService {
 
         let isNew = !fileManager.fileExists(atPath: storeURL.appending(path: ".git").path)
         if isNew {
-            try run("init", "--initial-branch", "main")
+            try await run("init", "--initial-branch", "main")
         }
         // Commits need an identity; a Mac without a Git setup (or a store
         // just cloned from a team space) gets the app's own.
-        if ((try? run("config", "user.email")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            try run("config", "user.name", "Jamf Deployer")
-            try run("config", "user.email", "jamf-deployer@localhost")
+        if ((try? await run("config", "user.email")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try await run("config", "user.name", "Jamf Deployer")
+            try await run("config", "user.email", "jamf-deployer@localhost")
         }
         if isNew {
-            _ = try? commitAll(message: "Initialize Jamf Deployer store")
+            _ = try? await commitAll(message: "Initialize Jamf Deployer store")
         }
     }
 
     /// Stages everything and commits when there are changes.
     @discardableResult
-    func commitAll(message: String) throws -> Bool {
-        try run("add", "-A")
-        let status = try run("status", "--porcelain")
+    func commitAll(message: String) async throws -> Bool {
+        try await run("add", "-A")
+        let status = try await run("status", "--porcelain")
         guard !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        try run("commit", "-m", message)
+        try await run("commit", "-m", message)
         return true
     }
 
     // MARK: Remote / team space
 
     var remoteURL: String? {
-        get throws {
-            let output = (try? run("remote", "get-url", "origin")) ?? ""
+        get async throws {
+            let output = (try? await run("remote", "get-url", "origin")) ?? ""
             let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
     }
 
-    func isTeamMode() -> Bool {
-        ((try? remoteURL) ?? nil) != nil
+    func isTeamMode() async -> Bool {
+        ((try? await remoteURL) ?? nil) != nil
     }
 
-    func attachRemote(_ url: String) throws {
-        if ((try? remoteURL) ?? nil) != nil {
-            try run("remote", "set-url", "origin", url)
+    func attachRemote(_ url: String) async throws {
+        // A token in the URL would land on git's arguments and in
+        // .git/config on disk; Git must use the user's own sign-in.
+        guard !RepositoryPublisher.hasCredentials(url) else { throw GitError.remoteHasCredentials }
+        if ((try? await remoteURL) ?? nil) != nil {
+            try await run("remote", "set-url", "origin", url)
         } else {
-            try run("remote", "add", "origin", url)
+            try await run("remote", "add", "origin", url)
         }
-        try run("push", "-u", "origin", "main")
+        try await run("push", "-u", "origin", "main")
     }
 
-    func detachRemote() throws {
-        try run("remote", "remove", "origin")
+    func detachRemote() async throws {
+        try await run("remote", "remove", "origin")
     }
 
-    func pull() throws {
-        guard ((try? remoteURL) ?? nil) != nil else { return }
-        try run("pull", "--rebase", "--autostash", "origin", "main")
+    func pull() async throws {
+        guard ((try? await remoteURL) ?? nil) != nil else { return }
+        try await run("pull", "--rebase", "--autostash", "origin", "main")
     }
 
-    func push() throws {
-        guard ((try? remoteURL) ?? nil) != nil else { return }
+    func push() async throws {
+        guard ((try? await remoteURL) ?? nil) != nil else { return }
         do {
-            try run("push", "origin", "main")
+            try await run("push", "origin", "main")
         } catch let error as GitError {
             if case .commandFailed(_, let output) = error,
                output.contains("rejected") || output.contains("fetch first") || output.contains("non-fast-forward") {
@@ -140,12 +146,12 @@ actor GitStoreService {
     }
 
     /// Publishes local commits, rebasing onto what teammates pushed first.
-    func pushRebasing() throws {
+    func pushRebasing() async throws {
         do {
-            try push()
+            try await push()
         } catch GitError.pushRejected {
-            try pull()
-            try push()
+            try await pull()
+            try await push()
         }
     }
 
@@ -153,22 +159,22 @@ actor GitStoreService {
 
     /// Creates the state branch on the remote when it does not exist yet:
     /// the state backend only writes to an existing branch.
-    func ensureStateBranch() throws {
+    func ensureStateBranch() async throws {
         let branch = StateBackendService.stateBranch
-        let existing = try run("ls-remote", "--heads", "origin", branch)
+        let existing = try await run("ls-remote", "--heads", "origin", branch)
         guard existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         // A one-file root commit, made with plumbing so the store's working
         // tree and main branch are untouched.
         let readme = "# Jamf Deployer state\n\nEngine state for this team space, written by the state backend. Do not edit by hand.\n"
-        let blob = try runWithInput(readme, "hash-object", "-w", "--stdin").trimmingCharacters(in: .whitespacesAndNewlines)
-        let tree = try runWithInput("100644 blob \(blob)\tREADME.md\n", "mktree").trimmingCharacters(in: .whitespacesAndNewlines)
-        let commit = try runWithInput("Create the state branch", "commit-tree", tree).trimmingCharacters(in: .whitespacesAndNewlines)
-        try run("push", "origin", "\(commit):refs/heads/\(branch)")
+        let blob = try await runWithInput(readme, "hash-object", "-w", "--stdin").trimmingCharacters(in: .whitespacesAndNewlines)
+        let tree = try await runWithInput("100644 blob \(blob)\tREADME.md\n", "mktree").trimmingCharacters(in: .whitespacesAndNewlines)
+        let commit = try await runWithInput("Create the state branch", "commit-tree", tree).trimmingCharacters(in: .whitespacesAndNewlines)
+        try await run("push", "origin", "\(commit):refs/heads/\(branch)")
     }
 
     /// The engine's current state locks, one per locked tenant.
-    func stateLocks() -> [UUID: StateBackendService.StateLock] {
-        guard let heads = try? run("ls-remote", "--heads", "origin", "locks/tenants/*") else { return [:] }
+    func stateLocks() async -> [UUID: StateBackendService.StateLock] {
+        guard let heads = try? await run("ls-remote", "--heads", "origin", "locks/tenants/*") else { return [:] }
         var locks: [UUID: StateBackendService.StateLock] = [:]
         for line in heads.split(separator: "\n") {
             guard let ref = line.split(separator: "\t").last.map(String.init),
@@ -177,8 +183,8 @@ actor GitStoreService {
             else { continue }
             let localRef = "refs/jamf-deployer/locks/\(tenantID.uuidString)"
             let path = "tenants/\(tenantID.uuidString)/terraform.tfstate.lock"
-            guard (try? run("fetch", "-q", "--depth", "1", "origin", "+\(ref):\(localRef)")) != nil,
-                  let text = try? run("show", "\(localRef):\(path)"),
+            guard (try? await run("fetch", "-q", "--depth", "1", "origin", "+\(ref):\(localRef)")) != nil,
+                  let text = try? await run("show", "\(localRef):\(path)"),
                   let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
             else { continue }
             locks[tenantID] = StateBackendService.StateLock(
@@ -195,23 +201,35 @@ actor GitStoreService {
     /// `locks/<state path>` branch; while one is left behind, a backend
     /// started fresh cannot even read the state, so the engine's own
     /// force-unlock (which needs init first) cannot release it.
-    func deleteStateLock(tenantID: UUID, lockID: String) throws {
-        guard stateLocks()[tenantID]?.lockID == lockID else { return }
-        try run("push", "-q", "origin", "--delete", "locks/tenants/\(tenantID.uuidString)/terraform.tfstate")
+    func deleteStateLock(tenantID: UUID, lockID: String) async throws {
+        guard await stateLocks()[tenantID]?.lockID == lockID else { return }
+        try await run("push", "-q", "origin", "--delete", "locks/tenants/\(tenantID.uuidString)/terraform.tfstate")
     }
 
     // MARK: Plumbing
 
     @discardableResult
-    private func run(_ arguments: String...) throws -> String {
-        try execute(arguments, input: nil)
+    private func run(_ arguments: String...) async throws -> String {
+        try await execute(arguments, input: nil)
     }
 
-    private func runWithInput(_ input: String, _ arguments: String...) throws -> String {
-        try execute(arguments, input: input)
+    private func runWithInput(_ input: String, _ arguments: String...) async throws -> String {
+        try await execute(arguments, input: input)
     }
 
-    private func execute(_ arguments: [String], input: String?) throws -> String {
+    /// Runs git off the actor: network operations (pull, push, ls-remote)
+    /// can stall for minutes and must not park an executor thread.
+    private func execute(_ arguments: [String], input: String?) async throws -> String {
+        let storeURL = storeURL
+        let logger = logger
+        return try await Task.detached {
+            try Self.executeSync(arguments, input: input, storeURL: storeURL, logger: logger)
+        }.value
+    }
+
+    private nonisolated static func executeSync(
+        _ arguments: [String], input: String?, storeURL: URL, logger: Logger
+    ) throws -> String {
         guard Self.isGitAvailable else { throw GitError.gitUnavailable }
         let process = Process()
         let stdin = Pipe()

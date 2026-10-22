@@ -92,8 +92,7 @@ struct TeamSettingsView: View {
                             .font(.callout.monospaced())
                             .textSelection(.enabled)
                         Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(TeamPassphrase.item.load() ?? "", forType: .string)
+                            Self.copyConcealed(TeamPassphrase.item.load() ?? "")
                         }
                         .controlSize(.small)
                     }
@@ -130,8 +129,7 @@ struct TeamSettingsView: View {
                         .font(.callout.monospaced())
                         .textSelection(.enabled)
                     Button("Copy") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(newPassphrase, forType: .string)
+                        Self.copyConcealed(newPassphrase)
                     }
                     .controlSize(.small)
                 }
@@ -269,7 +267,16 @@ struct TeamSettingsView: View {
             defer { isWorking = false }
             do {
                 try await Self.backUpStore()
-                let imported = try await Task.detached { try Self.join(remote: remote) }.value
+                let imported: Set<UUID>
+                do {
+                    imported = try await Task.detached { try Self.join(remote: remote) }.value
+                } catch {
+                    // The swap can fail after the store moved aside.
+                    try? await Task.detached { try Self.restoreReplacedStore() }.value
+                    tenantStore.reload()
+                    catalogSources.reload()
+                    throw TeamError.joinFailed(Self.describe(error))
+                }
                 do {
                     tenantStore.reload()
                     catalogSources.reload()
@@ -390,19 +397,30 @@ struct TeamSettingsView: View {
     }
 
     /// Puts this Mac's own store back after a join that did not finish.
+    /// Copies a secret to the pasteboard marked concealed, so clipboard
+    /// managers and pasteboard history skip it.
+    private static func copyConcealed(_ text: String) {
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        let pasteboard = NSPasteboard.general
+        pasteboard.declareTypes([.string, concealed], owner: nil)
+        pasteboard.setString(text, forType: .string)
+        pasteboard.setString("", forType: concealed)
+    }
+
     nonisolated static func restoreReplacedStore() throws {
         let fileManager = FileManager.default
         let store = GitStoreService.storeURL
         let retired = store.deletingLastPathComponent().appending(path: "store-replaced")
+        // No retired copy means the swap never happened: leave the store be.
+        guard fileManager.fileExists(atPath: retired.path) else { return }
         try? fileManager.removeItem(at: store)
-        if fileManager.fileExists(atPath: retired.path) {
-            try fileManager.moveItem(at: retired, to: store)
-        }
+        try fileManager.moveItem(at: retired, to: store)
     }
 
     /// Clone to a fresh folder, swap stores, import local tenants. Returns
     /// the imported tenants' IDs.
     nonisolated static func join(remote: String) throws -> Set<UUID> {
+        guard !RepositoryPublisher.hasCredentials(remote) else { throw GitStoreService.GitError.remoteHasCredentials }
         let fileManager = FileManager.default
         let store = GitStoreService.storeURL
         let fresh = store.deletingLastPathComponent().appending(path: "store-joining")
@@ -411,7 +429,7 @@ struct TeamSettingsView: View {
         let clone = Process()
         clone.standardInput = FileHandle.nullDevice
         clone.executableURL = URL(filePath: "/usr/bin/git")
-        clone.arguments = ["clone", "--branch", "main", remote, fresh.path]
+        clone.arguments = ["clone", "--branch", "main", "--", remote, fresh.path]
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
         clone.environment = environment
@@ -447,6 +465,10 @@ struct TeamSettingsView: View {
         try? fileManager.removeItem(at: retired)
         if fileManager.fileExists(atPath: store.path) {
             try fileManager.moveItem(at: store, to: retired)
+        } else {
+            // A marker, so a failed join knows the swap happened and
+            // restores "no store" rather than keeping a half-joined one.
+            try fileManager.createDirectory(at: retired, withIntermediateDirectories: true)
         }
         try fileManager.moveItem(at: fresh, to: store)
         return imported

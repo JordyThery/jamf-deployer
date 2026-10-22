@@ -93,8 +93,8 @@ Each workflow job runs in one of the tenant's Environments, so it can only
 read that tenant's credentials:
 
 - **`<tenant>`**, named after the tenant's directory, holds the credentials
-  that change Jamf. Apply, Restore, Destroy and Check for Changes use it, and
-  its deployment branch policy allows only `main`.
+  that change Jamf. Apply, Restore, Destroy, Check for Changes and Not in
+  code use it, and its deployment branch policy allows only `main`.
 - **`<tenant>-plan`** holds the credentials pull request plans use. Any branch
   can use it, so anyone who can push a branch can read these credentials:
   give it a read-only API client where you can.

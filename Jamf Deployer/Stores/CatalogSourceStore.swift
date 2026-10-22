@@ -3,6 +3,14 @@ import DeployerKit
 import JamfDeployerCore
 import os
 
+enum CatalogSourceError: LocalizedError {
+    case urlHasCredentials
+
+    var errorDescription: String? {
+        "Remove the credentials from the catalog URL. Git uses your own sign-in (SSH key or gh auth login)."
+    }
+}
+
 /// The catalog sources blocks come from: the built-in source plus custom
 /// local folders (captured blocks land in one of these) and Git catalogs
 /// pinned by release tag.
@@ -61,12 +69,27 @@ final class CatalogSourceStore {
     }
 
     init() {
-        customSources = (try? JSONFile.load([CustomSource].self, from: fileURL)) ?? []
+        customSources = load()
     }
 
     /// Re-reads sources from disk — used after a team-space sync.
     func reload() {
-        customSources = (try? JSONFile.load([CustomSource].self, from: fileURL)) ?? []
+        customSources = load()
+    }
+
+    /// Loads the source list. A file that exists but cannot be read is set
+    /// aside (bytes intact) rather than silently overwritten by a later save.
+    private func load() -> [CustomSource] {
+        do {
+            return try JSONFile.load([CustomSource].self, from: fileURL)
+        } catch {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+            let damaged = fileURL.deletingPathExtension().appendingPathExtension("damaged.json")
+            try? FileManager.default.removeItem(at: damaged)
+            try? FileManager.default.moveItem(at: fileURL, to: damaged)
+            logger.error("catalog-sources.json could not be read and was set aside: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
     }
 
     /// Creates (or registers) a local folder as a catalog source, writing
@@ -142,6 +165,7 @@ final class CatalogSourceStore {
     /// Registers a Git catalog source pinned to a starting tag.
     @discardableResult
     func addGitSource(name: String, url: String, tag: String) async throws -> CustomSource {
+        guard !RepositoryPublisher.hasCredentials(url) else { throw CatalogSourceError.urlHasCredentials }
         let id = UUID()
         let cacheRoot = CustomSource.cacheRoot(for: id)
         try await GitCatalogManager.fetchTag(remote: url, tag: tag, into: cacheRoot.appending(path: tag))

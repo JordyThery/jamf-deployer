@@ -22,6 +22,8 @@ struct BaselineEditorView: View {
     /// Preset blocks left out because they cannot deploy through this
     /// tenant's connection.
     @State private var presetSkippedNames: [String] = []
+    /// Why the last unchecking was refused, shown until the next change.
+    @State private var dependencyNotice: String?
 
     private var selectionIndex: [String: BlockSelection] {
         Dictionary(uniqueKeysWithValues: tenant.blockSelections.map { ($0.blockID, $0) })
@@ -59,6 +61,12 @@ struct BaselineEditorView: View {
 
             if !presetSkippedNames.isEmpty {
                 Label("Left out of the preset: \(presetSkippedNames.joined(separator: ", ")). These blocks need \(otherConnectionName).", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let dependencyNotice {
+                Label(dependencyNotice, systemImage: "link")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -334,6 +342,7 @@ struct BaselineEditorView: View {
     }
 
     private func toggle(_ block: BlockMetadata, on: Bool) {
+        dependencyNotice = nil
         var updated = tenant
         if on {
             guard selectionIndex[block.id] == nil else { return }
@@ -362,7 +371,10 @@ struct BaselineEditorView: View {
             // Refuse removal while another selected block requires this one.
             let dependents = updated.blockSelections.compactMap { catalog.block(id: $0.blockID) }
                 .filter { $0.requires.contains(block.id) }
-            guard dependents.isEmpty else { return }
+            guard dependents.isEmpty else {
+                dependencyNotice = "\(dependents.map(\.name).formatted(.list(type: .and))) need\(dependents.count == 1 ? "s" : "") \(block.name) — remove \(dependents.count == 1 ? "it" : "them") first."
+                return
+            }
             if tenant.deployedBlockVersions[block.id] != nil {
                 // Deployed blocks get the Remove / Stop managing choice.
                 blockPendingRemoval = block
@@ -389,29 +401,7 @@ struct BaselineEditorView: View {
     /// declared defaults when the block creating them is selected too;
     /// otherwise the user picks (an existing group, no category).
     private func defaultSelection(for block: BlockMetadata, selectedIDs: Set<String>) -> BlockSelection {
-        var settings: [String: String] = [:]
-        for setting in block.settings where !setting.default.isEmpty {
-            settings[setting.key] = setting.default
-        }
-        var selection = BlockSelection(
-            blockID: block.id,
-            sourceID: catalog.sourceIDByBlockID[block.id] ?? "official",
-            settings: settings
-        )
-        if block.scope.kind != .none,
-           let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)),
-           selectedIDs.contains(provided.blockID) {
-            selection.providedScope = provided
-        }
-        if block.acceptsCategory {
-            if let provided = block.defaultCategory.flatMap(ProvidedObject.init(reference:)),
-               selectedIDs.contains(provided.blockID) {
-                selection.providedCategory = provided
-            } else {
-                selection.existingCategory = .noCategory
-            }
-        }
-        return selection
+        BlockSelection.defaults(for: block, catalog: catalog, selectedIDs: selectedIDs)
     }
 
     /// Fills an unchosen scope, or the "no category" placeholder, with the
@@ -807,7 +797,15 @@ struct BlockSettingsForm: View {
 
     private func mutateSelection(_ mutate: (inout BlockSelection) -> Void) {
         var tenantCopy = tenant
-        guard let index = tenantCopy.blockSelections.firstIndex(where: { $0.blockID == block.id }) else { return }
+        // An always-on block shows a form before any selection exists;
+        // its first edit materializes one so nothing typed is lost.
+        let index: Int
+        if let existing = tenantCopy.blockSelections.firstIndex(where: { $0.blockID == block.id }) {
+            index = existing
+        } else {
+            tenantCopy.blockSelections.append(selection)
+            index = tenantCopy.blockSelections.count - 1
+        }
         mutate(&tenantCopy.blockSelections[index])
         tenantStore.update(tenantCopy)
     }
@@ -892,7 +890,7 @@ struct SavePresetSheet: View {
         }
         .frame(width: 480, height: 400)
         .confirmationDialog(
-            "Replace the existing preset “\(preset.id)”?",
+            "Replace the existing preset “\(name.trimmingCharacters(in: .whitespaces))”?",
             isPresented: $isConfirmingReplace,
             titleVisibility: .visible
         ) {

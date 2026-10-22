@@ -32,8 +32,6 @@ struct MyApp: App {
     )
     @State private var tour = JamfDeployerTour.makeState()
 
-    @AppStorage("showsTechnicalDetails") private var showsTechnicalDetails = false
-
     var body: some Scene {
         Window("Jamf Deployer", id: "main") {
             ContentView()

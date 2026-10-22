@@ -217,8 +217,10 @@ struct RolloutView: View {
         switch outcome {
         case .deployed(let succeeded):
             Label("Deployed (\(succeeded))", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-        case .failed:
-            Label("Deployed with problems", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        case .failed(let message):
+            Label("Deployed with problems", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .help(message)
         case .noChanges:
             Label("Nothing to deploy", systemImage: "equal.circle").foregroundStyle(.secondary)
         case .skipped:

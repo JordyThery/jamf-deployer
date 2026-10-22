@@ -427,7 +427,8 @@ struct ConnectTenantWizard: View {
                 gatewayURL: region.gatewayURL,
                 clientID: trimmedClientID,
                 clientSecret: trimmedSecret,
-                environmentID: usesLegacyTenantScope ? nil : trimmedScopeID
+                environmentID: usesLegacyTenantScope ? nil : trimmedScopeID,
+                tenantID: usesLegacyTenantScope ? trimmedScopeID : nil
             )
         }
         let client = JamfPlatformClient(configuration: configuration, activityLog: activityLog)

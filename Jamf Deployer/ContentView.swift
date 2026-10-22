@@ -56,11 +56,3 @@ struct ContentView: View {
         }
     }
 }
-
-#Preview {
-    ContentView()
-        .environment(TenantStore())
-        .environment(ActivityLog())
-        .environment(UpdateChecker(feed: UpdateFeed(owner: "JordyThery", repository: "jamf-deployer", appName: "Jamf Deployer")))
-        .environment(JamfDeployerTour.makeState())
-}

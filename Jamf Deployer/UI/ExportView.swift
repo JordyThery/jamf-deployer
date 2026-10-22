@@ -113,8 +113,11 @@ struct ExportView: View {
                 if !tenant.isJamfPro {
                     Picker("From", selection: $exportProvider) {
                         Text("Jamf Pro and Platform").tag("jamfplatform")
-                        Text("Jamf Protect").tag("jamfprotect")
-                            .disabled(tenant.protectURL == nil)
+                        // Offered only with a Protect connection; a disabled
+                        // option inside a menu picker stays clickable.
+                        if tenant.protectURL != nil {
+                            Text("Jamf Protect").tag("jamfprotect")
+                        }
                     }
                     .fixedSize()
                     .disabled(kind == .clone)
@@ -817,25 +820,27 @@ struct ExportView: View {
 
         // zip adds to an existing archive, so a replaced file starts empty.
         try? FileManager.default.removeItem(at: destination)
-        let zip = Process()
-        zip.standardInput = FileHandle.nullDevice
-        zip.executableURL = URL(filePath: "/usr/bin/zip")
-        zip.currentDirectoryURL = result.outputURL
-        // The provider download under .terraform is tens of megabytes and
-        // is fetched again by `terraform init`.
-        zip.arguments = ["-r", "-q", "-y", destination.path, ".", "-x", ".terraform/*"]
-        do {
-            try zip.run()
-        } catch {
-            errorMessage = "The snapshot could not be written."
-            return
+        let source = result.outputURL
+        Task {
+            // Off the main actor: a full snapshot can be hundreds of megabytes.
+            let status: Int32? = await Task.detached {
+                let zip = Process()
+                zip.standardInput = FileHandle.nullDevice
+                zip.executableURL = URL(filePath: "/usr/bin/zip")
+                zip.currentDirectoryURL = source
+                // The provider download under .terraform is tens of megabytes
+                // and is fetched again by `terraform init`.
+                zip.arguments = ["-r", "-q", "-y", destination.path, ".", "-x", ".terraform/*"]
+                guard (try? zip.run()) != nil else { return nil }
+                zip.waitUntilExit()
+                return zip.terminationStatus
+            }.value
+            guard status == 0 else {
+                errorMessage = "The snapshot could not be written."
+                return
+            }
+            captureOutcome = "Snapshot saved to \(destination.lastPathComponent)."
+            NSWorkspace.shared.activateFileViewerSelecting([destination])
         }
-        zip.waitUntilExit()
-        guard zip.terminationStatus == 0 else {
-            errorMessage = "The snapshot could not be written."
-            return
-        }
-        captureOutcome = "Snapshot saved to \(destination.lastPathComponent)."
-        NSWorkspace.shared.activateFileViewerSelecting([destination])
     }
 }

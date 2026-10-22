@@ -9,9 +9,10 @@ on:
   issues:
     types: [labeled]
 
+# The authorize job only reads (the collaborator lookup needs no more);
+# the restore job gets write for the state backend and the issue.
 permissions:
-  contents: write   # the state backend writes state and lock branches
-  issues: write
+  contents: read
 
 jobs:
   authorize:
@@ -42,6 +43,9 @@ jobs:
   restore:
     needs: authorize
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the state backend writes state and lock branches
+      issues: write     # closes the issue
     environment:
       name: ${{ needs.authorize.outputs.tenant }}
     concurrency:

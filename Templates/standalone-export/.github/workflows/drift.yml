@@ -12,9 +12,10 @@ on:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch:
 
+# Only the check job gets write: the state backend writes lock branches and
+# findings are reported as issues.
 permissions:
-  contents: write   # the state backend writes lock branches
-  issues: write
+  contents: read
 
 jobs:
   detect:
@@ -29,6 +30,9 @@ jobs:
           all: "true"
 
   check:
+    permissions:
+      contents: write   # the state backend writes lock branches
+      issues: write
     needs: detect
     if: needs.detect.outputs.tenants != '[]'
     runs-on: ubuntu-latest
