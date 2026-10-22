@@ -29,6 +29,8 @@ struct AppCatalogPickerView: View {
     @State private var totalCount = 0
     @State private var isLoading = false
     @State private var loadError: String?
+    /// The latest search; older in-flight responses are dropped.
+    @State private var searchRun = UUID()
     @State private var searchTask: Task<Void, Never>?
     @State private var categories: [ExistingObjectRef] = []
 
@@ -235,9 +237,14 @@ struct AppCatalogPickerView: View {
             configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
             activityLog: activityLog
         )
+        // Quotes and backslashes would end the RSQL string literal early.
         let query = searchText.trimmingCharacters(in: .whitespaces)
+            .replacing("\\", with: "").replacing("\"", with: "")
+        let run = UUID()
+        searchRun = run
         Task {
-            defer { isLoading = false }
+            // A slower earlier search must not overwrite this one's results.
+            defer { if searchRun == run { isLoading = false } }
             do {
                 var items = [
                     URLQueryItem(name: "page", value: "0"),
@@ -251,9 +258,11 @@ struct AppCatalogPickerView: View {
                     ))
                 }
                 let page = try await client.getDecoded(TitlesPage.self, path: "/pro/v1/app-installers/titles", query: items)
+                guard searchRun == run else { return }
                 titles = page.results
                 totalCount = page.totalCount
             } catch {
+                guard searchRun == run else { return }
                 loadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }

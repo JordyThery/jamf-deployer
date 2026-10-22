@@ -101,12 +101,12 @@ struct SidebarView: View {
                 : "Nothing in Jamf is changed. The tenant record kept by this app and its stored credentials are deleted.")
         }
         .alert(
-            "The tenant was not removed",
+            "Tenant Not Removed",
             isPresented: Binding(get: { removalError != nil }, set: { if !$0 { removalError = nil } })
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Its deployment state could not be deleted from the team space: \(removalError ?? "") Try again later.")
+            Text("Its deployment state could not be deleted from the team space: \(removalError ?? ""). Try again later.")
         }
     }
 }

@@ -100,6 +100,8 @@ public nonisolated enum TerminalScript {
             #"passphrase=${passphrase//\$\{/\$\$\{}"#,
             #"passphrase=${passphrase//\%\{/\%\%\{}"#,
             #"passphrase=${passphrase//$'\n'/\\n}"#,
+            #"passphrase=${passphrase//$'\r'/\\r}"#,
+            #"passphrase=${passphrase//$'\t'/\\t}"#,
             "export TF_ENCRYPTION=\"",
             "key_provider \\\"pbkdf2\\\" \\\"passphrase\\\" {",
             "  passphrase = \\\"$passphrase\\\"",

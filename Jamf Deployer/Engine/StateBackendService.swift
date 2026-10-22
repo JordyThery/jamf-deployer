@@ -56,7 +56,7 @@ final class StateBackendService {
     private var runningRemote: String?
     /// A start in progress, shared by callers that arrive meanwhile (a fleet
     /// check runs several tenants at once).
-    private var starting: (remote: String, task: Task<Void, Error>)?
+    private var starting: (remote: String, token: UUID, task: Task<Void, Error>)?
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "StateBackend")
 
     static var binaryURL: URL {
@@ -191,14 +191,20 @@ final class StateBackendService {
     }
 
     private func ensureRunning(remote: String) async throws {
-        if let starting, starting.remote == remote {
-            try await starting.task.value
-            return
+        if let starting {
+            if starting.remote == remote {
+                try await starting.task.value
+                return
+            }
+            // Let an in-flight start for another remote settle before
+            // replacing its backend; start() begins by stopping it.
+            try? await starting.task.value
         }
         if let process, process.isRunning, runningRemote == remote { return }
+        let token = UUID()
         let task = Task { try await self.start(remote: remote) }
-        starting = (remote, task)
-        defer { starting = nil }
+        starting = (remote, token, task)
+        defer { if starting?.token == token { starting = nil } }
         try await task.value
     }
 
@@ -238,7 +244,14 @@ final class StateBackendService {
             guard launched.isRunning else { break }
             if Self.isListening(port: port) {
                 try await Task.sleep(for: .milliseconds(200))
-                if launched.isRunning { return }
+                if launched.isRunning {
+                    // The backend logs every request to stderr; drain it for
+                    // its lifetime or the pipe fills and the backend blocks.
+                    errors.fileHandleForReading.readabilityHandler = { handle in
+                        if handle.availableData.isEmpty { handle.readabilityHandler = nil }
+                    }
+                    return
+                }
                 break
             }
             try await Task.sleep(for: .milliseconds(100))

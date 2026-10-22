@@ -47,9 +47,13 @@ final class TenantDeployService {
         case applying
     }
 
-    private(set) var phase: Phase = .idle
-    /// Live per-object progress lines during apply, display-only.
-    private(set) var progress: [String] = []
+    /// Engine phase and live apply progress, per tenant: previews and
+    /// deploys of different tenants may run at the same time.
+    private var phases: [UUID: Phase] = [:]
+    private var progressLines: [UUID: [String]] = [:]
+
+    func phase(for tenantID: UUID) -> Phase { phases[tenantID] ?? .idle }
+    func progress(for tenantID: UUID) -> [String] { progressLines[tenantID] ?? [] }
 
     private let tenantStore: TenantStore
     private let activityLog: ActivityLog
@@ -96,7 +100,7 @@ final class TenantDeployService {
     }
 
     var isBusy: Bool {
-        phase != .idle
+        !busyTenants.isEmpty
     }
 
     // MARK: Team space
@@ -971,6 +975,8 @@ final class TenantDeployService {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
             .replacingOccurrences(of: "${", with: "$${")
             .replacingOccurrences(of: "%{", with: "%%{")
     }
@@ -1103,10 +1109,10 @@ final class TenantDeployService {
     func preview(tenant original: Tenant) async throws -> PreviewSession {
         guard !busyTenants.contains(original.id) else { throw DeployError.tenantBusy }
         busyTenants.insert(original.id)
-        phase = .generating
-        progress = []
+        phases[original.id] = .generating
+        progressLines[original.id] = []
         defer {
-            phase = .idle
+            phases[original.id] = nil
             busyTenants.remove(original.id)
         }
 
@@ -1129,11 +1135,11 @@ final class TenantDeployService {
         let initArguments = ["init", "-input=false"]
         let planArguments = ["plan", "-input=false", "-out=plan.bin", "-json"] + Self.readParallelism(for: tenant)
 
-        phase = .initializing
+        phases[original.id] = .initializing
         logEngine("init", tenant: tenant)
         try await runEngine(runner, initArguments)
 
-        phase = .planning
+        phases[original.id] = .planning
         logEngine("plan", tenant: tenant)
         let planRun = try await runEngine(runner, planArguments)
         let plan = try await runner.showPlan(planFileName: "plan.bin")
@@ -1179,10 +1185,10 @@ final class TenantDeployService {
         guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
         busyTenants.insert(tenant.id)
 
-        phase = .applying
-        progress = []
+        phases[tenant.id] = .applying
+        progressLines[tenant.id] = []
         defer {
-            phase = .idle
+            phases[tenant.id] = nil
             activePreviewTenants.remove(tenant.id)
             busyTenants.remove(tenant.id)
         }
@@ -1192,15 +1198,12 @@ final class TenantDeployService {
         var result: EngineRunner.RunResult
         do {
             result = try await runner.run(
-                // Jamf's classic API fails more creates under load; four
-                // concurrent operations measurably reduce that at little cost.
-                // The Jamf Pro plugin requires one operation at a time.
                 arguments: Self.applyArguments(for: tenant, planFile: session.planFileName)
             ) { event in
                 if event.type == .applyComplete || event.type == .applyErrored {
                     let message = event.message
                     Task { @MainActor in
-                        self.progress.append(message)
+                        self.progressLines[tenant.id]?.append(message)
                     }
                 }
             }

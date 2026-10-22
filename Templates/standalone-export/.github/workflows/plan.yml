@@ -15,9 +15,10 @@ on:
   pull_request:
     branches: [main]
 
+# Only the plan job gets write: the state backend writes lock branches and
+# the plan is posted as a pull request comment.
 permissions:
-  contents: write        # the state backend writes lock branches
-  pull-requests: write   # plan comments
+  contents: read
 
 jobs:
   detect:
@@ -58,6 +59,9 @@ jobs:
   plan:
     needs: [detect, check]
     if: needs.detect.outputs.tenants != '[]'
+    permissions:
+      contents: write        # the state backend writes lock branches
+      pull-requests: write   # plan comments
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -132,7 +136,7 @@ jobs:
             echo '```'
           } > "$RUNNER_TEMP/comment.md"
           id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty")
+            | jq -r --arg marker "$marker" 'map(select(.body | startswith($marker))) | .[0].id // empty')
           if [ -n "$id" ]; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F "body=@$RUNNER_TEMP/comment.md" --silent
           else

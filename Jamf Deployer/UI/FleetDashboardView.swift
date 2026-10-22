@@ -113,7 +113,7 @@ struct FleetDashboardView: View {
             Button {
                 isConnectingTenant = true
             } label: {
-                Label("Connect a Tenant", systemImage: "plus")
+                Label("Connect a Tenant…", systemImage: "plus")
             }
             .help("Add a Jamf tenant to the fleet")
             if deployService.isTeamMode {

@@ -40,7 +40,7 @@ Click **Preview Changes** (⌘P). The app generates the configuration, compares 
 
 Before the first deploy, the app asks you to save a **recovery sheet** (**Save Recovery Sheet…**) with the passphrase that encrypts this tenant's deployment state and plan files — store it somewhere safe.
 
-If the preview looks right, click **Deploy**. Only the previewed plan is applied; if anything changed in between, the deploy stops. On a production tenant, a deploy that removes or replaces objects asks you to type the tenant name first. If Jamf reports a server error for an object it actually created, the app finds it by name after the deploy, and the next preview adopts it instead of creating a duplicate.
+If the preview looks right, click **Deploy**. Only the previewed plan is applied; if anything changed in between, the deploy stops. On a production tenant, a deploy that removes or replaces objects asks you to type the tenant name first. On Jamf Platform API tenants, if Jamf reports a server error for an object it actually created, the app finds it by name after the deploy, and the next preview adopts it instead of creating a duplicate.
 
 Every deploy is recorded in **History** (sidebar). **Roll Back…** restores the baseline of an earlier deploy, which you then preview and deploy.
 

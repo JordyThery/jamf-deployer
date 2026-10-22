@@ -41,8 +41,12 @@ runs:
             list=$(echo "$changed" | grep '^tenants/' | grep -v '^tenants/_template/' | cut -d/ -f2 | sort -u || true)
           fi
         fi
-        # A removed tenant directory has nothing left to plan.
-        list=$(echo "$list" | while read -r t; do [ -n "$t" ] && [ -d "tenants/$t" ] && echo "$t" || true; done)
+        # A removed tenant directory has nothing left to plan, and a name
+        # outside the tenant-name pattern never reaches the other steps.
+        list=$(echo "$list" | while read -r t; do
+          [ -n "$t" ] && [ -d "tenants/$t" ] || continue
+          if [[ "$t" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then echo "$t"; else echo "Skipping tenants/$t: not a tenant name" >&2; fi
+        done)
         json=$(printf '%s\n' "$list" | jq -R -s -c 'split("\n") | map(select(length > 0))')
         echo "tenants=$json" >> "$GITHUB_OUTPUT"
         echo "Tenants: $json"

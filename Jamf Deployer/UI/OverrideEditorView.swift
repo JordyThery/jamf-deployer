@@ -82,6 +82,7 @@ struct OverrideEditorView: View {
     @State private var values: [String: String] = [:]
     @State private var message: String?
 
+
     var body: some View {
         SheetFrame(
             title: "Add a Custom Object — \(tenant.name)",
@@ -89,6 +90,12 @@ struct OverrideEditorView: View {
             isBusy: catalog == nil
         ) {
             content
+                .onChange(of: selectedTypeName) {
+                    // Attribute names can collide across types; a value
+                    // typed for one must not carry into another.
+                    values = [:]
+                    message = nil
+                }
         } footer: {
             if let message {
                 Text(message)
@@ -267,6 +274,10 @@ struct OverrideEditorView: View {
             let hcl = previewHCL(type)
             let destination = deployService.adoptedURL(for: tenant)
                 .appending(path: "override-\(sanitizedObjectName).tf")
+            guard !FileManager.default.fileExists(atPath: destination.path) else {
+                message = "A custom object named “\(objectName)” is already staged on this tenant. Choose another name."
+                return
+            }
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(),
                 withIntermediateDirectories: true

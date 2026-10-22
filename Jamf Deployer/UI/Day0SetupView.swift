@@ -171,6 +171,13 @@ struct Day0SetupView: View {
         case "protect":
             VStack(alignment: .leading, spacing: 6) {
                 TextField("Protect console URL", text: $protectURL, prompt: Text("https://yourorg.protect.jamfcloud.com"))
+                    .onAppear {
+                        // The stored secret is read only here, where it can
+                        // be edited — not on every Day 0 visit.
+                        if protectSecret.isEmpty {
+                            protectSecret = TenantSecrets(tenantID: tenant.id).protectClientSecret.load() ?? ""
+                        }
+                    }
                 HStack {
                     TextField("API client ID", text: $protectClientID)
                         .font(.callout.monospaced())
@@ -221,7 +228,6 @@ struct Day0SetupView: View {
         if protectURL.isEmpty, let saved = tenant.protectURL {
             protectURL = saved
             protectClientID = tenant.protectClientID ?? ""
-            protectSecret = TenantSecrets(tenantID: tenant.id).protectClientSecret.load() ?? ""
         }
         Task {
             await service.detect(tenant: tenantStore.tenant(id: tenant.id) ?? tenant)

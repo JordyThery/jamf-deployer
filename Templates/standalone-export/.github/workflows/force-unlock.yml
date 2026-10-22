@@ -49,6 +49,7 @@ jobs:
           git fetch -q --depth 1 origin "+refs/heads/$branch:refs/remotes/origin/lock"
           echo "The lock being released:"
           git show "origin/lock:tenants/$TENANT/terraform.tfstate.lock" \
-            | python3 -c 'import json, sys; lock = json.load(sys.stdin); [print(f"  {key}: {lock.get(key)}") for key in ("Who", "Operation", "Created", "ID")]'
+            | python3 -c 'import json, sys; lock = json.load(sys.stdin); [print(f"  {key}: {lock.get(key)}") for key in ("Who", "Operation", "Created", "ID")]' \
+            || echo "  (the lock file could not be read)"
           git push -q origin --delete "$branch"
           echo "Unlocked. The next run for $TENANT works normally."

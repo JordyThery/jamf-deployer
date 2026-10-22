@@ -39,6 +39,7 @@ final class TerraformManager {
     /// Call only after the user consented in the export UI.
     func downloadIfNeeded() async {
         if case .installed = status { return }
+        if case .downloading = status { return }
         status = .downloading
 
         let version = Self.pinnedVersion

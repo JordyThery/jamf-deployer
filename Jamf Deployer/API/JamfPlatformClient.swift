@@ -51,12 +51,17 @@ nonisolated struct JamfAPIConfiguration: Sendable {
         }
     }
 
-    init(gatewayURL: URL, clientID: String, clientSecret: String, environmentID: String?) {
+    init(gatewayURL: URL, clientID: String, clientSecret: String, environmentID: String?, tenantID: String? = nil) {
         self.gatewayURL = gatewayURL
         self.clientID = clientID
         self.clientSecret = clientSecret
-        scopeHeaderName = environmentID == nil ? nil : "X-Environment-Id"
-        scopeHeaderValue = environmentID
+        if let environmentID {
+            scopeHeaderName = "X-Environment-Id"
+            scopeHeaderValue = environmentID
+        } else if let tenantID {
+            scopeHeaderName = "X-Tenant-Id"
+            scopeHeaderValue = tenantID
+        }
     }
 
     /// A Jamf Pro connection made before the tenant exists (the wizard).

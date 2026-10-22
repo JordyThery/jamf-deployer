@@ -115,12 +115,12 @@ struct PreviewDeploySheet: View {
 
         case .deploying(let session):
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(deployService.progress.enumerated()), id: \.offset) { _, line in
+                ForEach(Array(deployService.progress(for: tenantID).enumerated()), id: \.offset) { _, line in
                     Label(line, systemImage: "checkmark.circle")
                         .font(.callout.monospaced())
                 }
                 let total = session.summary.counts.filter { $0.key != .unchanged }.values.reduce(0, +)
-                ProgressView(value: Double(deployService.progress.count), total: Double(max(total, 1)))
+                ProgressView(value: Double(deployService.progress(for: tenantID).count), total: Double(max(total, 1)))
                     .padding(.top, 4)
             }
             .padding()
@@ -206,7 +206,7 @@ struct PreviewDeploySheet: View {
     }
 
     private var progressText: String {
-        switch deployService.phase {
+        switch deployService.phase(for: tenantID) {
         case .generating: "Assembling the configuration…"
         case .initializing: "Preparing the deployment engine…"
         case .planning: "Asking Jamf what would change…"

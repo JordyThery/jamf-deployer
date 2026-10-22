@@ -119,6 +119,8 @@ def main():
     with open(QUERY_FILE, "w") as query:
         for kind in types:
             query.write(f'list "{kind}" "all" {{\n  provider = jamfplatform\n}}\n\n')
+    # Two runs on purpose: combined with -json, -generate-config-out stops
+    # writing the file and folds the configuration into the JSON stream.
     events = terraform("query", "-json", "-no-color")
     generated_path = os.path.join(os.environ.get("RUNNER_TEMP", "."), "not-in-code-generated.tf")
     if os.path.exists(generated_path):
