@@ -179,8 +179,10 @@ afterwards. To delete the objects as well, run the Destroy workflow first.
 ## A stuck lock
 
 Every run locks the tenant's state and unlocks it when it ends. A cancelled
-or crashed run can leave the lock behind; the next run then fails with
-"Error acquiring the state lock" and the lock's ID. Check under Actions that
-no run is still working on the tenant, then run the **Force unlock** workflow
-with the tenant and that ID. It waits for any run still in progress on the
-tenant, so a lock in use is never taken away.
+or crashed run can leave the lock behind, as a branch named
+`locks/tenants/<tenant>/terraform.tfstate`. Every later run for that tenant
+then fails at Init with "Error loading state: Failed to get state … giving
+up". Check under Actions that no run is still working on the tenant, then run
+the **Force unlock** workflow with the tenant's name, typed twice. It shows
+who held the lock and when, deletes it, and waits for any run still in
+progress on the tenant first, so a lock in use is never taken away.

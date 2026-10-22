@@ -163,6 +163,9 @@ U="http://127.0.0.1:$PORT/?type=git&repository=https://github.com/$REPO.git&ref=
 echo "  teammate locks the tenant: $(curl -s -o /dev/null -w '%{http_code}' -u mate:$PASS -X LOCK \
     --data '{"ID":"teammate-lock","Operation":"OperationTypePlan","Who":"teammate@other-mac","Version":"1.13.1","Created":"2026-10-19T08:00:00Z","Path":"","Info":""}' "$U")"
 kill $MATE
+# As on a Mac that has not used the team space before: the app's state
+# backend starts with an empty working folder while the teammate's lock is held.
+rm -rf "$SUPPORT/engine/state-backend"
 run test05LockedByATeammate
 echo "  team export: $(ls "$TEST_RUNNER_TEAM_EXPORT_DIR/tenants" 2> /dev/null | tr '\n' ' ')"
 echo "  lock branches left: $(gh api "repos/$REPO/branches" --jq '.[].name' | grep -c '^locks/')"

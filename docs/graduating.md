@@ -448,10 +448,11 @@ and skips tenants on the Jamf Pro API, whose plugin cannot list objects.
   pull request that removes its folder. Once merged, its state moves to
   `handed-over/` on the state branch, and its objects stay in Jamf untouched.
   To delete the objects as well, run the **Destroy tenant** workflow first.
-- **A stuck lock:** a cancelled run can leave a tenant's state locked; the
-  next run fails with "Error acquiring the state lock" and a lock ID. Once
-  you are sure no run is still working on the tenant, run the **Force
-  unlock** workflow with that ID.
+- **A stuck lock:** a cancelled run can leave a tenant's state locked, and
+  later runs then fail at Init with "Failed to get state". Once you are sure
+  no run is still working on the tenant, run the **Force unlock** workflow
+  with the tenant's name: it shows who held the lock and since when, and
+  removes it.
 
 ### Growing up
 

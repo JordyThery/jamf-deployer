@@ -153,6 +153,21 @@ final class StateBackendService {
         runningRemote = nil
     }
 
+    /// Stops the backend and empties its working folder, so the next run
+    /// starts from a fresh clone. After a lock branch is deleted behind its
+    /// back, a running backend's clone still holds the old lock ref and every
+    /// read of that state fails ("non-fast-forward update"); a fresh one reads
+    /// it normally.
+    func restartFresh() async {
+        if let running = process {
+            running.terminate()
+            await Task.detached { running.waitUntilExit() }.value
+        }
+        process = nil
+        runningRemote = nil
+        try? FileManager.default.removeItem(at: Self.workFolderURL)
+    }
+
     // MARK: Plumbing
 
     private func stateAddress(tenantID: UUID, remote: String) -> String {

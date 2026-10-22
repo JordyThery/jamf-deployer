@@ -342,7 +342,9 @@ curl -s -o /dev/null -u locker:$PASS -X LOCK \
     --data '{"ID":"uitest-stuck-lock","Operation":"OperationTypeApply","Who":"runner@cancelled","Version":"1.15.0","Created":"2026-10-21T08:00:00Z","Path":"","Info":""}' "$U"
 kill $LOCKER
 echo "  lock branches before: $(gh api "repos/$REPO/branches" --jq '.[].name' | grep -c '^locks/')"
-gh workflow run force-unlock.yml --repo "$REPO" --ref main -f tenant=$TENANT -f lock_id=uitest-stuck-lock > /dev/null; wait_run force-unlock.yml
+echo "  a run while the lock is stuck (expected to fail):"
+gh workflow run drift.yml --repo "$REPO" --ref main > /dev/null; wait_run drift.yml
+gh workflow run force-unlock.yml --repo "$REPO" --ref main -f tenant=$TENANT -f confirm=$TENANT > /dev/null; wait_run force-unlock.yml
 echo "  lock branches after: $(gh api "repos/$REPO/branches" --jq '.[].name' | grep -c '^locks/')"
 
 echo "The repository's Destroy workflow"
