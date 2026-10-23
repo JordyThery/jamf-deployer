@@ -17,7 +17,7 @@ stage; the app keeps working throughout.
 | [0. What you already know](#stage-0--what-you-already-know) | Put names to what the app does | Nothing |
 | [1. Watch the engine work](#stage-1--watch-the-engine-work) | Read a plan, then run one yourself | A tenant in the app |
 | [2. Run one tenant yourself](#stage-2--run-one-tenant-yourself) | Plan and apply from the command line | Terraform, about an hour |
-| [3. Many tenants, Git and reviews](#stage-3--many-tenants-git-and-reviews) | Change Jamf through a pull request | A private GitHub repository |
+| [3. Many tenants, Git and reviews](#stage-3--many-tenants-git-and-reviews) | Change Jamf through a pull request | A GitHub account, two API clients per tenant, about an hour |
 | [4. Run a fleet](#stage-4--run-a-fleet) | Change every instance at once, handle drift | Stage 3's repository |
 
 **Not using Jamf Deployer?** Read stage 0 for the vocabulary, then start at
@@ -385,34 +385,167 @@ covers the general practice behind all of these, and
 builds the same plan-on-pull-request, apply-on-merge pipeline with HCP
 Terraform instead of the state branch.
 
-**From the app:** on the dashboard, choose **Export as Terraform…**, tick the
-tenants and an empty folder. **Keep managing here** writes the repository to
-read and run `terraform validate` against; nothing moves. **Move to a
-repository** also moves each tenant's state to an empty private repository's
-`terraform-state` branch, publishes the code as its first commit, and archives
-the tenants in the app; every object stays in Jamf. Each tenant must have
-nothing left to deploy and no changes made in Jamf, so the repository's first
-plan shows no changes. In Team Mode, the app syncs first and refuses tenants
-a teammate is working on.
+### Move your tenants, step by step
+
+The app does the heavy lifting: it writes the repository, moves each
+tenant's state into it and checks that nothing in Jamf would be recreated.
+Allow about an hour the first time. Your Mac is needed only for this setup;
+afterwards everything runs on GitHub.
+
+**1. Accounts and tools**
+
+- A **GitHub account**. The free plan is enough to start (see *Cost* above).
+- For **each tenant, two API clients**: a **full** one with the privileges
+  its building blocks need (each block's detail view lists them, and
+  [Permissions](permissions.md) explains them), and a **read-only** one with
+  the read half of the same privileges. Merges use the full client;
+  pull request plans use the read-only one, so a branch can never change
+  Jamf. Note each client's ID and secret (and for the Jamf Platform API its
+  environment ID and region), and keep the secrets in your password manager.
+- The **GitHub CLI** on your Mac: `brew install gh` with Homebrew, or the
+  installer from [cli.github.com](https://cli.github.com). Then run
+  `gh auth login`, choose *GitHub.com*, *HTTPS* and *Login with a web
+  browser*, and answer **Yes** when it asks whether to authenticate Git with
+  your GitHub credentials. The app and the setup script use this sign-in;
+  neither ever asks for a GitHub password.
+
+**2. Get every tenant ready in the app**
+
+For each tenant you are moving:
+
+- Its page shows the baseline deployed, with **nothing left to deploy**.
+- **Check for Changes** reports it in sync. Restore or keep any change first.
+- Objects that were made by hand in Jamf and should be in code are
+  **adopted** (**Adopt Existing Configuration…**) *before* you export, so
+  they move along.
+- Its **recovery sheet** is saved somewhere safe.
+
+**3. Create an empty private repository**
+
+On github.com, choose **New repository**, give it a name (for example
+`jamf-tenants`), choose **Private**, and leave every option to add a README,
+.gitignore or license **off**: the move needs a completely empty
+repository and refuses one that already has a `main` branch. Copy its URL,
+`https://github.com/<you>/jamf-tenants.git`.
+
+**4. Export and move**
+
+On the dashboard, choose **Export as Terraform…**, tick the tenants, and
+choose an empty folder on your Mac: it keeps a copy, and the script for
+step 5. Choose **Move to a repository**, paste the URL, tick **Stop
+managing these tenants in this app**, and choose **Export and Move**.
+
+The app checks every tenant, publishes the code as the repository's first
+commit, moves each tenant's state to its `terraform-state` branch, and
+archives the tenants in the app; every object stays in Jamf exactly as it
+is. A moved tenant's page shows **Open Repository**. In Team Mode, the app
+syncs first and refuses tenants a teammate is working on.
+
+What you had in the app, and where it is now:
+
+| In the app | In the repository |
+| --- | --- |
+| A tenant | `tenants/<tenant>/`: its name in lowercase, with dashes |
+| A building block | One shared module in `modules/<block>/`, used by every tenant that has it |
+| A tenant's block settings | `tenants/<tenant>/tenant.auto.tfvars`, the file that differs between tenants |
+| Blocks filing into each other's groups and categories | `tenants/<tenant>/main.tf` |
+| Adopted and custom objects | Extra `.tf` files in the tenant's folder |
+| The deployment state | Unchanged, on the `terraform-state` branch |
+| Credentials | Not exported: you enter them once, in step 5 |
+| Check for Changes, Restore Baseline | The *Check for changes* workflow and its issues (stage 4) |
+| Roll Out | A pull request that changes several tenants (stage 4) |
+| History | The repository's Git history and its **Actions** tab |
+| Team Mode | The repository: everyone works through pull requests |
+
+> **Not ready to move?** Choose **Keep managing here** instead. You get the
+> same repository in the folder, to read and run `terraform validate`
+> against, and nothing moves. Export again with *Move to a repository*
+> when you are ready.
+
+**5. Give GitHub the credentials**
+
+Each tenant gets two Environments (see "Why each piece is there"), with the
+same secret names in both, so the workflows work for every tenant. In
+Terminal, go to the export folder and run the script the app wrote:
+
+```bash
+cd ~/Documents/jamf-tenants-export      # the folder from step 4
+./create-environments.sh <you>/jamf-tenants
+```
+
+For each tenant it asks for every secret twice, with typing hidden: first
+the full client's value, for `<tenant>`; then the read-only client's, for
+`<tenant>-plan` (Return reuses the first). It creates both Environments,
+allows only `main` to use the full one, and sets the values that are not
+secret itself.
+
+To do it by hand in the browser instead (or later, for one tenant): in the
+repository, **Settings → Environments → New environment**, named exactly
+like the tenant's folder. Under **Deployment branches and tags**, choose
+**Selected branches and tags** and add `main`. Add the variables
+`JAMFPLATFORM_BASE_URL` (for example `https://us.api.jamfcloud.com`) and
+`JAMFPLATFORM_ENVIRONMENT_ID`, and the secrets `JAMFPLATFORM_CLIENT_ID` and
+`JAMFPLATFORM_CLIENT_SECRET`. Repeat for `<tenant>-plan` with the read-only
+client and no branch restriction. Tenants on the Jamf Pro API use other
+names; the repository's README lists them all.
+
+**6. Protect `main`**
+
+In the repository, **Settings → Branches** (or **Rules → Rulesets**), add a
+rule for `main` that requires a pull request (with an approving review if
+others work in the repository) and requires the **Plan result** status
+check. From then on, nothing reaches Jamf without a plan someone has read.
+
+**7. Check the move**
+
+Open the **Actions** tab, choose **Check for changes**, then **Run
+workflow**. It should succeed and open **no** issue: the repository's code,
+state and credentials agree with Jamf. If it opens `Changed in Jamf:
+<tenant>`, read the plan in the issue; it is usually a credential in the
+wrong Environment, or a change made in Jamf after the export.
 
 **Without the app:** lay out stage 2's project the same way (your modules
-under `modules/`, one folder per tenant, a backend per tenant) and copy the
-workflows from an export, or from the Jamf-Concepts reference.
+under `modules/`, one folder per tenant, a backend per tenant), copy the
+workflows from an export or from the Jamf-Concepts reference, and follow
+steps 1, 3, 5 and 6.
 
-**Then set it up** as the repository's README describes: create each
-tenant's Environments (`./create-environments.sh OWNER/REPOSITORY` in an
-export folder), and protect `main` with a required review and the **Plan
-result** check.
+**Exercise: your first reviewed change.** Everything happens in the
+browser. On the repository's page, press **.** (the full stop): GitHub
+opens an editor with every file.
 
-**Exercise: your first reviewed change.** On a branch, change one value in a
-tenant's `tenant.auto.tfvars`, push, and open a pull request. Read the plan
-comment: it should show that one change and nothing else. Merge it, watch the
-Apply workflow, and check Jamf.
+1. Open a tenant's `tenant.auto.tfvars` and change one value, for example
+   a check-in frequency.
+2. In the editor's **Source Control** panel, write a short message, choose
+   **Commit to new branch**, name the branch, and accept the offer to open
+   a pull request.
+3. Wait for the **Plan** workflow's comment on the pull request. Read it:
+   it should show that one change and nothing else. Be wary of any line
+   that destroys or replaces an object.
+4. Merge, watch the **Apply** workflow in the **Actions** tab, and check
+   Jamf.
+
+(With Git on your Mac, the same loop is `git switch -c <branch>`, edit,
+`git commit -am …`, `git push`, and opening the pull request on GitHub.)
 
 **Checkpoint:** a change reached Jamf through a reviewed pull request, and you
 did not open the app.
 
 ## Stage 4 — Run a fleet
+
+### Choose how far a change goes
+
+Which tenants a change reaches is decided by which file it touches. The
+Plan workflow works it out, plans exactly those tenants, and posts one
+comment per tenant:
+
+| To change | Edit | Plans and applies |
+| --- | --- | --- |
+| One tenant | `tenants/<tenant>/tenant.auto.tfvars` (or that tenant's `main.tf`) | That tenant |
+| Several tenants | The same edit in each of their `tenant.auto.tfvars`, in one pull request | Exactly those tenants, one merge |
+| Every tenant | The shared module in `modules/<block>/` | Every tenant that uses the block |
+| Some first, the rest later | A second version of the module (below, *Roll out in rings*) | The tenants you point at it |
+
+The rest of this stage works through the last two.
 
 ### Push one change to every instance
 
@@ -495,15 +628,23 @@ To rename one, also move its state file to the new name on the
   `tenants/_template`, creates the tenant's two Environments (asking for each
   secret), lets you set its values, and opens a pull request whose plan shows
   everything the tenant would get.
+- **Add one without the script:** in the browser editor, copy
+  `tenants/_template/` to `tenants/<new-tenant>/` and set its values, create
+  its two Environments as in stage 3, step 5, and open the pull request.
 - **Stop managing one:** `scripts/hand-over.sh contoso-production` opens a
   pull request that removes its folder. Once merged, its state moves to
   `handed-over/` on the state branch, and its objects stay in Jamf untouched.
   To delete the objects as well, run the **Destroy tenant** workflow first.
-- **A stuck lock:** a cancelled run can leave a tenant's state locked, and
-  later runs then fail at Init with "Failed to get state". Once you are sure
-  no run is still working on the tenant, run the **Force unlock** workflow
-  with the tenant's name: it shows who held the lock and since when, and
-  removes it.
+
+### When something goes wrong
+
+| What you see | What to do |
+| --- | --- |
+| A run fails at Init with "Failed to get state" | A cancelled run left the tenant's state locked. Once you are sure no run is still working on the tenant (**Actions** tab), run the **Force unlock** workflow with the tenant's name, typed twice. It shows who held the lock and since when, and removes it. |
+| A plan destroys or replaces something you did not expect | Do not merge. Look at what the file change did; a renamed object or a removed module call is the usual cause. |
+| A plan or apply fails with 401 or 403 | The credentials in that tenant's Environment are wrong, or the client lacks a privilege. The run's log shows which Environment the job used. |
+| A tenant you did not touch shows changes | Someone changed it in Jamf; handle it as in *Changes made in Jamf*. |
+| A fleet-wide change failed for one tenant | The others are applied. Fix the cause, then re-run only the failed job from the **Actions** tab. |
 
 ### Growing up
 
