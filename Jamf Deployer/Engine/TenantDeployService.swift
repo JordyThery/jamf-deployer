@@ -542,6 +542,39 @@ final class TenantDeployService {
 
     /// The catalog as this tenant sees it: git sources resolve at the
     /// tenant's pinned tags.
+    /// Selections whose catalog source was removed still deploy — from the
+    /// merged catalog, at the default tag of whichever source now provides
+    /// the block — but never see that source's releases. When a source with
+    /// the block exists (typically the same catalog added again), the
+    /// selection moves to it. What deploys does not change; the removed
+    /// source's pin is dropped.
+    @discardableResult
+    func reattachOrphanedSelections(of tenant: Tenant) -> Tenant {
+        let known = Set(catalogSources.customSources.map(\.id.uuidString))
+        let isOrphan: (BlockSelection) -> Bool = { $0.sourceID != "official" && !known.contains($0.sourceID) }
+        guard tenant.blockSelections.contains(where: isOrphan) else { return tenant }
+        // The source the merged catalog resolves the block from — the one
+        // the selection already deploys from.
+        guard let merged = try? loadCatalog(for: tenant) else { return tenant }
+        var updated = tenant
+        var removed: Set<String> = []
+        for index in updated.blockSelections.indices where isOrphan(updated.blockSelections[index]) {
+            let blockID = updated.blockSelections[index].blockID
+            guard merged.block(id: blockID) != nil else { continue }
+            let target = merged.sourceIDByBlockID[blockID] ?? "official"
+            removed.insert(updated.blockSelections[index].sourceID)
+            updated.blockSelections[index].sourceID = target
+            updated.blockSelections[index].sourceTag = nil
+        }
+        for sourceID in removed where !updated.blockSelections.contains(where: { $0.sourceID == sourceID }) {
+            updated.catalogPins.removeValue(forKey: sourceID)
+        }
+        guard updated != tenant else { return tenant }
+        Self.traceUpdates("Reattached \(removed.count) removed catalog source(s) for \(tenant.name)")
+        tenantStore.update(updated)
+        return updated
+    }
+
     func loadCatalog(for tenant: Tenant) throws -> LoadedCatalog {
         try catalogSources.loadMerged(pins: tenant.catalogPins)
     }
@@ -583,7 +616,8 @@ final class TenantDeployService {
         #endif
     }
 
-    func availableBaselineUpdates(for tenant: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
+    func availableBaselineUpdates(for original: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
+        let tenant = reattachOrphanedSelections(of: original)
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []
         let usedSourceIDs = Set(tenant.blockSelections.map(\.sourceID))
         Self.traceUpdates("Release check for \(tenant.name): sources in use \(usedSourceIDs.sorted()), git sources \(self.catalogSources.customSources.filter { $0.kind == .gitRepository }.map(\.id.uuidString))")
@@ -1160,7 +1194,7 @@ final class TenantDeployService {
             await syncTeamState()
         }
         // Read after the pull: a teammate may have changed the baseline.
-        let tenant = tenantStore.tenant(id: original.id) ?? original
+        let tenant = reattachOrphanedSelections(of: tenantStore.tenant(id: original.id) ?? original)
 
         try await ensureCatalogCheckouts(for: tenant)
         let catalog = try loadCatalog(for: tenant)

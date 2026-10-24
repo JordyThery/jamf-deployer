@@ -1,6 +1,8 @@
 #!/bin/zsh
 # Runs the rename UI tests (RenameUITests) against one test tenant: a local
 # catalog whose second release renames a group another block scopes to.
+# Between the releases the catalog source is removed and added again, so the
+# tenant's blocks must follow the source's new identity.
 # Deploying that release must finish without failures; afterwards the old
 # group is gone and the policy scopes to the renamed one. Everything the run
 # created is removed afterwards.
@@ -184,7 +186,7 @@ run() {
 }
 
 set +e
-for step in test1ConnectAndSetPrefix test2AddCatalog test3DeployFirstRelease test4DeployRenamingRelease; do run $step; done
+for step in test1ConnectAndSetPrefix test2AddCatalog test3DeployFirstRelease test3bReaddCatalog test4DeployRenamingRelease; do run $step; done
 echo "Checking the tenant"
 api "
 names = sorted(g['name'] for g in groups)

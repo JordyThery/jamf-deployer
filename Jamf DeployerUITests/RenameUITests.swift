@@ -49,6 +49,13 @@ final class RenameUITests: DeployerUITestCase {
         previewAndDeployExpectingNoFailures()
     }
 
+    /// A catalog source removed and added again gets a new identity; the
+    /// tenant's blocks must follow it, or releases stop reaching them.
+    func test3bReaddCatalog() throws {
+        removeCatalogSources(named: Self.catalogName)
+        try test2AddCatalog()
+    }
+
     func test4DeployRenamingRelease() throws {
         openTenant(Self.tenant)
         tap(app.buttons["Baseline Updates…"], timeout: 10)
