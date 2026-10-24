@@ -9,6 +9,8 @@
 #
 #   Scripts/run-rename-ui-tests.sh
 #
+# RENAME_KEEP=1 stops before removing the tenant and skips the cleanup, to
+# inspect a failure; run again without it to clean up.
 # Credentials come from the login Keychain (base-url, client-id,
 # client-secret, environment-id under RENAME_SERVICE, default
 # JamfDeployer-Beta) and reach the test runner only as environment
@@ -199,5 +201,6 @@ detail = call('GET', '/proclassic/policies/id/%s' % policies[0]['id'])['policy']
 scoped = [g['name'] for g in detail['scope']['computer_groups']] if detail else []
 ok2 = scoped == [prefix + 'Rename Pilot Renamed']
 print(('  ok   ' if ok2 else '  FAIL ') + 'policy scope: %s' % scoped)"
+[[ -n "$RENAME_KEEP" ]] && { echo "Kept the tenant and its objects (RENAME_KEEP)"; CLEANED=1; rm -rf "$WORK"; exit 0; }
 run test5RemoveTenantAndCatalog
 set -e

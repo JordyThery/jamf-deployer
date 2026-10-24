@@ -7,22 +7,29 @@ import Foundation
 /// not deletes, then the deletes. Every retry plan must stay within the plan
 /// the user approved; anything else is left for a new preview.
 public nonisolated enum DeleteOrderRetry {
-    /// The failed deletes, when every error of the run is a delete the
-    /// approved plan contains. `nil` when any other error occurred.
+    /// The failed deletes, when every operation that failed is a delete the
+    /// approved plan contains and every error is a delete error. `nil`
+    /// otherwise. The engine reports delete errors without an address (the
+    /// object is gone from the configuration), so the failed operations come
+    /// from the run's `apply_errored` events.
     public static func failedDeletes(
+        events: [EngineStreamEvent],
         diagnostics: [EngineStreamEvent.Diagnostic],
         approved: PlanFile
     ) -> Set<String>? {
         let errors = diagnostics.filter { $0.severity == "error" }
-        guard !errors.isEmpty else { return nil }
+        let failed = events.filter { $0.type == .applyErrored }.compactMap(\.hook)
+        guard !errors.isEmpty, !failed.isEmpty else { return nil }
         let actions = actionsByAddress(approved)
         var addresses: Set<String> = []
-        for error in errors {
-            guard let address = error.address,
-                  actions[address] == ["delete"],
-                  error.summary.range(of: "delet", options: .caseInsensitive) != nil
-            else { return nil }
+        for hook in failed {
+            let address = hook.resource.addr
+            guard hook.action == "delete", actions[address] == ["delete"] else { return nil }
             addresses.insert(address)
+        }
+        for error in errors {
+            guard error.summary.range(of: "delet", options: .caseInsensitive) != nil else { return nil }
+            if let address = error.address, !addresses.contains(address) { return nil }
         }
         return addresses
     }
@@ -45,6 +52,11 @@ public nonisolated enum DeleteOrderRetry {
     /// Whether the plan changes anything.
     public static func hasChanges(_ plan: PlanFile) -> Bool {
         !actionsByAddress(plan).isEmpty
+    }
+
+    /// The planned changes as "address: actions" lines, for logs.
+    public static func actionsByAddressForDisplay(_ plan: PlanFile) -> [String] {
+        actionsByAddress(plan).sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.joined(separator: "+"))" }
     }
 
     /// Planned actions per address, without no-ops and reads.

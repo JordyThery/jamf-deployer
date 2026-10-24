@@ -570,7 +570,7 @@ final class TenantDeployService {
             updated.catalogPins.removeValue(forKey: sourceID)
         }
         guard updated != tenant else { return tenant }
-        Self.traceUpdates("Reattached \(removed.count) removed catalog source(s) for \(tenant.name)")
+        Self.trace("Reattached \(removed.count) removed catalog source(s) for \(tenant.name)")
         tenantStore.update(updated)
         return updated
     }
@@ -599,15 +599,16 @@ final class TenantDeployService {
 
     /// Per-block updates available from newer tags of the tenant's git
     /// sources (fetches the remotes' tag lists).
-    static let updatesLog = Logger(subsystem: "be.jordythery.jamf-deployer", category: "baseline-updates")
+    static let decisionsLog = Logger(subsystem: "be.jordythery.jamf-deployer", category: "decisions")
 
-    /// Release-check decisions, to Console; Debug builds also append them to
-    /// a file so test runs can be read back without log access.
-    static func traceUpdates(_ message: String) {
-        updatesLog.info("\(message, privacy: .public)")
+    /// Release-check and deploy-retry decisions, to Console; Debug builds
+    /// also append them to a file so test runs can be read back without log
+    /// access.
+    static func trace(_ message: String) {
+        decisionsLog.info("\(message, privacy: .public)")
         #if DEBUG
         let line = Data("\(Date().formatted(.iso8601)) \(message)\n".utf8)
-        let url = URL(filePath: "/tmp/jamf-deployer-updates-trace.log")
+        let url = URL(filePath: "/tmp/jamf-deployer-decisions.log")
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile(); handle.write(line); try? handle.close()
         } else {
@@ -620,16 +621,16 @@ final class TenantDeployService {
         let tenant = reattachOrphanedSelections(of: original)
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []
         let usedSourceIDs = Set(tenant.blockSelections.map(\.sourceID))
-        Self.traceUpdates("Release check for \(tenant.name): sources in use \(usedSourceIDs.sorted()), git sources \(self.catalogSources.customSources.filter { $0.kind == .gitRepository }.map(\.id.uuidString))")
+        Self.trace("Release check for \(tenant.name): sources in use \(usedSourceIDs.sorted()), git sources \(self.catalogSources.customSources.filter { $0.kind == .gitRepository }.map(\.id.uuidString))")
         for source in catalogSources.customSources
         where source.kind == .gitRepository && usedSourceIDs.contains(source.id.uuidString) {
             guard let gitURL = source.gitURL,
                   let latest = try await GitCatalogManager.availableTags(remote: gitURL).last else {
-                Self.traceUpdates("\(source.name): no release tags found")
+                Self.trace("\(source.name): no release tags found")
                 continue
             }
             let pinned = tenant.catalogPins[source.id.uuidString] ?? source.defaultTag ?? latest
-            Self.traceUpdates("\(source.name): pinned \(pinned) (tenant pin \(tenant.catalogPins[source.id.uuidString] ?? "none"), default \(source.defaultTag ?? "none")), latest \(latest)")
+            Self.trace("\(source.name): pinned \(pinned) (tenant pin \(tenant.catalogPins[source.id.uuidString] ?? "none"), default \(source.defaultTag ?? "none")), latest \(latest)")
             guard latest != pinned else { continue }
             try await catalogSources.ensureCheckout(source: source, tag: pinned)
             try await catalogSources.ensureCheckout(source: source, tag: latest)
@@ -639,7 +640,7 @@ final class TenantDeployService {
                 .filter { $0.sourceID == source.id.uuidString }
                 .map(\.blockID)
             let updates = CatalogUpdatePlanner.plan(current: current, candidate: candidate, selectedBlockIDs: selected)
-            Self.traceUpdates("\(source.name): \(updates.count) block update(s) for \(selected)")
+            Self.trace("\(source.name): \(updates.count) block update(s) for \(selected)")
             if !updates.isEmpty {
                 results.append((source, latest, updates))
             }
@@ -1292,8 +1293,12 @@ final class TenantDeployService {
         // The engine can delete an object before updating what still uses it
         // (a block renamed a group another block scopes to); Jamf refuses the
         // delete. Finish the approved plan in order instead of failing.
-        if let approved = try? await runner.showPlan(planFileName: session.planFileName),
-           DeleteOrderRetry.failedDeletes(diagnostics: result.errorDiagnostics, approved: approved) != nil {
+        let approvedPlan = try? await runner.showPlan(planFileName: session.planFileName)
+        if !result.errorDiagnostics.isEmpty {
+            Self.trace("Deploy \(tenant.name): \(result.errorDiagnostics.count) error(s) \(result.errorDiagnostics.map { "\($0.address ?? "-"): \($0.summary)" }); approved plan read: \(approvedPlan != nil); failed deletes: \(approvedPlan.flatMap { DeleteOrderRetry.failedDeletes(events: result.events, diagnostics: result.errorDiagnostics, approved: $0) }.map { Array($0) } ?? [])")
+        }
+        if let approved = approvedPlan,
+           DeleteOrderRetry.failedDeletes(events: result.events, diagnostics: result.errorDiagnostics, approved: approved) != nil {
             let retry = await finishInOrder(tenant: tenant, runner: runner, approved: approved)
             succeeded += retry.succeeded
             result.rawLines += retry.rawLines
@@ -1450,10 +1455,17 @@ final class TenantDeployService {
             let planArguments = ["plan", "-input=false", "-out=\(step.file)", "-json"]
                 + step.targets.map { "-target=\($0)" } + Self.readParallelism(for: tenant)
             logEngine("plan", tenant: tenant)
-            guard let planRun = try? await runner.run(arguments: planArguments),
-                  let plan = try? await runner.showPlan(planFileName: step.file),
-                  DeleteOrderRetry.staysWithin(plan, approved: approved)
-            else { return (succeeded, nil, [], lines) }
+            let planRun: EngineRunner.RunResult
+            do { planRun = try await runner.run(arguments: planArguments) } catch {
+                Self.trace("Ordered deploy: plan \(step.file) failed: \(error)")
+                return (succeeded, nil, [], lines)
+            }
+            guard let plan = try? await runner.showPlan(planFileName: step.file) else {
+                Self.trace("Ordered deploy: could not read \(step.file)")
+                return (succeeded, nil, [], lines)
+            }
+            Self.trace("Ordered deploy: \(step.file) changes \(DeleteOrderRetry.actionsByAddressForDisplay(plan)); within approved: \(DeleteOrderRetry.staysWithin(plan, approved: approved))")
+            guard DeleteOrderRetry.staysWithin(plan, approved: approved) else { return (succeeded, nil, [], lines) }
             lines += planRun.rawLines
             guard DeleteOrderRetry.hasChanges(plan) else { continue }
 

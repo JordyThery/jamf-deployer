@@ -307,7 +307,7 @@ struct RolloutView: View {
         do {
             let available = try await deployService.availableBaselineUpdates(for: tenant)
             guard let release = available.first(where: { $0.source.id == sourceID }) else {
-                TenantDeployService.traceUpdates("Rollout: no release of \(sourceID.uuidString) for \(tenant.name); updates found for \(available.map(\.source.id.uuidString))")
+                TenantDeployService.trace("Rollout: no release of \(sourceID.uuidString) for \(tenant.name); updates found for \(available.map(\.source.id.uuidString))")
                 outcomes[entry.id] = .noChanges
                 advance(from: index)
                 return

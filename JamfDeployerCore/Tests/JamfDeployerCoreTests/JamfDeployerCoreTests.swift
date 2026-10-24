@@ -2437,24 +2437,39 @@ struct DeleteOrderRetryTests {
         try plan([(group, ["delete"]), (newGroup, ["create"]), (policy, ["update"]), ("module.keys.x.unchanged", ["no-op"])])
     }
 
+    static func errored(_ address: String, action: String) throws -> EngineStreamEvent {
+        let parts = address.split(separator: ".")
+        let line = #"{"@level":"error","@message":"\#(address): \#(action) errored","@module":"tofu.ui","@timestamp":"2026-10-24T13:24:04.0+02:00","hook":{"resource":{"addr":"\#(address)","module":"\#(parts.prefix(2).joined(separator: "."))","resource":"\#(parts.suffix(2).joined(separator: "."))","implied_provider":"jamfplatform","resource_type":"\#(parts[parts.count - 2])","resource_name":"\#(parts.last!)","resource_key":null},"action":"\#(action)","elapsed_seconds":0},"type":"apply_errored"}"#
+        return try JSONDecoder().decode(EngineStreamEvent.self, from: Data(line.utf8))
+    }
+
     @Test func retriesWhenOnlyApprovedDeletesFailed() throws {
         let approved = try Self.approved()
-        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error deleting device group", Self.group)], approved: approved) == [Self.group])
+        // OpenTofu reports the delete error without an address; the errored
+        // operation names it.
+        #expect(DeleteOrderRetry.failedDeletes(
+            events: [try Self.errored(Self.group, action: "delete")],
+            diagnostics: [try Self.error("Error deleting device group", nil)],
+            approved: approved) == [Self.group])
         #expect(DeleteOrderRetry.nonDeleteTargets(approved: approved) == [Self.newGroup, Self.policy])
     }
 
     @Test func noRetryForOtherErrors() throws {
         let approved = try Self.approved()
-        // A failed create, an error without an address, or a delete the plan
-        // did not contain all leave the deploy to the user.
-        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error creating device group", Self.newGroup)], approved: approved) == nil)
-        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error deleting device group", nil)], approved: approved) == nil)
-        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error deleting device group", Self.policy)], approved: approved) == nil)
-        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [
-            try Self.error("Error deleting device group", Self.group),
-            try Self.error("Error updating policy", Self.policy),
-        ], approved: approved) == nil)
-        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [], approved: approved) == nil)
+        let deleteFailed = try Self.errored(Self.group, action: "delete")
+        let deleteError = try Self.error("Error deleting device group", nil)
+        // A failed create, a failed delete the plan did not contain, another
+        // error next to the delete, or no errored operation at all.
+        #expect(DeleteOrderRetry.failedDeletes(events: [try Self.errored(Self.newGroup, action: "create")],
+                                               diagnostics: [try Self.error("Error creating device group", Self.newGroup)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [try Self.errored(Self.policy, action: "delete")],
+                                               diagnostics: [deleteError], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [deleteFailed, try Self.errored(Self.policy, action: "update")],
+                                               diagnostics: [deleteError, try Self.error("Error updating policy", Self.policy)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [deleteFailed],
+                                               diagnostics: [deleteError, try Self.error("Invalid provider configuration", nil)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [], diagnostics: [deleteError], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [deleteFailed], diagnostics: [], approved: approved) == nil)
     }
 
     @Test func retryPlansMustStayWithinTheApprovedPlan() throws {

@@ -17,7 +17,10 @@ def call(method, path):
         "Authorization": "Bearer " + token, "X-Environment-Id": kc("environment-id"), "Accept": "application/json"})
     with urllib.request.urlopen(request) as response:
         data = response.read()
-        return json.loads(data) if data else None
+        try:
+            return json.loads(data) if data else None
+        except ValueError:
+            return None  # Classic API deletes answer in XML
 # (label, list path, list key, name key, delete path); dependents first.
 kinds = [
     ("policy", "/proclassic/policies", "policies", "name", "/proclassic/policies/id/{}"),
