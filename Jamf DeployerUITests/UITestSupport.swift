@@ -77,6 +77,15 @@ class DeployerUITestCase: XCTestCase {
             let expectation = XCTNSPredicateExpectation(predicate: enabled, object: element)
             XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: timeout), .completed, "Disabled \(element)", file: file, line: line)
         }
+        // A control below the visible part of a long page: scroll it into view.
+        if !element.isHittable, let scrollView = app.scrollViews.allElementsBoundByIndex
+            .first(where: { $0.frame.contains(CGPoint(x: element.frame.midX, y: $0.frame.midY)) }) {
+            var attempts = 0
+            while !element.isHittable, attempts < 30 {
+                scrollView.scroll(byDeltaX: 0, deltaY: element.frame.midY > scrollView.frame.maxY ? -120 : 120)
+                attempts += 1
+            }
+        }
         element.click()
     }
 
