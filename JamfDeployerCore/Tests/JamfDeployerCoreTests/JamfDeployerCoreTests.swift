@@ -2354,6 +2354,38 @@ struct CaptureWiringTests {
         #expect(variables.contains(#"variable "dep_extension_attribute_names""#))
     }
 
+    @Test func preStageDeviceAssignmentsAreLeftOut() throws {
+        let export = FileManager.default.temporaryDirectory.appending(path: "prestage-scope-\(UUID().uuidString)")
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "prestage-scope-dst-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: export); try? FileManager.default.removeItem(at: catalog) }
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try Data("""
+        resource "jamfplatform_pro_computer_prestage_enrollment" "assigned" {
+          display_name         = "Assigned"
+          scope_serial_numbers = [
+            "C02ABC123",
+            "C02DEF456",
+          ]
+          supervised = true
+        }
+
+        resource "jamfplatform_pro_computer_prestage_enrollment" "empty" {
+          display_name         = "Empty"
+          scope_serial_numbers = []
+          supervised           = true
+        }
+        """.utf8).write(to: export.appending(path: "pro_computer_prestage_enrollment.tf"))
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "prestages", name: "PreStages", summary: "", namePrefix: "",
+            sourceDirectory: export, catalogRootDirectory: catalog))
+        let text = try String(contentsOf: result.blockFolderURL.appending(path: "pro_computer_prestage_enrollment.tf"), encoding: .utf8)
+        #expect(!text.contains("scope_serial_numbers"))
+        #expect(!text.contains("C02ABC123"))
+        #expect(text.contains("supervised"))
+        #expect(result.objectCount == 2)
+        #expect(result.warnings.filter { $0.contains("device assignments of 1 PreStage") }.count == 1)
+    }
+
     @Test func advancedSearchesCapturedWithTheirGroupsReferenceThemDirectly() throws {
         let export = try Self.writeExport()
         let catalog = FileManager.default.temporaryDirectory.appending(path: "wiring-dst-\(UUID().uuidString)")
