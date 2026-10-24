@@ -106,10 +106,12 @@ class DeployerUITestCase: XCTestCase {
     }
 
     func openTenant(_ name: String, tab: String = "Overview") {
-        // A click while a text field is editing only ends editing; retry until the page shows.
-        for _ in 0..<3 {
+        // A click while a text field is editing only ends editing, and right
+        // after connecting the page can take a few seconds to appear; retry
+        // until it shows.
+        for _ in 0..<5 {
             openSidebar(name)
-            if app.windows[name].waitForExistence(timeout: 3) { break }
+            if app.windows[name].waitForExistence(timeout: 5) { break }
         }
         XCTAssertTrue(app.windows[name].exists, "Tenant page \(name) did not open")
         let segment = app.radioButtons[tab].firstMatch
