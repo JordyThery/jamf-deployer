@@ -84,6 +84,8 @@ Deselecting a block offers two choices. **Remove from Tenant** deletes the block
 
 A tenant-wide setting can belong to one block only: selecting two blocks that manage the same setting stops the preview with a message naming both.
 
+Some blocks do the same job in different ways — the fleet blocks' Mac Security and the FileVault block, for example. A block lists those in its `block.json` under `conflicts`; the baseline editor flags such a pair and the preview refuses to run until one of them is deselected.
+
 ## Presets
 
 Presets come from the catalogs you follow. The demo catalog ships five:
