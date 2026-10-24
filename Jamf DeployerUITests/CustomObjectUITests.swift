@@ -106,24 +106,4 @@ final class CustomObjectUITests: DeployerUITestCase {
             attempts += 1
         }
     }
-
-    private func checkForChanges(on tenant: String, expectingChanges: Bool) throws {
-        openTenant(tenant)
-        let check = app.toolbars.buttons["Check for Changes"]
-        tap(check, timeout: 60)
-        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: check)
-        waitForExpectations(timeout: 600)
-        sleep(2)
-        let failure = anyContaining("The last check for changes failed")
-        if failure.exists {
-            XCTFail("The check failed on \(tenant): \(failure.label.isEmpty ? (failure.value as? String ?? "") : failure.label)")
-            return
-        }
-        let changed = any("Changed in Jamf")
-        if expectingChanges {
-            XCTAssertTrue(changed.waitForExistence(timeout: 30), "No changes were detected on \(tenant)")
-        } else {
-            XCTAssertFalse(changed.waitForExistence(timeout: 5), "Changes were reported on unchanged \(tenant)")
-        }
-    }
 }

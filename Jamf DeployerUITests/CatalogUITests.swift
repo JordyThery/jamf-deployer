@@ -62,7 +62,7 @@ final class CatalogUITests: DeployerUITestCase {
         for block in ["Enrollment,", "Mobile Enrollment,"] {
             openSettings(of: block)
             let ade = app.textFields.matching(NSPredicate(format: "placeholderValue == 'Required' AND value == ''")).firstMatch
-            type("Apple Business Manager", into: ade)
+            type(ProcessInfo.processInfo.environment["CATALOG_ADE_NAME"] ?? "Apple Business Manager", into: ade)
             app.typeKey(.return, modifierFlags: [])
             tap(app.buttons["Hide Settings"].firstMatch, timeout: 5)
         }
@@ -102,12 +102,12 @@ final class CatalogUITests: DeployerUITestCase {
 
     /// A fresh deploy shows no changes.
     func test05NoChangesAfterDeploy() throws {
-        try checkForChanges(expectingChanges: false)
+        try checkForChanges(on: Self.tenant, expectingChanges: false)
     }
 
     /// Precondition (set by the script): one field changed on every object type.
     func test06DetectsEveryChange() throws {
-        try checkForChanges(expectingChanges: true)
+        try checkForChanges(on: Self.tenant, expectingChanges: true)
     }
 
     func test07RestoreBaseline() throws {
@@ -115,7 +115,7 @@ final class CatalogUITests: DeployerUITestCase {
         tap(app.buttons["Restore Baseline…"], timeout: 30)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
-        try checkForChanges(expectingChanges: false)
+        try checkForChanges(on: Self.tenant, expectingChanges: false)
     }
 
     /// Precondition (set by the script): six "UIC - Adopt" objects of
@@ -148,16 +148,16 @@ final class CatalogUITests: DeployerUITestCase {
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
         XCTAssertTrue(anyContaining("6 adopted objects").waitForExistence(timeout: 15), "The objects were not adopted")
-        try checkForChanges(expectingChanges: false)
+        try checkForChanges(on: Self.tenant, expectingChanges: false)
     }
 
     /// Precondition (set by the script): the adopted policy and script changed in Jamf.
     func test07cRestoreAdoptedObjects() throws {
-        try checkForChanges(expectingChanges: true)
+        try checkForChanges(on: Self.tenant, expectingChanges: true)
         tap(app.buttons["Restore Baseline…"], timeout: 30)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
-        try checkForChanges(expectingChanges: false)
+        try checkForChanges(on: Self.tenant, expectingChanges: false)
     }
 
     /// Unticks every block and removes them all from the tenant in one deploy.
@@ -185,38 +185,4 @@ final class CatalogUITests: DeployerUITestCase {
 
     // MARK: Helpers
 
-    /// Opens a block's settings: the Show Settings button on the block's row.
-    private func openSettings(of blockLabelPrefix: String) {
-        let checkbox = blockCheckbox(String(blockLabelPrefix.dropLast()))
-        XCTAssertTrue(checkbox.waitForExistence(timeout: 10), "\(blockLabelPrefix) not listed")
-        let buttons = app.buttons.matching(NSPredicate(format: "label == 'Show Settings'")).allElementsBoundByIndex
-        let row = buttons.min { abs($0.frame.midY - checkbox.frame.midY) < abs($1.frame.midY - checkbox.frame.midY) }
-        guard let button = row, abs(button.frame.midY - checkbox.frame.midY) < 30 else {
-            XCTFail("No Show Settings button next to \(blockLabelPrefix)")
-            return
-        }
-        button.click()
-    }
-
-    private func checkForChanges(expectingChanges: Bool) throws {
-        openTenant(Self.tenant)
-        let check = app.toolbars.buttons["Check for Changes"]
-        tap(check, timeout: 30)
-        // The button is disabled while the check runs.
-        let finished = NSPredicate(format: "isEnabled == true")
-        expectation(for: finished, evaluatedWith: check)
-        waitForExpectations(timeout: 1200)
-        sleep(2)
-        let failure = anyContaining("The last check for changes failed")
-        if failure.exists {
-            XCTFail("The check failed: \(failure.label.isEmpty ? (failure.value as? String ?? "") : failure.label)")
-            return
-        }
-        let changed = any("Changed in Jamf")
-        if expectingChanges {
-            XCTAssertTrue(changed.waitForExistence(timeout: 30), "No changes were detected")
-        } else {
-            XCTAssertFalse(changed.waitForExistence(timeout: 5), "Changes were reported on an unchanged tenant")
-        }
-    }
 }

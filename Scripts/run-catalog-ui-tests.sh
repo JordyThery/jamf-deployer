@@ -38,6 +38,9 @@ git clone -q --bare "$WORK/work" "$WORK/catalog.git"
 export TEST_RUNNER_UITEST_CATALOG_URL="file://$WORK/catalog.git"
 export TEST_RUNNER_UITEST_CATALOG_TAG="v9.0.0"
 export TEST_RUNNER_CATALOG_CONNECTION="$CONNECTION"
+# The ADE instance both PreStages attach to (CATALOG_ADE_NAME, default
+# "Apple Business Manager").
+export TEST_RUNNER_CATALOG_ADE_NAME="${CATALOG_ADE_NAME:-Apple Business Manager}"
 if [[ "$CONNECTION" == jamfPro ]]; then
     export TEST_RUNNER_CATALOG_CREDENTIALS=CAT
     export TEST_RUNNER_CAT_URL="https://$(kc jamfpro-fqdn)"

@@ -315,6 +315,42 @@ class DeployerUITestCase: XCTestCase {
     }
 
     /// The baseline editor's checkbox for a catalog block.
+    /// Opens a block's settings: the Show Settings button on the block's row.
+    func openSettings(of blockLabelPrefix: String) {
+        let checkbox = blockCheckbox(String(blockLabelPrefix.dropLast()))
+        XCTAssertTrue(checkbox.waitForExistence(timeout: 10), "\(blockLabelPrefix) not listed")
+        let buttons = app.buttons.matching(NSPredicate(format: "label == 'Show Settings'")).allElementsBoundByIndex
+        let row = buttons.min { abs($0.frame.midY - checkbox.frame.midY) < abs($1.frame.midY - checkbox.frame.midY) }
+        guard let button = row, abs(button.frame.midY - checkbox.frame.midY) < 30 else {
+            XCTFail("No Show Settings button next to \(blockLabelPrefix)")
+            return
+        }
+        button.click()
+    }
+
+    /// Runs Check for Changes on a tenant and checks whether it found any.
+    func checkForChanges(on tenant: String, expectingChanges: Bool) throws {
+        openTenant(tenant)
+        let check = app.toolbars.buttons["Check for Changes"]
+        tap(check, timeout: 30)
+        // The button is disabled while the check runs.
+        let finished = NSPredicate(format: "isEnabled == true")
+        expectation(for: finished, evaluatedWith: check)
+        waitForExpectations(timeout: 1200)
+        sleep(2)
+        let failure = anyContaining("The last check for changes failed")
+        if failure.exists {
+            XCTFail("The check failed: \(failure.label.isEmpty ? (failure.value as? String ?? "") : failure.label)")
+            return
+        }
+        let changed = any("Changed in Jamf")
+        if expectingChanges {
+            XCTAssertTrue(changed.waitForExistence(timeout: 30), "No changes were detected")
+        } else {
+            XCTAssertFalse(changed.waitForExistence(timeout: 5), "Changes were reported on an unchanged tenant")
+        }
+    }
+
     func blockCheckbox(_ name: String) -> XCUIElement {
         app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", name + ",")).firstMatch
     }
