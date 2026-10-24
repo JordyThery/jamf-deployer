@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import os
 import DeployerKit
 import JamfDeployerCore
 
@@ -565,14 +566,36 @@ final class TenantDeployService {
 
     /// Per-block updates available from newer tags of the tenant's git
     /// sources (fetches the remotes' tag lists).
+    static let updatesLog = Logger(subsystem: "be.jordythery.jamf-deployer", category: "baseline-updates")
+
+    /// Release-check decisions, to Console; Debug builds also append them to
+    /// a file so test runs can be read back without log access.
+    static func traceUpdates(_ message: String) {
+        updatesLog.info("\(message, privacy: .public)")
+        #if DEBUG
+        let line = Data("\(Date().formatted(.iso8601)) \(message)\n".utf8)
+        let url = URL(filePath: "/tmp/jamf-deployer-updates-trace.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(line); try? handle.close()
+        } else {
+            try? line.write(to: url)
+        }
+        #endif
+    }
+
     func availableBaselineUpdates(for tenant: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []
         let usedSourceIDs = Set(tenant.blockSelections.map(\.sourceID))
+        Self.traceUpdates("Release check for \(tenant.name): sources in use \(usedSourceIDs.sorted()), git sources \(self.catalogSources.customSources.filter { $0.kind == .gitRepository }.map(\.id.uuidString))")
         for source in catalogSources.customSources
         where source.kind == .gitRepository && usedSourceIDs.contains(source.id.uuidString) {
             guard let gitURL = source.gitURL,
-                  let latest = try await GitCatalogManager.availableTags(remote: gitURL).last else { continue }
+                  let latest = try await GitCatalogManager.availableTags(remote: gitURL).last else {
+                Self.traceUpdates("\(source.name): no release tags found")
+                continue
+            }
             let pinned = tenant.catalogPins[source.id.uuidString] ?? source.defaultTag ?? latest
+            Self.traceUpdates("\(source.name): pinned \(pinned) (tenant pin \(tenant.catalogPins[source.id.uuidString] ?? "none"), default \(source.defaultTag ?? "none")), latest \(latest)")
             guard latest != pinned else { continue }
             try await catalogSources.ensureCheckout(source: source, tag: pinned)
             try await catalogSources.ensureCheckout(source: source, tag: latest)
@@ -582,6 +605,7 @@ final class TenantDeployService {
                 .filter { $0.sourceID == source.id.uuidString }
                 .map(\.blockID)
             let updates = CatalogUpdatePlanner.plan(current: current, candidate: candidate, selectedBlockIDs: selected)
+            Self.traceUpdates("\(source.name): \(updates.count) block update(s) for \(selected)")
             if !updates.isEmpty {
                 results.append((source, latest, updates))
             }
