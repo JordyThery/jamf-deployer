@@ -40,7 +40,27 @@ Opinionated configuration — what your FileVault, enrollment or update policy s
 | **Mobile Passcode** | A passcode policy for iPads and iPhones: minimum length, no simple values, automatic lock. | Medium |
 | **Mobile Enrollment** | A mobile PreStage for Automated Device Enrollment: supervised, MDM non-removable, consumer setup panes skipped. | Medium |
 
-Every demo block has a Jamf Pro API version except Software Updates and Compliance — CIS Level 1, which build on Platform features (Blueprints and compliance benchmarks). On a tenant connected through the Jamf Pro API those two show as needing the Platform API, and presets leave them out.
+Each of these blocks has a Jamf Pro API version except Software Updates and Compliance — CIS Level 1, which build on Platform features (Blueprints and compliance benchmarks). On a tenant connected through the Jamf Pro API those two show as needing the Platform API, and presets leave them out.
+
+The demo catalog also holds a set of **fleet blocks** built around a fleet split into one-to-one and shared devices, for Macs, iPads and iPhones. They deploy through the Jamf Platform API.
+
+| Block | Creates | Impact |
+| --- | --- | --- |
+| **Fleet Foundation** | The groups, extension attributes and categories the other fleet blocks build on. Select it with any of them. | Low |
+| **Mac Provisioning** | A first-run workflow: enrollment and first-run policies, Rosetta 2, removal of unused Apple apps, and a Self Service item for Macs enrolled without a PreStage. | Medium |
+| **Mac PreStages** | Computer PreStages for one-to-one and shared Macs. | Medium |
+| **Mac Security** | Firewall, screen lock, restrictions, login window and FileVault through profiles. Use it instead of the FileVault block. | High |
+| **FileVault Key Management** | Reissues invalid recovery keys at login and from Self Service, and rotates valid keys monthly. | Medium |
+| **Mac Preferences and Privacy** | Finder and Energy Saver settings, managed login items, privacy approvals and privilege elevation. | Medium |
+| **macOS Update Profiles** | Software update settings and deferrals through profiles. Use it instead of Software Updates. | Medium |
+| **Microsoft Apps** | Microsoft 365 apps, Edge, Teams, OneDrive and Windows App from the App Catalog. | Medium |
+| **Common Apps** | Chrome, Zoom, Webex, Acrobat Reader and Creative Cloud from the App Catalog. | Medium |
+| **Mac Maintenance** | Inventory at startup and weekly, and Self Service items to submit inventory and collect logs. | Low |
+| **iPad and iPhone Restrictions** | Baseline, shared-device and CIS Level 1 restrictions, lock screen information, a passcode policy and update deferral. Use it instead of Mobile Passcode. | High |
+| **iPad and iPhone PreStages** | Mobile PreStages for one-to-one and shared devices. | Medium |
+| **Saved Searches** | Advanced computer and mobile device searches for the fleet groups. | Low |
+
+On Macs, the fleet's All Managed group means "first run complete", so the Mac blocks reach a Mac once Mac Provisioning's first-run workflow has finished on it.
 
 Both App Store blocks pick apps with **Choose Apps…**, which lists only apps the tenant holds Apps and Books licenses for. Every tenant they deploy to needs licenses for the same apps, free apps included. Per app you choose the delivery (install automatically or offer in Self Service) and a category. When a tenant has several Apps and Books locations, the picker asks which one; the block stores its name in the **Apps and Books location** setting, which is looked up by name on each tenant.
 
@@ -66,12 +86,13 @@ A tenant-wide setting can belong to one block only: selecting two blocks that ma
 
 ## Presets
 
-Presets come from the catalogs you follow. The demo catalog ships four:
+Presets come from the catalogs you follow. The demo catalog ships five:
 
 - **Standard** — device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1 (monitor), Rosetta 2.
 - **Minimal** — device groups, categories and software updates; a starting point to grow from.
 - **Mobile** — categories, mobile device groups, a passcode policy and a mobile PreStage.
-- **Complete** — everything in the demo catalog: Standard plus the tenant settings, Self Service maintenance, macOS version groups and the mobile blocks.
+- **Complete** — Standard plus the tenant settings, Self Service maintenance, macOS version groups and the mobile blocks.
+- **Fleet** — all thirteen fleet blocks.
 
 A preset is just a starting selection. Everything stays editable afterwards.
 

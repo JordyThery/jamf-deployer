@@ -106,9 +106,31 @@ public nonisolated enum BlockCapture {
         var nameByTypeAndID: [String: String] = [:]
         /// "jamfplatform_pro_script.foo" → object name.
         var nameByAddress: [String: String] = [:]
+        /// "jamfplatform_pro_script#143" → "jamfplatform_pro_script.foo".
+        var addressByTypeAndID: [String: String] = [:]
+        /// Device groups with `device_type = "mobile"`.
+        var mobileGroupAddresses: Set<String> = []
+        /// Names of the computer device groups in the export.
+        var computerGroupNames: Set<String> = []
 
         func name(type: String, id: String) -> String? {
             nameByTypeAndID["\(type)#\(id)"]
+        }
+
+        func address(type: String, id: String) -> String? {
+            addressByTypeAndID["\(type)#\(id)"]
+        }
+
+        /// The key other blocks use for an object in the name-keyed
+        /// dependency maps: its name, except that a mobile group sharing its
+        /// name with a computer group becomes "<name> (mobile)" — Jamf allows
+        /// the same name for both kinds, but a map key can appear only once.
+        func dependencyKey(address: String) -> String? {
+            guard let name = nameByAddress[address] else { return nil }
+            if mobileGroupAddresses.contains(address), computerGroupNames.contains(name) {
+                return "\(name) (mobile)"
+            }
+            return name
         }
     }
 
@@ -615,7 +637,7 @@ public nonisolated enum BlockCapture {
                   let depKey = Self.dependencyTypes[String(header.1)]
             else { continue }
             let address = "\(header.1).\(header.2)"
-            guard let objectName = table.nameByAddress[address]
+            guard let objectName = table.dependencyKey(address: address)
                 ?? block.firstMatch(of: /\n\s+name\s+= "([^"]*)"/).map({ String($0.1) })
             else { continue }
             provides[depKey, default: []].append((address, objectName))
@@ -1123,6 +1145,14 @@ public nonisolated enum BlockCapture {
                 table.nameByAddress[address] = name
                 if let id = idByAddress[address] {
                     table.nameByTypeAndID["\(header.1)#\(id)"] = name
+                    table.addressByTypeAndID["\(header.1)#\(id)"] = address
+                }
+                if header.1 == "jamfplatform_device_group" {
+                    if block.range(of: #"\n\s*device_type\s*=\s*"mobile""#, options: .regularExpression) != nil {
+                        table.mobileGroupAddresses.insert(address)
+                    } else {
+                        table.computerGroupNames.insert(name)
+                    }
                 }
             }
         }
@@ -1141,21 +1171,22 @@ public nonisolated enum BlockCapture {
     ) -> [String: Set<String>] {
         var needs: [String: Set<String>] = [:]
 
-        func record(_ depKey: String, _ name: String) -> String {
+        func record(_ depKey: String, address: String) -> String? {
             // Objects captured into this same block are referenced directly.
-            if let type = dependencyTypes.first(where: { $0.value == depKey })?.key,
-               let address = table.nameByAddress.first(where: { $0.value == name && $0.key.hasPrefix(type + ".") })?.key,
-               localAddresses.contains(address) {
+            if localAddresses.contains(address) {
                 return "\(address).id"
             }
-            needs[depKey, default: []].insert(name)
-            return "var.dep_\(depKey)_ids[\(hclStringLiteral(name))]"
+            guard let key = table.dependencyKey(address: address) else { return nil }
+            needs[depKey, default: []].insert(key)
+            return "var.dep_\(depKey)_ids[\(hclStringLiteral(key))]"
         }
 
         // category_id = "7" (with or without the exporter's TODO note).
         text = replacing(in: text, pattern: #"(?<![A-Za-z0-9_])category_id\s*= "(\d+)"( # TODO: unresolved reference)?"#) { match in
-            guard let name = table.name(type: "jamfplatform_pro_category", id: match[1]) else { return nil }
-            return "category_id = \(record("category", name))"
+            guard let address = table.address(type: "jamfplatform_pro_category", id: match[1]),
+                  let reference = record("category", address: address)
+            else { return nil }
+            return "category_id = \(reference)"
         }
 
         // PreStages name their enrollment customization by numeric ID ("0"
@@ -1163,11 +1194,13 @@ public nonisolated enum BlockCapture {
         // origin's ID means nothing elsewhere, so it falls back to none.
         text = replacing(in: text, pattern: #"enrollment_customization_id\s*= "(\d+)""#) { match in
             guard match[1] != "0" else { return nil }
-            guard let name = table.name(type: "jamfplatform_pro_enrollment_customization", id: match[1]) else {
+            guard let address = table.address(type: "jamfplatform_pro_enrollment_customization", id: match[1]),
+                  let reference = record("enrollment_customization", address: address)
+            else {
                 warnings.append("A PreStage used an enrollment customization that is not part of the export; it deploys without one. Export the customization with it to keep the link.")
                 return "enrollment_customization_id = \"0\""
             }
-            return "enrollment_customization_id = \(record("enrollment_customization", name))"
+            return "enrollment_customization_id = \(reference)"
         }
 
         // id = "12" # TODO: … inside scripts/packages containers.
@@ -1190,12 +1223,13 @@ public nonisolated enum BlockCapture {
                 : container.contains("packages") ? "package" : nil
             guard let key = depKey,
                   let type = dependencyTypes.first(where: { $0.value == key })?.key,
-                  let name = table.name(type: type, id: String(match.2))
+                  let address = table.address(type: type, id: String(match.2)),
+                  let reference = record(key, address: address)
             else {
                 warnings.append("A reference to \(container.last ?? "an object") with ID \(match.2) could not be resolved to a name — review it before deploying.")
                 continue
             }
-            lines[index] = "\(match.1)id = \(record(key, name))"
+            lines[index] = "\(match.1)id = \(reference)"
         }
         text = lines.joined(separator: "\n")
 
@@ -1210,8 +1244,9 @@ public nonisolated enum BlockCapture {
             else { return nil }
             let type = String(address.split(separator: ".").first ?? "")
             if let depKey = dependencyTypes[type], !Self.isBuiltinGroupName(name) {
-                needs[depKey, default: []].insert(name)
-                return "var.dep_\(depKey)_names[\(hclStringLiteral(name))]"
+                let key = table.dependencyKey(address: address) ?? name
+                needs[depKey, default: []].insert(key)
+                return "var.dep_\(depKey)_names[\(hclStringLiteral(key))]"
             }
             return hclStringLiteral(name)
         }
@@ -1227,8 +1262,9 @@ public nonisolated enum BlockCapture {
                 builtinGroupNames.insert(name)
                 return "local.builtin_group_jamf_pro_ids[\(hclStringLiteral(name))]"
             }
-            needs["device_group", default: []].insert(name)
-            return "var.dep_device_group_jamf_pro_ids[\(hclStringLiteral(name))]"
+            let key = table.dependencyKey(address: address) ?? name
+            needs["device_group", default: []].insert(key)
+            return "var.dep_device_group_jamf_pro_ids[\(hclStringLiteral(key))]"
         }
 
         // Jamf's built-in device groups exist in every tenant and are looked
@@ -1250,7 +1286,7 @@ public nonisolated enum BlockCapture {
                 if depKey == "device_group", Self.isBuiltinGroupName(name) {
                     return builtinGroupUUIDLookup(name)
                 }
-                return record(depKey, name)
+                return record(depKey, address: address)
             }
         }
 
@@ -1273,10 +1309,12 @@ public nonisolated enum BlockCapture {
                         elements.append(token)
                         continue
                     }
-                    if let name = table.name(type: "jamfplatform_device_group", id: String(uuid)) {
-                        elements.append(Self.isBuiltinGroupName(name)
-                            ? builtinGroupUUIDLookup(name)
-                            : record("device_group", name))
+                    if let address = table.address(type: "jamfplatform_device_group", id: String(uuid)),
+                       let name = table.nameByAddress[address],
+                       let reference = Self.isBuiltinGroupName(name)
+                        ? builtinGroupUUIDLookup(name)
+                        : record("device_group", address: address) {
+                        elements.append(reference)
                         resolvedAny = true
                     } else {
                         resolvedAll = false
@@ -1312,7 +1350,101 @@ public nonisolated enum BlockCapture {
             return "\(match[1])var.dep_extension_attribute_names[\(hclStringLiteral(original))]"
         }
 
+        // Advanced searches name groups and extension attributes as plain
+        // strings, with no reference the exporter could resolve. Wiring them
+        // makes the search use the deployed names and wait for the objects.
+        if text.contains("resource \"jamfplatform_pro_advanced_") {
+            text = wiringAdvancedSearches(
+                in: text, table: table, localAddresses: localAddresses,
+                namePrefix: namePrefix, eaOriginalByName: eaOriginalByCriteria,
+                localEAAddressesByName: localEAAddressesByName, needs: &needs)
+        }
+
         return needs
+    }
+
+    /// Rewrites the group and extension attribute names in advanced searches
+    /// (criteria and display fields) into references.
+    static func wiringAdvancedSearches(
+        in text: String,
+        table: ReferenceTable,
+        localAddresses: Set<String>,
+        namePrefix: String,
+        eaOriginalByName: [String: String],
+        localEAAddressesByName: [String: String],
+        needs: inout [String: Set<String>]
+    ) -> String {
+        // The prefix pass may have rewritten the names already.
+        func original(_ literal: String) -> String {
+            let parameterized = "${var.name_prefix}"
+            return literal.hasPrefix(parameterized) ? namePrefix + literal.dropFirst(parameterized.count) : literal
+        }
+        func groupReference(_ literal: String, mobile: Bool) -> String? {
+            let name = original(literal)
+            guard !isBuiltinGroupName(name),
+                  let address = table.nameByAddress.first(where: { address, groupName in
+                      groupName == name && address.hasPrefix("jamfplatform_device_group.")
+                          && table.mobileGroupAddresses.contains(address) == mobile
+                  })?.key
+            else { return nil }
+            if localAddresses.contains(address) { return "\(address).name" }
+            guard let key = table.dependencyKey(address: address) else { return nil }
+            needs["device_group", default: []].insert(key)
+            return "var.dep_device_group_names[\(hclStringLiteral(key))]"
+        }
+        func attributeReference(_ literal: String) -> String? {
+            guard let name = eaOriginalByName[literal] else { return nil }
+            if let address = localEAAddressesByName[name] { return "\(address).name" }
+            needs["extension_attribute", default: []].insert(name)
+            return "var.dep_extension_attribute_names[\(hclStringLiteral(name))]"
+        }
+
+        let blocks = ExportedObjectInventory.topLevelBlocks(in: text).map { block -> String in
+            let computer = block.hasPrefix("resource \"jamfplatform_pro_advanced_computer_search\"")
+            guard computer || block.hasPrefix("resource \"jamfplatform_pro_advanced_mobile_device_search\"") else {
+                return block
+            }
+            // One criterion per `{ … }` object: its name says what the value
+            // is. The prefix interpolation is masked so its braces do not end
+            // the object early.
+            let parameterized = "${var.name_prefix}", mask = "\u{1}NAME_PREFIX\u{1}"
+            var block = replacing(in: block.replacingOccurrences(of: parameterized, with: mask),
+                                  pattern: #"\{[^{}]*\}"#) { match in
+                let criterion = match[0].replacingOccurrences(of: mask, with: parameterized)
+                guard let field = criterion.firstMatch(of: /\n(\s*)name(\s*)= "([^"]+)"/),
+                      let value = criterion.firstMatch(of: /\n\s*value\s*= "([^"]*)"/)
+                else { return nil }
+                var rewritten = criterion
+                switch String(field.3) {
+                case "Computer Group", "Mobile Device Group":
+                    guard let reference = groupReference(String(value.1), mobile: field.3 == "Mobile Device Group") else { return nil }
+                    rewritten = criterion.replacingOccurrences(of: String(value.0), with: String(value.0).replacingOccurrences(
+                        of: "\"\(value.1)\"", with: reference))
+                default:
+                    // Extension attributes exist for computers only as a
+                    // dependency type.
+                    guard computer, let reference = attributeReference(String(field.3)) else { return nil }
+                    rewritten = criterion.replacingOccurrences(
+                        of: String(field.0), with: "\n\(field.1)name\(field.2)= \(reference)")
+                }
+                return rewritten.replacingOccurrences(of: parameterized, with: mask)
+            }
+            .replacingOccurrences(of: mask, with: parameterized)
+            if computer {
+                block = replacing(in: block, pattern: #"(display_fields\s*= \[)([^\]]*)\]"#) { match in
+                    let elements = match[2].split(separator: ",").map { element -> String in
+                        let trimmed = element.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard let literal = trimmed.wholeMatch(of: /"([^"]*)"/)?.1,
+                              let reference = attributeReference(String(literal))
+                        else { return trimmed }
+                        return reference
+                    }
+                    return "\(match[1])\(elements.joined(separator: ", "))]"
+                }
+            }
+            return block
+        }
+        return blocks.joined(separator: "\n\n") + "\n"
     }
 
     /// Whether `text` references `address` as a whole word, so stripping

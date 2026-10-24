@@ -2190,3 +2190,182 @@ struct GitHubRepositoryTests {
         #expect(try String(contentsOf: readme, encoding: .utf8) == "# Jamf tenants as code\n\nThis repository\n")
     }
 }
+
+@Suite("Capture wiring")
+struct CaptureWiringTests {
+    /// An export with a computer and a mobile group sharing a name, an
+    /// extension attribute, a mobile profile scoped to the mobile group, and
+    /// advanced searches naming the groups and the attribute as strings.
+    static func writeExport() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "wiring-src-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let files: [String: String] = [
+            "device_groups.tf": """
+            resource "jamfplatform_device_group" "fleet_all_managed_computer" {
+              device_type = "computer"
+              group_type  = "smart"
+              name        = "Fleet - All Managed"
+            }
+
+            resource "jamfplatform_device_group" "fleet_all_managed_mobile" {
+              device_type = "mobile"
+              group_type  = "smart"
+              name        = "Fleet - All Managed"
+            }
+            """,
+            "device_groups_import.tf": """
+            import {
+              id = "aaaaaaaa-0000-0000-0000-000000000001"
+              to = jamfplatform_device_group.fleet_all_managed_computer
+            }
+
+            import {
+              id = "aaaaaaaa-0000-0000-0000-000000000002"
+              to = jamfplatform_device_group.fleet_all_managed_mobile
+            }
+            """,
+            "pro_computer_extension_attribute.tf": """
+            resource "jamfplatform_pro_computer_extension_attribute" "fleet_notes" {
+              data_type  = "STRING"
+              input_type = "TEXT"
+              name       = "Fleet - Notes"
+            }
+            """,
+            "pro_mobile_device_configuration_profile.tf": """
+            resource "jamfplatform_pro_mobile_device_configuration_profile" "fleet_lock_screen" {
+              name = "Fleet - Lock Screen"
+              scope = {
+                targets = {
+                  mobile_device_group_ids = [
+                    jamfplatform_device_group.fleet_all_managed_mobile.jamf_pro_id,
+                  ]
+                }
+              }
+            }
+            """,
+            "pro_advanced_computer_search.tf": """
+            resource "jamfplatform_pro_advanced_computer_search" "managed" {
+              criteria = [
+                {
+                  and_or      = "and"
+                  name        = "Computer Group"
+                  priority    = 0
+                  search_type = "member of"
+                  value       = "Fleet - All Managed"
+                },
+                {
+                  and_or      = "and"
+                  name        = "Fleet - Notes"
+                  priority    = 1
+                  search_type = "like"
+                  value       = "loaner"
+                },
+              ]
+              display_fields = ["Computer Name", "Fleet - Notes"]
+              name           = "Fleet - Managed Macs"
+            }
+            """,
+            "pro_advanced_mobile_device_search.tf": """
+            resource "jamfplatform_pro_advanced_mobile_device_search" "managed" {
+              criteria = [
+                {
+                  and_or      = "and"
+                  name        = "Mobile Device Group"
+                  priority    = 0
+                  search_type = "member of"
+                  value       = "Fleet - All Managed"
+                },
+              ]
+              display_fields = ["Display Name"]
+              name           = "Fleet - Managed Devices"
+            }
+            """,
+        ]
+        for (name, text) in files {
+            try Data(text.utf8).write(to: directory.appending(path: name))
+        }
+        return directory
+    }
+
+    /// Captures `addresses` from the export as their own block, the way a
+    /// split capture does: a pruned copy, resolved against the full export.
+    static func capture(_ id: String, keeping addresses: Set<String>, from export: URL, into catalog: URL) throws -> URL {
+        let staging = FileManager.default.temporaryDirectory.appending(path: "wiring-slice-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.copyItem(at: export, to: staging)
+        try ExportedObjectInventory.prune(directory: staging, keeping: addresses)
+        return try BlockCapture.capture(BlockCapture.Request(
+            blockID: id, name: id, summary: "", namePrefix: "Fleet - ",
+            sourceDirectory: staging, catalogRootDirectory: catalog,
+            resolutionDirectory: export)).blockFolderURL
+    }
+
+    static func block(_ folder: URL) throws -> BlockMetadata {
+        try JSONDecoder().decode(BlockMetadata.self, from: Data(contentsOf: folder.appending(path: "block.json")))
+    }
+
+    @Test func mobileGroupSharingAComputerGroupNameGetsItsOwnKey() throws {
+        let export = try Self.writeExport()
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "wiring-dst-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: export); try? FileManager.default.removeItem(at: catalog) }
+        let groups = try Self.capture("groups", keeping: [
+            "jamfplatform_device_group.fleet_all_managed_computer",
+            "jamfplatform_device_group.fleet_all_managed_mobile",
+            "jamfplatform_pro_computer_extension_attribute.fleet_notes",
+        ], from: export, into: catalog)
+        let profile = try Self.capture("profile", keeping: [
+            "jamfplatform_pro_mobile_device_configuration_profile.fleet_lock_screen",
+        ], from: export, into: catalog)
+
+        let outputs = try String(contentsOf: groups.appending(path: "dependency_outputs.tf"), encoding: .utf8)
+        #expect(outputs.contains(#""Fleet - All Managed" = jamfplatform_device_group.fleet_all_managed_computer.jamf_pro_id"#))
+        #expect(outputs.contains(#""Fleet - All Managed (mobile)" = jamfplatform_device_group.fleet_all_managed_mobile.jamf_pro_id"#))
+        #expect(try Self.block(groups).provides["device_group"] == ["Fleet - All Managed", "Fleet - All Managed (mobile)"])
+        #expect(try Self.block(groups).mobileDeviceGroups == ["Fleet - All Managed (mobile)"])
+
+        let text = try String(contentsOf: profile.appending(path: "pro_mobile_device_configuration_profile.tf"), encoding: .utf8)
+        #expect(text.contains(#"var.dep_device_group_jamf_pro_ids["Fleet - All Managed (mobile)"]"#))
+        #expect(try Self.block(profile).needs["device_group"] == ["Fleet - All Managed (mobile)"])
+    }
+
+    @Test func advancedSearchesWireTheGroupsAndAttributesTheyName() throws {
+        let export = try Self.writeExport()
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "wiring-dst-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: export); try? FileManager.default.removeItem(at: catalog) }
+        let searches = try Self.capture("searches", keeping: [
+            "jamfplatform_pro_advanced_computer_search.managed",
+            "jamfplatform_pro_advanced_mobile_device_search.managed",
+        ], from: export, into: catalog)
+
+        let computer = try String(contentsOf: searches.appending(path: "pro_advanced_computer_search.tf"), encoding: .utf8)
+        #expect(computer.contains(#"value       = var.dep_device_group_names["Fleet - All Managed"]"#))
+        #expect(computer.contains(#"name        = var.dep_extension_attribute_names["Fleet - Notes"]"#))
+        #expect(computer.contains(#"display_fields = ["Computer Name", var.dep_extension_attribute_names["Fleet - Notes"]]"#))
+        // Values that are not object names stay as they are.
+        #expect(computer.contains(#"value       = "loaner""#))
+        let mobile = try String(contentsOf: searches.appending(path: "pro_advanced_mobile_device_search.tf"), encoding: .utf8)
+        #expect(mobile.contains(#"var.dep_device_group_names["Fleet - All Managed (mobile)"]"#))
+
+        let block = try Self.block(searches)
+        #expect(block.needs["device_group"] == ["Fleet - All Managed", "Fleet - All Managed (mobile)"])
+        #expect(block.needs["extension_attribute"] == ["Fleet - Notes"])
+        let variables = try String(contentsOf: searches.appending(path: "variables.tf"), encoding: .utf8)
+        #expect(variables.contains(#"variable "dep_device_group_names""#))
+        #expect(variables.contains(#"variable "dep_extension_attribute_names""#))
+    }
+
+    @Test func advancedSearchesCapturedWithTheirGroupsReferenceThemDirectly() throws {
+        let export = try Self.writeExport()
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "wiring-dst-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: export); try? FileManager.default.removeItem(at: catalog) }
+        let folder = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "all", name: "All", summary: "", namePrefix: "Fleet - ",
+            sourceDirectory: export, catalogRootDirectory: catalog)).blockFolderURL
+        let computer = try String(contentsOf: folder.appending(path: "pro_advanced_computer_search.tf"), encoding: .utf8)
+        #expect(computer.contains("value       = jamfplatform_device_group.fleet_all_managed_computer.name"))
+        #expect(computer.contains("jamfplatform_pro_computer_extension_attribute.fleet_notes.name"))
+        let mobile = try String(contentsOf: folder.appending(path: "pro_advanced_mobile_device_search.tf"), encoding: .utf8)
+        #expect(mobile.contains("value       = jamfplatform_device_group.fleet_all_managed_mobile.name"))
+        #expect(try Self.block(folder).needs.isEmpty)
+    }
+}
