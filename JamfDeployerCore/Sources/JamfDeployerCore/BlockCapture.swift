@@ -362,6 +362,26 @@ public nonisolated enum BlockCapture {
                 text = blocks.joined(separator: "\n\n") + "\n"
             }
 
+            // PreStage device assignments name the origin tenant's devices in
+            // its Apple Business Manager. Each tenant assigns its own; an
+            // explicit (even empty) list also makes the plugin replace the
+            // scope after creating the PreStage, which Jamf Pro answers with
+            // a server error.
+            if text.contains("prestage_enrollment"), text.contains("scope_serial_numbers") {
+                var assigned = 0
+                let blocks = ExportedObjectInventory.topLevelBlocks(in: text).map { block -> String in
+                    guard block.contains("\n  scope_serial_numbers") else { return block }
+                    if block.range(of: #"\n  scope_serial_numbers\s*=\s*\[\s*\]"#, options: .regularExpression) == nil {
+                        assigned += 1
+                    }
+                    return Self.removingAttribute("scope_serial_numbers", from: block)
+                }
+                text = blocks.joined(separator: "\n\n") + "\n"
+                if assigned > 0 {
+                    warnings.append("Left out the device assignments of \(assigned) PreStage\(assigned == 1 ? "" : "s") in \(name): they name the origin tenant's devices. Assign devices to the PreStages in each tenant.")
+                }
+            }
+
             // Jamf never exports Recovery Lock passwords; a PreStage that
             // enables Recovery Lock without a non-empty one cannot be created.
             if text.contains("prestage_enrollment") {

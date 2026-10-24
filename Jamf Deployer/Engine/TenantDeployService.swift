@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import os
 import DeployerKit
 import JamfDeployerCore
 
@@ -541,6 +542,39 @@ final class TenantDeployService {
 
     /// The catalog as this tenant sees it: git sources resolve at the
     /// tenant's pinned tags.
+    /// Selections whose catalog source was removed still deploy — from the
+    /// merged catalog, at the default tag of whichever source now provides
+    /// the block — but never see that source's releases. When a source with
+    /// the block exists (typically the same catalog added again), the
+    /// selection moves to it. What deploys does not change; the removed
+    /// source's pin is dropped.
+    @discardableResult
+    func reattachOrphanedSelections(of tenant: Tenant) -> Tenant {
+        let known = Set(catalogSources.customSources.map(\.id.uuidString))
+        let isOrphan: (BlockSelection) -> Bool = { $0.sourceID != "official" && !known.contains($0.sourceID) }
+        guard tenant.blockSelections.contains(where: isOrphan) else { return tenant }
+        // The source the merged catalog resolves the block from — the one
+        // the selection already deploys from.
+        guard let merged = try? loadCatalog(for: tenant) else { return tenant }
+        var updated = tenant
+        var removed: Set<String> = []
+        for index in updated.blockSelections.indices where isOrphan(updated.blockSelections[index]) {
+            let blockID = updated.blockSelections[index].blockID
+            guard merged.block(id: blockID) != nil else { continue }
+            let target = merged.sourceIDByBlockID[blockID] ?? "official"
+            removed.insert(updated.blockSelections[index].sourceID)
+            updated.blockSelections[index].sourceID = target
+            updated.blockSelections[index].sourceTag = nil
+        }
+        for sourceID in removed where !updated.blockSelections.contains(where: { $0.sourceID == sourceID }) {
+            updated.catalogPins.removeValue(forKey: sourceID)
+        }
+        guard updated != tenant else { return tenant }
+        Self.trace("Reattached \(removed.count) removed catalog source(s) for \(tenant.name)")
+        tenantStore.update(updated)
+        return updated
+    }
+
     func loadCatalog(for tenant: Tenant) throws -> LoadedCatalog {
         try catalogSources.loadMerged(pins: tenant.catalogPins)
     }
@@ -565,14 +599,38 @@ final class TenantDeployService {
 
     /// Per-block updates available from newer tags of the tenant's git
     /// sources (fetches the remotes' tag lists).
-    func availableBaselineUpdates(for tenant: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
+    static let decisionsLog = Logger(subsystem: "be.jordythery.jamf-deployer", category: "decisions")
+
+    /// Release-check and deploy-retry decisions, to Console; Debug builds
+    /// also append them to a file so test runs can be read back without log
+    /// access.
+    static func trace(_ message: String) {
+        decisionsLog.info("\(message, privacy: .public)")
+        #if DEBUG
+        let line = Data("\(Date().formatted(.iso8601)) \(message)\n".utf8)
+        let url = URL(filePath: "/tmp/jamf-deployer-decisions.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(line); try? handle.close()
+        } else {
+            try? line.write(to: url)
+        }
+        #endif
+    }
+
+    func availableBaselineUpdates(for original: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
+        let tenant = reattachOrphanedSelections(of: original)
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []
         let usedSourceIDs = Set(tenant.blockSelections.map(\.sourceID))
+        Self.trace("Release check for \(tenant.name): sources in use \(usedSourceIDs.sorted()), git sources \(self.catalogSources.customSources.filter { $0.kind == .gitRepository }.map(\.id.uuidString))")
         for source in catalogSources.customSources
         where source.kind == .gitRepository && usedSourceIDs.contains(source.id.uuidString) {
             guard let gitURL = source.gitURL,
-                  let latest = try await GitCatalogManager.availableTags(remote: gitURL).last else { continue }
+                  let latest = try await GitCatalogManager.availableTags(remote: gitURL).last else {
+                Self.trace("\(source.name): no release tags found")
+                continue
+            }
             let pinned = tenant.catalogPins[source.id.uuidString] ?? source.defaultTag ?? latest
+            Self.trace("\(source.name): pinned \(pinned) (tenant pin \(tenant.catalogPins[source.id.uuidString] ?? "none"), default \(source.defaultTag ?? "none")), latest \(latest)")
             guard latest != pinned else { continue }
             try await catalogSources.ensureCheckout(source: source, tag: pinned)
             try await catalogSources.ensureCheckout(source: source, tag: latest)
@@ -582,6 +640,7 @@ final class TenantDeployService {
                 .filter { $0.sourceID == source.id.uuidString }
                 .map(\.blockID)
             let updates = CatalogUpdatePlanner.plan(current: current, candidate: candidate, selectedBlockIDs: selected)
+            Self.trace("\(source.name): \(updates.count) block update(s) for \(selected)")
             if !updates.isEmpty {
                 results.append((source, latest, updates))
             }
@@ -624,10 +683,12 @@ final class TenantDeployService {
         "tofu " + arguments.joined(separator: " ")
     }
 
-    /// The jamfpro plugin expects one request at a time; the Platform
-    /// gateway takes a few writes in parallel.
+    /// Changes go one at a time. The jamfpro plugin expects that, and through
+    /// the Platform gateway Jamf Pro answers concurrent configuration profile
+    /// creates with server errors while creating the profiles anyway — even
+    /// two at a time. One at a time ran 124 creates cleanly in under a minute.
     static func parallelism(for tenant: Tenant) -> String {
-        "-parallelism=\(tenant.isJamfPro ? 1 : 4)"
+        "-parallelism=1"
     }
 
     /// Previews and checks only read: the engine default suits the Platform
@@ -1136,7 +1197,7 @@ final class TenantDeployService {
             await syncTeamState()
         }
         // Read after the pull: a teammate may have changed the baseline.
-        let tenant = tenantStore.tenant(id: original.id) ?? original
+        let tenant = reattachOrphanedSelections(of: tenantStore.tenant(id: original.id) ?? original)
 
         try await ensureCatalogCheckouts(for: tenant)
         let catalog = try loadCatalog(for: tenant)
@@ -1228,16 +1289,31 @@ final class TenantDeployService {
             result = partial
         }
 
-        let succeeded = result.events.count { $0.type == .applyComplete }
-        var errors = result.errorDiagnostics.map { diagnostic in
-            var text = diagnostic.summary
-            if let address = diagnostic.address {
-                text = "\(address): \(text)"
+        var succeeded = result.events.count { $0.type == .applyComplete }
+        var errors = result.errorDiagnostics.map(Self.describe)
+
+        // The engine can delete an object before updating what still uses it
+        // (a block renamed a group another block scopes to); Jamf refuses the
+        // delete. Finish the approved plan in order instead of failing.
+        let approvedPlan = try? await runner.showPlan(planFileName: session.planFileName)
+        if !result.errorDiagnostics.isEmpty {
+            Self.trace("Deploy \(tenant.name): \(result.errorDiagnostics.count) error(s) \(result.errorDiagnostics.map { "\($0.address ?? "-"): \($0.summary)" }); approved plan read: \(approvedPlan != nil); failed deletes: \(approvedPlan.flatMap { DeleteOrderRetry.failedDeletes(events: result.events, diagnostics: result.errorDiagnostics, approved: $0) }.map { Array($0) } ?? [])")
+        }
+        if let approved = approvedPlan,
+           DeleteOrderRetry.failedDeletes(events: result.events, diagnostics: result.errorDiagnostics, approved: approved) != nil {
+            let retry = await finishInOrder(tenant: tenant, runner: runner, approved: approved)
+            succeeded += retry.succeeded
+            result.rawLines += retry.rawLines
+            if let retryErrors = retry.errors {
+                errors = retryErrors
+                result.errorDiagnostics = retry.diagnostics
+                result.exitCode = retryErrors.isEmpty ? 0 : 1
             }
-            if let detail = diagnostic.detail {
-                text += "\n\(detail)"
-            }
-            return text
+            activityLog.append(ActivityLogEntry(
+                category: "Engine", operation: "deploy-in-order", detail: tenant.name,
+                status: retry.errors?.isEmpty == true ? 200 : 500, duration: nil,
+                note: retry.errors == nil ? "stopped: the remaining changes differ from the approved plan" : "\(retry.succeeded) deployed after reordering"
+            ))
         }
         // A teammate deployed after this preview: the engine refuses the
         // saved plan, and nothing was changed.
@@ -1347,6 +1423,77 @@ final class TenantDeployService {
             recovered: recovered,
             historyEntryID: entryID
         )
+    }
+
+    /// An engine error as the deploy result shows it.
+    static func describe(_ diagnostic: EngineStreamEvent.Diagnostic) -> String {
+        var text = diagnostic.summary
+        if let address = diagnostic.address {
+            text = "\(address): \(text)"
+        }
+        if let detail = diagnostic.detail {
+            text += "\n\(detail)"
+        }
+        return text
+    }
+
+    /// Finishes a deploy whose only failures were deletes the engine ran too
+    /// early: first the approved changes that are not deletes, then the
+    /// deletes. Each step plans again and applies only a plan that stays
+    /// within the approved one. `errors` is nil when a step left that plan
+    /// (a change in Jamf since the preview): the original errors stand.
+    private func finishInOrder(
+        tenant: Tenant,
+        runner: EngineRunner,
+        approved: PlanFile
+    ) async -> (succeeded: Int, errors: [String]?, diagnostics: [EngineStreamEvent.Diagnostic], rawLines: [String]) {
+        var succeeded = 0
+        var lines: [String] = []
+        let targets = DeleteOrderRetry.nonDeleteTargets(approved: approved)
+        var steps: [(file: String, targets: [String])] = []
+        if !targets.isEmpty { steps.append(("retry-ordered.bin", targets)) }
+        steps.append(("retry-deletes.bin", []))
+        for step in steps {
+            let planArguments = ["plan", "-input=false", "-out=\(step.file)", "-json"]
+                + step.targets.map { "-target=\($0)" } + Self.readParallelism(for: tenant)
+            logEngine("plan", tenant: tenant)
+            let planRun: EngineRunner.RunResult
+            do { planRun = try await runner.run(arguments: planArguments) } catch {
+                Self.trace("Ordered deploy: plan \(step.file) failed: \(error)")
+                return (succeeded, nil, [], lines)
+            }
+            guard let plan = try? await runner.showPlan(planFileName: step.file) else {
+                Self.trace("Ordered deploy: could not read \(step.file)")
+                return (succeeded, nil, [], lines)
+            }
+            Self.trace("Ordered deploy: \(step.file) changes \(DeleteOrderRetry.actionsByAddressForDisplay(plan)); within approved: \(DeleteOrderRetry.staysWithin(plan, approved: approved))")
+            guard DeleteOrderRetry.staysWithin(plan, approved: approved) else { return (succeeded, nil, [], lines) }
+            lines += planRun.rawLines
+            guard DeleteOrderRetry.hasChanges(plan) else { continue }
+
+            logEngine("apply", tenant: tenant)
+            var applied: EngineRunner.RunResult
+            do {
+                applied = try await runner.run(arguments: Self.applyArguments(for: tenant, planFile: step.file)) { event in
+                    if event.type == .applyComplete || event.type == .applyErrored {
+                        let message = event.message
+                        Task { @MainActor in self.progressLines[tenant.id]?.append(message) }
+                    }
+                }
+            } catch EngineRunner.EngineError.nonZeroExit(let partial) {
+                applied = partial
+            } catch {
+                return (succeeded, nil, [], lines)
+            }
+            succeeded += applied.events.count { $0.type == .applyComplete }
+            lines += applied.rawLines
+            if !applied.errorDiagnostics.isEmpty || applied.exitCode != 0 {
+                let errors = applied.errorDiagnostics.map(Self.describe)
+                return (succeeded, errors.isEmpty ? ["The engine stopped unexpectedly (exit code \(applied.exitCode)). The Activity Log has the details."] : errors,
+                        applied.errorDiagnostics, lines)
+            }
+        }
+        return (succeeded, [], [], lines)
     }
 
     /// Looks up each failed create in Jamf by its planned name and records

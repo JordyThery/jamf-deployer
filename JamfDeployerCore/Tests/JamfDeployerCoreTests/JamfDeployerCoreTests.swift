@@ -2354,6 +2354,38 @@ struct CaptureWiringTests {
         #expect(variables.contains(#"variable "dep_extension_attribute_names""#))
     }
 
+    @Test func preStageDeviceAssignmentsAreLeftOut() throws {
+        let export = FileManager.default.temporaryDirectory.appending(path: "prestage-scope-\(UUID().uuidString)")
+        let catalog = FileManager.default.temporaryDirectory.appending(path: "prestage-scope-dst-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: export); try? FileManager.default.removeItem(at: catalog) }
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        try Data("""
+        resource "jamfplatform_pro_computer_prestage_enrollment" "assigned" {
+          display_name         = "Assigned"
+          scope_serial_numbers = [
+            "C02ABC123",
+            "C02DEF456",
+          ]
+          supervised = true
+        }
+
+        resource "jamfplatform_pro_computer_prestage_enrollment" "empty" {
+          display_name         = "Empty"
+          scope_serial_numbers = []
+          supervised           = true
+        }
+        """.utf8).write(to: export.appending(path: "pro_computer_prestage_enrollment.tf"))
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "prestages", name: "PreStages", summary: "", namePrefix: "",
+            sourceDirectory: export, catalogRootDirectory: catalog))
+        let text = try String(contentsOf: result.blockFolderURL.appending(path: "pro_computer_prestage_enrollment.tf"), encoding: .utf8)
+        #expect(!text.contains("scope_serial_numbers"))
+        #expect(!text.contains("C02ABC123"))
+        #expect(text.contains("supervised"))
+        #expect(result.objectCount == 2)
+        #expect(result.warnings.filter { $0.contains("device assignments of 1 PreStage") }.count == 1)
+    }
+
     @Test func advancedSearchesCapturedWithTheirGroupsReferenceThemDirectly() throws {
         let export = try Self.writeExport()
         let catalog = FileManager.default.temporaryDirectory.appending(path: "wiring-dst-\(UUID().uuidString)")
@@ -2367,5 +2399,118 @@ struct CaptureWiringTests {
         let mobile = try String(contentsOf: folder.appending(path: "pro_advanced_mobile_device_search.tf"), encoding: .utf8)
         #expect(mobile.contains("value       = jamfplatform_device_group.fleet_all_managed_mobile.name"))
         #expect(try Self.block(folder).needs.isEmpty)
+    }
+}
+
+@Suite("Block conflicts")
+struct BlockConflictTests {
+    static func blocks() throws -> (BlockMetadata, BlockMetadata, BlockMetadata) {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        var first = try #require(catalog.block(id: "protect-baseline"))
+        first.id = "profile-filevault"
+        first.name = "Profile FileVault"
+        first.conflicts = ["policy-filevault"]
+        var second = try #require(catalog.block(id: "protect-baseline"))
+        second.id = "policy-filevault"
+        second.name = "Policy FileVault"
+        var third = try #require(catalog.block(id: "protect-baseline"))
+        third.id = "unrelated"
+        third.name = "Unrelated"
+        return (first, second, third)
+    }
+
+    @Test func conflictsCountInEitherDirection() throws {
+        let (first, second, third) = try Self.blocks()
+        #expect(WorkspaceGenerator.conflictingPairs([second, first, third]).map { [$0.0.id, $0.1.id] }
+                == [["policy-filevault", "profile-filevault"]])
+        #expect(WorkspaceGenerator.conflictingPairs([first, third]).isEmpty)
+        #expect(WorkspaceGenerator.conflictingPairs([second, third]).isEmpty)
+    }
+
+    @Test func previewRefusesConflictingBlocks() throws {
+        let (first, second, _) = try Self.blocks()
+        #expect {
+            _ = try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "",
+                selections: [GeneratedSelection(block: first, settings: [:]), GeneratedSelection(block: second, settings: [:])],
+                providerVersion: "1.6.0"))
+        } throws: { error in
+            guard case WorkspaceGeneratorError.conflictingBlocks(let names) = error else { return false }
+            return names == ["Policy FileVault", "Profile FileVault"]
+        }
+    }
+}
+
+@Suite("Delete order retry")
+struct DeleteOrderRetryTests {
+    static let group = "module.groups.jamfplatform_device_group.old"
+    static let newGroup = "module.groups.jamfplatform_device_group.new"
+    static let policy = "module.keys.jamfplatform_pro_policy.rotate"
+
+    static func plan(_ changes: [(String, [String])]) throws -> PlanFile {
+        let resources = changes.map { address, actions in
+            """
+            {"address": "\(address)", "type": "t", "name": "n", "change": {"actions": [\(actions.map { "\"\($0)\"" }.joined(separator: ","))]}}
+            """
+        }
+        let json = #"{"format_version": "1.2", "resource_changes": ["# + resources.joined(separator: ",") + "]}"
+        return try JSONDecoder().decode(PlanFile.self, from: Data(json.utf8))
+    }
+
+    static func error(_ summary: String, _ address: String?) throws -> EngineStreamEvent.Diagnostic {
+        let addressField = address.map { #", "address": "\#($0)""# } ?? ""
+        return try JSONDecoder().decode(EngineStreamEvent.Diagnostic.self, from: Data(
+            #"{"severity": "error", "summary": "\#(summary)"\#(addressField)}"#.utf8))
+    }
+
+    /// The renamed group from a live run: the old group's delete fails, the
+    /// policy update that still used it never ran.
+    static func approved() throws -> PlanFile {
+        try plan([(group, ["delete"]), (newGroup, ["create"]), (policy, ["update"]), ("module.keys.x.unchanged", ["no-op"])])
+    }
+
+    static func errored(_ address: String, action: String) throws -> EngineStreamEvent {
+        let parts = address.split(separator: ".")
+        let line = #"{"@level":"error","@message":"\#(address): \#(action) errored","@module":"tofu.ui","@timestamp":"2026-10-24T13:24:04.0+02:00","hook":{"resource":{"addr":"\#(address)","module":"\#(parts.prefix(2).joined(separator: "."))","resource":"\#(parts.suffix(2).joined(separator: "."))","implied_provider":"jamfplatform","resource_type":"\#(parts[parts.count - 2])","resource_name":"\#(parts.last!)","resource_key":null},"action":"\#(action)","elapsed_seconds":0},"type":"apply_errored"}"#
+        return try JSONDecoder().decode(EngineStreamEvent.self, from: Data(line.utf8))
+    }
+
+    @Test func retriesWhenOnlyApprovedDeletesFailed() throws {
+        let approved = try Self.approved()
+        // OpenTofu reports the delete error without an address; the errored
+        // operation names it.
+        #expect(DeleteOrderRetry.failedDeletes(
+            events: [try Self.errored(Self.group, action: "delete")],
+            diagnostics: [try Self.error("Error deleting device group", nil)],
+            approved: approved) == [Self.group])
+        #expect(DeleteOrderRetry.nonDeleteTargets(approved: approved) == [Self.newGroup, Self.policy])
+    }
+
+    @Test func noRetryForOtherErrors() throws {
+        let approved = try Self.approved()
+        let deleteFailed = try Self.errored(Self.group, action: "delete")
+        let deleteError = try Self.error("Error deleting device group", nil)
+        // A failed create, a failed delete the plan did not contain, another
+        // error next to the delete, or no errored operation at all.
+        #expect(DeleteOrderRetry.failedDeletes(events: [try Self.errored(Self.newGroup, action: "create")],
+                                               diagnostics: [try Self.error("Error creating device group", Self.newGroup)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [try Self.errored(Self.policy, action: "delete")],
+                                               diagnostics: [deleteError], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [deleteFailed, try Self.errored(Self.policy, action: "update")],
+                                               diagnostics: [deleteError, try Self.error("Error updating policy", Self.policy)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [deleteFailed],
+                                               diagnostics: [deleteError, try Self.error("Invalid provider configuration", nil)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [], diagnostics: [deleteError], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(events: [deleteFailed], diagnostics: [], approved: approved) == nil)
+    }
+
+    @Test func retryPlansMustStayWithinTheApprovedPlan() throws {
+        let approved = try Self.approved()
+        #expect(DeleteOrderRetry.staysWithin(try Self.plan([(Self.policy, ["update"])]), approved: approved))
+        #expect(DeleteOrderRetry.staysWithin(try Self.plan([(Self.group, ["delete"]), ("other", ["no-op"])]), approved: approved))
+        // A change made in Jamf since the preview, or a different action.
+        #expect(!DeleteOrderRetry.staysWithin(try Self.plan([("module.keys.x.unchanged", ["update"])]), approved: approved))
+        #expect(!DeleteOrderRetry.staysWithin(try Self.plan([(Self.policy, ["delete", "create"])]), approved: approved))
+        #expect(!DeleteOrderRetry.hasChanges(try Self.plan([("a", ["no-op"])])))
     }
 }

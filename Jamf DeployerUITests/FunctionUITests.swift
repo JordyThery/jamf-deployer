@@ -205,6 +205,7 @@ final class FunctionUITests: DeployerUITestCase {
     /// Hand-over stops managing everything and archives the record.
     func test12HandOver() throws {
         openTenant(Self.sandbox)
+        scrollIntoView(app.buttons["Hand Over Tenant…"])
         tap(app.buttons["Hand Over Tenant…"], timeout: 15)
         let nameField = app.dialogs.textFields.firstMatch.exists ? app.dialogs.textFields.firstMatch : app.sheets.textFields.firstMatch
         type(Self.sandbox, into: nameField)

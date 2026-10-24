@@ -108,6 +108,8 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     case unmetDependencies(block: String, type: String, names: [String])
     /// Two selected blocks manage the same tenant-wide setting.
     case conflictingSettings(type: String, blocks: [String])
+    /// Two selected blocks declare each other as conflicting.
+    case conflictingBlocks(blocks: [String])
     /// The block has no module for the tenant's connection.
     case unsupportedConnection(block: String, connection: ConnectionKind)
 
@@ -123,6 +125,8 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
             "The block \"\(block)\" references \(type.replacingOccurrences(of: "_", with: " "))s no selected block creates: \(names.joined(separator: ", ")). Select the block that creates them, or remove this block."
         case .unsupportedConnection(let block, let connection):
             "The block \"\(block)\" has no \(connection == .jamfPro ? "Jamf Pro API" : "Jamf Platform API") version in the catalog release this tenant uses. Update the block with Baseline Updates…, or remove it from the baseline."
+        case .conflictingBlocks(let blocks):
+            "The blocks \(blocks.map { "\"\($0)\"" }.joined(separator: " and ")) do the same job in different ways and cannot be used together. Deselect one of them."
         case .conflictingSettings(let type, let blocks):
             "The blocks \(blocks.map { "\"\($0)\"" }.joined(separator: " and ")) both manage the tenant's \(type.replacingOccurrences(of: "jamfplatform_pro_", with: "").replacingOccurrences(of: "jamfpro_", with: "").replacingOccurrences(of: "_", with: " ")). A setting can belong to one block only — deselect one of them."
         }
@@ -194,7 +198,24 @@ public nonisolated enum WorkspaceGenerator {
 
     /// The module calls for `input`, in rendering order, with the secret
     /// variables they use.
+    /// Pairs of blocks that cannot be selected together. A conflict counts
+    /// when either block lists the other in `conflicts`.
+    public static func conflictingPairs(_ blocks: [BlockMetadata]) -> [(BlockMetadata, BlockMetadata)] {
+        let sorted = blocks.sorted { $0.id < $1.id }
+        var pairs: [(BlockMetadata, BlockMetadata)] = []
+        for (index, first) in sorted.enumerated() {
+            for second in sorted.dropFirst(index + 1)
+            where first.conflicts.contains(second.id) || second.conflicts.contains(first.id) {
+                pairs.append((first, second))
+            }
+        }
+        return pairs
+    }
+
     public static func moduleCalls(_ input: WorkspaceInput) throws -> (calls: [ModuleCall], secrets: [SecretVariable]) {
+        if let (first, second) = conflictingPairs(input.selections.map(\.block)).first {
+            throw WorkspaceGeneratorError.conflictingBlocks(blocks: [first.name, second.name])
+        }
         var calls: [ModuleCall] = []
         var secrets: [SecretVariable] = []
 

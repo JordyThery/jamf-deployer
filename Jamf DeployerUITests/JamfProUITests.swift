@@ -112,6 +112,7 @@ final class JamfProUITests: DeployerUITestCase {
     /// Hand-over stops managing everything; objects stay in Jamf.
     func test09HandOver() throws {
         openTenant(Self.sandbox)
+        scrollIntoView(app.buttons["Hand Over Tenant…"])
         tap(app.buttons["Hand Over Tenant…"], timeout: 15)
         let nameField = app.dialogs.textFields.firstMatch.exists ? app.dialogs.textFields.firstMatch : app.sheets.textFields.firstMatch
         type(Self.sandbox, into: nameField)
