@@ -33,7 +33,10 @@ def call(method, path):
         'Authorization': 'Bearer ' + token, 'X-Environment-Id': os.environ['ENVID'], 'Accept': 'application/json'})
     with urllib.request.urlopen(request) as response:
         data = response.read()
-        return json.loads(data) if data else None
+        try:
+            return json.loads(data) if data else None
+        except ValueError:
+            return None  # Classic API deletes answer in XML
 policies = [p for p in call('GET', '/proclassic/policies')['policies'] if p['name'].startswith(prefix)]
 groups = [g for g in call('GET', '/device-groups/v1/device-groups?page-size=500')['results'] if g['name'].startswith(prefix)]
 $1"
