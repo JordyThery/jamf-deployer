@@ -77,20 +77,23 @@ class DeployerUITestCase: XCTestCase {
             let expectation = XCTNSPredicateExpectation(predicate: enabled, object: element)
             XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: timeout), .completed, "Disabled \(element)", file: file, line: line)
         }
-        // A control outside the visible part of a long page: scroll it into
-        // view. Controls that are in view but briefly not hittable are left
-        // alone, so sheets and lists keep their state.
-        if !element.isHittable, let scrollView = app.scrollViews.allElementsBoundByIndex.first(where: {
-            $0.frame.minX <= element.frame.midX && element.frame.midX <= $0.frame.maxX
-                && (element.frame.midY > $0.frame.maxY || element.frame.midY < $0.frame.minY)
-        }) {
-            var attempts = 0
-            while !element.isHittable, attempts < 30 {
-                scrollView.scroll(byDeltaX: 0, deltaY: element.frame.midY > scrollView.frame.maxY ? -120 : 120)
-                attempts += 1
-            }
-        }
         element.click()
+    }
+
+    /// Scrolls a long page until a control below (or above) its visible part
+    /// can be clicked.
+    func scrollIntoView(_ element: XCUIElement, timeout: TimeInterval = 15) {
+        let element = element.firstMatch
+        guard element.waitForExistence(timeout: timeout), !element.isHittable,
+              let scrollView = app.scrollViews.allElementsBoundByIndex.first(where: {
+                  $0.frame.minX <= element.frame.midX && element.frame.midX <= $0.frame.maxX
+              })
+        else { return }
+        var attempts = 0
+        while !element.isHittable, attempts < 30 {
+            scrollView.scroll(byDeltaX: 0, deltaY: element.frame.midY > scrollView.frame.maxY ? -120 : 120)
+            attempts += 1
+        }
     }
 
     func type(_ text: String, into element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
