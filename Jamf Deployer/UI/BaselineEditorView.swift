@@ -168,6 +168,15 @@ struct BaselineEditorView: View {
         }
     }
 
+    /// Another selected block this one conflicts with — the same check the
+    /// generator enforces, surfaced before a preview is attempted.
+    private func conflictingSelection(for block: BlockMetadata) -> BlockMetadata? {
+        let selected = tenant.blockSelections.compactMap { catalog.block(id: $0.blockID) }
+        return WorkspaceGenerator.conflictingPairs(selected).compactMap { pair in
+            pair.0.id == block.id ? pair.1 : pair.1.id == block.id ? pair.0 : nil
+        }.first
+    }
+
     /// Needed object names no other selected block creates — the same
     /// check the generator enforces, surfaced before a preview is attempted.
     private func unmetDependencies(for block: BlockMetadata) -> [String] {
@@ -304,6 +313,15 @@ struct BaselineEditorView: View {
             if isSelected, let missing = firstMissingRequiredSetting(block, selection: selection) {
                 Label(
                     "“\(missing.title)” needs a value before this block can deploy — open Settings.",
+                    systemImage: "exclamationmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
+            if isSelected, let other = conflictingSelection(for: block) {
+                Label(
+                    "Cannot be used together with “\(other.name)”: both do the same job in different ways. Deselect one of them.",
                     systemImage: "exclamationmark.circle.fill"
                 )
                 .font(.caption)

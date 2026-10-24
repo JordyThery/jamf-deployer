@@ -2369,3 +2369,42 @@ struct CaptureWiringTests {
         #expect(try Self.block(folder).needs.isEmpty)
     }
 }
+
+@Suite("Block conflicts")
+struct BlockConflictTests {
+    static func blocks() throws -> (BlockMetadata, BlockMetadata, BlockMetadata) {
+        let catalog = try LoadedCatalog.load(from: CatalogTests.catalogURL)
+        var first = try #require(catalog.block(id: "protect-baseline"))
+        first.id = "profile-filevault"
+        first.name = "Profile FileVault"
+        first.conflicts = ["policy-filevault"]
+        var second = try #require(catalog.block(id: "protect-baseline"))
+        second.id = "policy-filevault"
+        second.name = "Policy FileVault"
+        var third = try #require(catalog.block(id: "protect-baseline"))
+        third.id = "unrelated"
+        third.name = "Unrelated"
+        return (first, second, third)
+    }
+
+    @Test func conflictsCountInEitherDirection() throws {
+        let (first, second, third) = try Self.blocks()
+        #expect(WorkspaceGenerator.conflictingPairs([second, first, third]).map { [$0.0.id, $0.1.id] }
+                == [["policy-filevault", "profile-filevault"]])
+        #expect(WorkspaceGenerator.conflictingPairs([first, third]).isEmpty)
+        #expect(WorkspaceGenerator.conflictingPairs([second, third]).isEmpty)
+    }
+
+    @Test func previewRefusesConflictingBlocks() throws {
+        let (first, second, _) = try Self.blocks()
+        #expect {
+            _ = try WorkspaceGenerator.generate(WorkspaceInput(
+                namePrefix: "",
+                selections: [GeneratedSelection(block: first, settings: [:]), GeneratedSelection(block: second, settings: [:])],
+                providerVersion: "1.6.0"))
+        } throws: { error in
+            guard case WorkspaceGeneratorError.conflictingBlocks(let names) = error else { return false }
+            return names == ["Policy FileVault", "Profile FileVault"]
+        }
+    }
+}
