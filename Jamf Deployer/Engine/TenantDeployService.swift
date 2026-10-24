@@ -683,10 +683,12 @@ final class TenantDeployService {
         "tofu " + arguments.joined(separator: " ")
     }
 
-    /// The jamfpro plugin expects one request at a time; the Platform
-    /// gateway takes a few writes in parallel.
+    /// The jamfpro plugin expects one request at a time. Through the
+    /// Platform gateway, Jamf Pro answers concurrent configuration profile
+    /// creates with server errors (while creating the profiles) once more
+    /// than two run at a time, so writes go two at a time.
     static func parallelism(for tenant: Tenant) -> String {
-        "-parallelism=\(tenant.isJamfPro ? 1 : 4)"
+        "-parallelism=\(tenant.isJamfPro ? 1 : 2)"
     }
 
     /// Previews and checks only read: the engine default suits the Platform

@@ -120,6 +120,8 @@ never appears in your shell history. Older API clients scoped to a tenant
 rather than an environment set `JAMFPLATFORM_TENANT_ID` instead of
 `JAMFPLATFORM_ENVIRONMENT_ID`.
 
+Applies and destroys make two changes at a time, plans read ten at a time: Jamf Pro answers more simultaneous configuration profile creates with server errors. The `PARALLELISM` variable overrides both.
+
 Tenants connected through the **Jamf Pro API** use these instead. The Jamf Pro
 API plugin needs one operation at a time, which `PARALLELISM` sets:
 

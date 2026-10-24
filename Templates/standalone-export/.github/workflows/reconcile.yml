@@ -71,8 +71,8 @@ jobs:
       # The Jamf Pro API plugin needs one operation at a time: those tenants
       # set PARALLELISM to 1 in their Environment.
       TF_CLI_ARGS_plan: -parallelism=${{ vars.PARALLELISM || '10' }}
-      TF_CLI_ARGS_apply: -parallelism=${{ vars.PARALLELISM || '10' }}
-      TF_CLI_ARGS_destroy: -parallelism=${{ vars.PARALLELISM || '10' }}
+      TF_CLI_ARGS_apply: -parallelism=${{ vars.PARALLELISM || '2' }}
+      TF_CLI_ARGS_destroy: -parallelism=${{ vars.PARALLELISM || '2' }}
       GH_TOKEN: ${{ github.token }}
       TITLE: "Not in code: ${{ matrix.tenant }}"
     steps:
