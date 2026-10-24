@@ -2408,3 +2408,62 @@ struct BlockConflictTests {
         }
     }
 }
+
+@Suite("Delete order retry")
+struct DeleteOrderRetryTests {
+    static let group = "module.groups.jamfplatform_device_group.old"
+    static let newGroup = "module.groups.jamfplatform_device_group.new"
+    static let policy = "module.keys.jamfplatform_pro_policy.rotate"
+
+    static func plan(_ changes: [(String, [String])]) throws -> PlanFile {
+        let resources = changes.map { address, actions in
+            """
+            {"address": "\(address)", "type": "t", "name": "n", "change": {"actions": [\(actions.map { "\"\($0)\"" }.joined(separator: ","))]}}
+            """
+        }
+        let json = #"{"format_version": "1.2", "resource_changes": ["# + resources.joined(separator: ",") + "]}"
+        return try JSONDecoder().decode(PlanFile.self, from: Data(json.utf8))
+    }
+
+    static func error(_ summary: String, _ address: String?) throws -> EngineStreamEvent.Diagnostic {
+        let addressField = address.map { #", "address": "\#($0)""# } ?? ""
+        return try JSONDecoder().decode(EngineStreamEvent.Diagnostic.self, from: Data(
+            #"{"severity": "error", "summary": "\#(summary)"\#(addressField)}"#.utf8))
+    }
+
+    /// The renamed group from a live run: the old group's delete fails, the
+    /// policy update that still used it never ran.
+    static func approved() throws -> PlanFile {
+        try plan([(group, ["delete"]), (newGroup, ["create"]), (policy, ["update"]), ("module.keys.x.unchanged", ["no-op"])])
+    }
+
+    @Test func retriesWhenOnlyApprovedDeletesFailed() throws {
+        let approved = try Self.approved()
+        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error deleting device group", Self.group)], approved: approved) == [Self.group])
+        #expect(DeleteOrderRetry.nonDeleteTargets(approved: approved) == [Self.newGroup, Self.policy])
+    }
+
+    @Test func noRetryForOtherErrors() throws {
+        let approved = try Self.approved()
+        // A failed create, an error without an address, or a delete the plan
+        // did not contain all leave the deploy to the user.
+        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error creating device group", Self.newGroup)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error deleting device group", nil)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [try Self.error("Error deleting device group", Self.policy)], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [
+            try Self.error("Error deleting device group", Self.group),
+            try Self.error("Error updating policy", Self.policy),
+        ], approved: approved) == nil)
+        #expect(DeleteOrderRetry.failedDeletes(diagnostics: [], approved: approved) == nil)
+    }
+
+    @Test func retryPlansMustStayWithinTheApprovedPlan() throws {
+        let approved = try Self.approved()
+        #expect(DeleteOrderRetry.staysWithin(try Self.plan([(Self.policy, ["update"])]), approved: approved))
+        #expect(DeleteOrderRetry.staysWithin(try Self.plan([(Self.group, ["delete"]), ("other", ["no-op"])]), approved: approved))
+        // A change made in Jamf since the preview, or a different action.
+        #expect(!DeleteOrderRetry.staysWithin(try Self.plan([("module.keys.x.unchanged", ["update"])]), approved: approved))
+        #expect(!DeleteOrderRetry.staysWithin(try Self.plan([(Self.policy, ["delete", "create"])]), approved: approved))
+        #expect(!DeleteOrderRetry.hasChanges(try Self.plan([("a", ["no-op"])])))
+    }
+}

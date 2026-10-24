@@ -1252,16 +1252,27 @@ final class TenantDeployService {
             result = partial
         }
 
-        let succeeded = result.events.count { $0.type == .applyComplete }
-        var errors = result.errorDiagnostics.map { diagnostic in
-            var text = diagnostic.summary
-            if let address = diagnostic.address {
-                text = "\(address): \(text)"
+        var succeeded = result.events.count { $0.type == .applyComplete }
+        var errors = result.errorDiagnostics.map(Self.describe)
+
+        // The engine can delete an object before updating what still uses it
+        // (a block renamed a group another block scopes to); Jamf refuses the
+        // delete. Finish the approved plan in order instead of failing.
+        if let approved = try? await runner.showPlan(planFileName: session.planFileName),
+           DeleteOrderRetry.failedDeletes(diagnostics: result.errorDiagnostics, approved: approved) != nil {
+            let retry = await finishInOrder(tenant: tenant, runner: runner, approved: approved)
+            succeeded += retry.succeeded
+            result.rawLines += retry.rawLines
+            if let retryErrors = retry.errors {
+                errors = retryErrors
+                result.errorDiagnostics = retry.diagnostics
+                result.exitCode = retryErrors.isEmpty ? 0 : 1
             }
-            if let detail = diagnostic.detail {
-                text += "\n\(detail)"
-            }
-            return text
+            activityLog.append(ActivityLogEntry(
+                category: "Engine", operation: "deploy-in-order", detail: tenant.name,
+                status: retry.errors?.isEmpty == true ? 200 : 500, duration: nil,
+                note: retry.errors == nil ? "stopped: the remaining changes differ from the approved plan" : "\(retry.succeeded) deployed after reordering"
+            ))
         }
         // A teammate deployed after this preview: the engine refuses the
         // saved plan, and nothing was changed.
@@ -1371,6 +1382,70 @@ final class TenantDeployService {
             recovered: recovered,
             historyEntryID: entryID
         )
+    }
+
+    /// An engine error as the deploy result shows it.
+    static func describe(_ diagnostic: EngineStreamEvent.Diagnostic) -> String {
+        var text = diagnostic.summary
+        if let address = diagnostic.address {
+            text = "\(address): \(text)"
+        }
+        if let detail = diagnostic.detail {
+            text += "\n\(detail)"
+        }
+        return text
+    }
+
+    /// Finishes a deploy whose only failures were deletes the engine ran too
+    /// early: first the approved changes that are not deletes, then the
+    /// deletes. Each step plans again and applies only a plan that stays
+    /// within the approved one. `errors` is nil when a step left that plan
+    /// (a change in Jamf since the preview): the original errors stand.
+    private func finishInOrder(
+        tenant: Tenant,
+        runner: EngineRunner,
+        approved: PlanFile
+    ) async -> (succeeded: Int, errors: [String]?, diagnostics: [EngineStreamEvent.Diagnostic], rawLines: [String]) {
+        var succeeded = 0
+        var lines: [String] = []
+        let targets = DeleteOrderRetry.nonDeleteTargets(approved: approved)
+        var steps: [(file: String, targets: [String])] = []
+        if !targets.isEmpty { steps.append(("retry-ordered.bin", targets)) }
+        steps.append(("retry-deletes.bin", []))
+        for step in steps {
+            let planArguments = ["plan", "-input=false", "-out=\(step.file)", "-json"]
+                + step.targets.map { "-target=\($0)" } + Self.readParallelism(for: tenant)
+            logEngine("plan", tenant: tenant)
+            guard let planRun = try? await runner.run(arguments: planArguments),
+                  let plan = try? await runner.showPlan(planFileName: step.file),
+                  DeleteOrderRetry.staysWithin(plan, approved: approved)
+            else { return (succeeded, nil, [], lines) }
+            lines += planRun.rawLines
+            guard DeleteOrderRetry.hasChanges(plan) else { continue }
+
+            logEngine("apply", tenant: tenant)
+            var applied: EngineRunner.RunResult
+            do {
+                applied = try await runner.run(arguments: Self.applyArguments(for: tenant, planFile: step.file)) { event in
+                    if event.type == .applyComplete || event.type == .applyErrored {
+                        let message = event.message
+                        Task { @MainActor in self.progressLines[tenant.id]?.append(message) }
+                    }
+                }
+            } catch EngineRunner.EngineError.nonZeroExit(let partial) {
+                applied = partial
+            } catch {
+                return (succeeded, nil, [], lines)
+            }
+            succeeded += applied.events.count { $0.type == .applyComplete }
+            lines += applied.rawLines
+            if !applied.errorDiagnostics.isEmpty || applied.exitCode != 0 {
+                let errors = applied.errorDiagnostics.map(Self.describe)
+                return (succeeded, errors.isEmpty ? ["The engine stopped unexpectedly (exit code \(applied.exitCode)). The Activity Log has the details."] : errors,
+                        applied.errorDiagnostics, lines)
+            }
+        }
+        return (succeeded, [], [], lines)
     }
 
     /// Looks up each failed create in Jamf by its planned name and records
