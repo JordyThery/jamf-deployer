@@ -10,7 +10,10 @@ import os
 @Observable
 final class TenantStore {
     private(set) var tenants: [Tenant] = []
-    private let rootURL: URL
+    /// tenant.json files that exist but could not be read, e.g. one written
+    /// by a newer version. They are not listed and never written.
+    private(set) var unreadableFiles: [URL] = []
+    let rootURL: URL
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "TenantStore")
 
     /// The default store under Application Support; injectable for tests.
@@ -30,6 +33,17 @@ final class TenantStore {
 
     func workspaceURL(for tenant: Tenant) -> URL {
         rootURL.appending(path: tenant.id.uuidString)
+    }
+
+    func recordURL(for id: UUID) -> URL {
+        rootURL.appending(path: id.uuidString).appending(path: "tenant.json")
+    }
+
+    /// Like `update`, but a failed write is thrown instead of only logged.
+    func write(_ tenant: Tenant) throws {
+        guard let index = tenants.firstIndex(where: { $0.id == tenant.id }) else { return }
+        try JSONFile.save(tenant, to: recordURL(for: tenant.id))
+        tenants[index] = tenant
     }
 
     func add(_ tenant: Tenant) {
@@ -60,16 +74,19 @@ final class TenantStore {
         ) else { return }
 
         var loaded: [Tenant] = []
+        var unreadable: [URL] = []
         for folder in folders {
             let file = folder.appending(path: "tenant.json")
             guard fileManager.fileExists(atPath: file.path) else { continue }
             do {
                 loaded.append(try JSONFile.load(Tenant.self, from: file))
             } catch {
+                unreadable.append(file)
                 logger.error("Could not read \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
         tenants = loaded.sorted { $0.createdAt < $1.createdAt }
+        unreadableFiles = unreadable
     }
 
     private func save(_ tenant: Tenant) {

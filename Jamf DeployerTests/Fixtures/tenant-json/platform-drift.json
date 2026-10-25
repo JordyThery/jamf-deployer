@@ -1,0 +1,299 @@
+{
+  "acknowledgedDrift" : [
+
+  ],
+  "blockSelections" : [
+    {
+      "blockID" : "device-groups",
+      "settings" : {
+
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "categories",
+      "settings" : {
+
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "extension-attributes",
+      "settings" : {
+
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "enrollment",
+      "settings" : {
+        "ade_instance_name" : "Apple Business Manager",
+        "auto_advance_setup" : "false",
+        "default_prestage" : "false",
+        "prestage_display_name" : "Standard Enrollment"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "filevault",
+      "providedCategory" : {
+        "blockID" : "categories",
+        "name" : "Security"
+      },
+      "providedScope" : {
+        "blockID" : "device-groups",
+        "name" : "Pilot"
+      },
+      "settings" : {
+        "auth_restart" : "false"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "software-updates",
+      "providedScope" : {
+        "blockID" : "device-groups",
+        "name" : "Pilot"
+      },
+      "settings" : {
+        "allow_standard_user_updates" : "true",
+        "deferral_major_days" : "14",
+        "deferral_minor_days" : "7",
+        "notifications_enabled" : "true"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "compliance-cis-l1",
+      "providedScope" : {
+        "blockID" : "device-groups",
+        "name" : "Pilot"
+      },
+      "settings" : {
+        "enforcement_mode" : "MONITOR",
+        "macos_major_version" : "26"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "rosetta",
+      "providedCategory" : {
+        "blockID" : "categories",
+        "name" : "Applications"
+      },
+      "providedScope" : {
+        "blockID" : "device-groups",
+        "name" : "Apple Silicon Macs"
+      },
+      "settings" : {
+
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "checkin-inventory",
+      "settings" : {
+        "check_in_frequency" : "15",
+        "collect_application_usage" : "true",
+        "include_home_directory_sizes" : "false",
+        "run_login_policies" : "true",
+        "run_startup_policies" : "true"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "reenrollment",
+      "settings" : {
+        "clear_extension_attributes" : "true",
+        "clear_location_information" : "true",
+        "clear_management_history" : "DELETE_EVERYTHING_EXCEPT_ACKNOWLEDGED",
+        "clear_policy_logs" : "true"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "local-admin-password",
+      "settings" : {
+        "include_prestage_accounts" : "true",
+        "rotation_after_viewing_interval" : "1 hour",
+        "rotation_interval" : "30 days"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "self-service-app",
+      "settings" : {
+        "authentication_type" : "Basic",
+        "default_landing_page" : "HOME",
+        "install_automatically" : "true",
+        "login_method" : "NotRequired",
+        "notifications_enabled" : "true"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "self-service-maintenance",
+      "providedCategory" : {
+        "blockID" : "categories",
+        "name" : "Maintenance"
+      },
+      "providedScope" : {
+        "blockID" : "device-groups",
+        "name" : "All Managed Macs"
+      },
+      "settings" : {
+
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "macos-version-groups",
+      "settings" : {
+        "current_major_version" : "26",
+        "minimum_major_version" : "15"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "mobile-device-groups",
+      "settings" : {
+
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "mobile-passcode",
+      "providedCategory" : {
+        "blockID" : "categories",
+        "name" : "Security"
+      },
+      "providedScope" : {
+        "blockID" : "mobile-device-groups",
+        "name" : "Supervised iPads"
+      },
+      "settings" : {
+        "max_inactivity_minutes" : "5",
+        "minimum_length" : "6"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "mobile-enrollment",
+      "settings" : {
+        "ade_instance_name" : "Apple Business Manager",
+        "default_prestage" : "false",
+        "prestage_display_name" : "iPad and iPhone Enrollment"
+      },
+      "sourceID" : "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "blockID" : "app-catalog",
+      "existingCategory" : {
+        "id" : "-1",
+        "name" : "No category"
+      },
+      "providedScope" : {
+        "blockID" : "device-groups",
+        "name" : "All Managed Macs"
+      },
+      "settings" : {
+        "apps_json" : "[{\"deploymentType\":\"SELF_SERVICE\",\"publisher\":\"Google\",\"titleName\":\"Google Chrome\",\"updateBehavior\":\"AUTOMATIC\"}]"
+      },
+      "sourceID" : "official"
+    }
+  ],
+  "catalogPins" : {
+
+  },
+  "clientID" : "11111111-1111-4111-8111-111111111102",
+  "connection" : "platform",
+  "createdAt" : "2026-10-24T13:42:45Z",
+  "day0" : {
+    "skippedSteps" : [
+
+    ]
+  },
+  "deployedBlockVersions" : {
+    "app-catalog" : "1.0.0",
+    "categories" : "1.0.0",
+    "checkin-inventory" : "1.0.0",
+    "compliance-cis-l1" : "1.0.0",
+    "device-groups" : "1.0.0",
+    "enrollment" : "1.0.0",
+    "extension-attributes" : "1.0.0",
+    "filevault" : "1.0.0",
+    "local-admin-password" : "1.0.0",
+    "macos-version-groups" : "1.0.0",
+    "mobile-device-groups" : "1.0.0",
+    "mobile-enrollment" : "1.0.0",
+    "mobile-passcode" : "1.0.0",
+    "reenrollment" : "1.0.0",
+    "rosetta" : "1.0.0",
+    "self-service-app" : "1.0.0",
+    "self-service-maintenance" : "1.0.0",
+    "software-updates" : "1.0.0"
+  },
+  "driftReport" : {
+    "date" : "2026-10-24T13:47:00Z",
+    "objects" : [
+      {
+        "address" : "module.enrollment.jamfplatform_pro_computer_prestage_enrollment.standard",
+        "blockID" : "enrollment",
+        "blockName" : "Enrollment",
+        "displayName" : "EXA - Standard Enrollment",
+        "fields" : [
+          {
+            "after" : "0123456789ABCDEF0123456789ABCD02",
+            "before" : "(empty)",
+            "path" : "profile_uuid",
+            "rawAfter" : "0123456789ABCDEF0123456789ABCD02"
+          }
+        ],
+        "isComputedOnly" : true,
+        "resourceType" : "jamfplatform_pro_computer_prestage_enrollment"
+      },
+      {
+        "address" : "module.mobile_enrollment.jamfplatform_pro_mobile_device_prestage_enrollment.standard",
+        "blockID" : "mobile-enrollment",
+        "blockName" : "Mobile Enrollment",
+        "displayName" : "EXA - iPad and iPhone Enrollment",
+        "fields" : [
+          {
+            "after" : "0123456789ABCDEF0123456789ABCD01",
+            "before" : "(empty)",
+            "path" : "profile_uuid",
+            "rawAfter" : "0123456789ABCDEF0123456789ABCD01"
+          }
+        ],
+        "isComputedOnly" : true,
+        "resourceType" : "jamfplatform_pro_mobile_device_prestage_enrollment"
+      }
+    ]
+  },
+  "environmentID" : "22222222-2222-4222-8222-222222222201",
+  "handOverPending" : false,
+  "id" : "00000000-0000-4000-8000-000000000006",
+  "isProduction" : false,
+  "lastDeploy" : {
+    "date" : "2026-10-24T13:46:15Z",
+    "engineerName" : "Example Engineer",
+    "failed" : 0,
+    "succeeded" : 33
+  },
+  "lastDriftCheck" : "2026-10-24T13:47:00Z",
+  "mode" : "managed",
+  "name" : "Example Tenant 1",
+  "namePrefix" : "EXA - ",
+  "pendingRemovals" : [
+
+  ],
+  "preflight" : {
+    "adeTokenExpiration" : "2027-06-04",
+    "allGreen" : false,
+    "date" : "2026-10-24T13:47:00Z",
+    "jamfProVersion" : "11.33.1-t1792501724838",
+    "tenantHasContent" : true,
+    "vppTokenExpiration" : "2027-06-04T09:45:25Z"
+  },
+  "region" : "us"
+}

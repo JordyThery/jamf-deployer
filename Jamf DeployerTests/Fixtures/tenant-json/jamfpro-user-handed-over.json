@@ -1,0 +1,49 @@
+{
+  "acknowledgedDrift" : [
+
+  ],
+  "blockSelections" : [
+
+  ],
+  "catalogPins" : {
+
+  },
+  "clientID" : "example-admin",
+  "connection" : "jamfPro",
+  "createdAt" : "2026-10-24T15:25:18Z",
+  "day0" : {
+    "skippedSteps" : [
+
+    ]
+  },
+  "deployedBlockVersions" : {
+
+  },
+  "handOverPending" : false,
+  "id" : "00000000-0000-4000-8000-000000000002",
+  "isProduction" : false,
+  "jamfProAuth" : "userAccount",
+  "jamfProURL" : "https:\/\/jamfpro-a.example.com",
+  "lastDeploy" : {
+    "date" : "2026-10-24T15:32:36Z",
+    "engineerName" : "Example Engineer",
+    "failed" : 0,
+    "succeeded" : 0
+  },
+  "lastDriftCheck" : "2026-10-24T15:32:36Z",
+  "mode" : "handedOver",
+  "name" : "Example Tenant 4",
+  "namePrefix" : "JD - ",
+  "pendingRemovals" : [
+
+  ],
+  "preflight" : {
+    "adeTokenExpiration" : "2027-06-04",
+    "allGreen" : false,
+    "date" : "2026-10-24T15:27:50Z",
+    "jamfProVersion" : "11.33.1-t1792501724838",
+    "tenantHasContent" : true,
+    "vppTokenExpiration" : "2027-06-04T09:45:25Z"
+  },
+  "region" : "eu"
+}

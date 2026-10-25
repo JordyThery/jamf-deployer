@@ -33,6 +33,12 @@ struct ContentView: View {
         .onChange(of: selection) {
             appState.selection = selection
         }
+        .onChange(of: tenantStore.tenants) {
+            // a tenant removed in Settings › Connections leaves the detail
+            if case .tenant(let id) = selection, tenantStore.tenant(id: id) == nil {
+                selection = .fleet
+            }
+        }
         .task {
             await deployService.syncTeamState()
             await updates.checkAutomatically()

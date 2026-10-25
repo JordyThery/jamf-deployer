@@ -1,0 +1,41 @@
+{
+  "acknowledgedDrift" : [
+
+  ],
+  "blockSelections" : [
+
+  ],
+  "catalogPins" : {
+
+  },
+  "clientID" : "example-admin",
+  "connection" : "jamfPro",
+  "createdAt" : "2026-10-24T16:55:03Z",
+  "day0" : {
+    "skippedSteps" : [
+
+    ]
+  },
+  "deployedBlockVersions" : {
+
+  },
+  "handOverPending" : false,
+  "id" : "00000000-0000-4000-8000-000000000004",
+  "isProduction" : false,
+  "jamfProAuth" : "userAccount",
+  "jamfProURL" : "https:\/\/jamfpro-b.example.com",
+  "mode" : "managed",
+  "name" : "Example Tenant 3",
+  "namePrefix" : "JD - ",
+  "pendingRemovals" : [
+
+  ],
+  "preflight" : {
+    "adeTokenExpiration" : "2027-05-18",
+    "allGreen" : false,
+    "date" : "2026-10-24T16:54:59Z",
+    "jamfProVersion" : "11.34.0-b.1.t1791987365570",
+    "tenantHasContent" : true
+  },
+  "region" : "eu"
+}

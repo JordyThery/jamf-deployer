@@ -1,5 +1,6 @@
 import SwiftUI
 import JTKit
+import os
 
 @main
 struct MyApp: App {
@@ -11,18 +12,34 @@ struct MyApp: App {
     @State private var exportSessions = ExportSessionStore()
     @State private var componentUpdates = ComponentUpdateChecker()
     @State private var catalogSources: CatalogSourceStore
+    @State private var connections: ConnectionStore<TenantConnection>
 
     init() {
         let tenantStore = TenantStore()
         let activityLog = ActivityLog()
         let catalogSources = CatalogSourceStore()
-        _tenantStore = State(initialValue: tenantStore)
-        _activityLog = State(initialValue: activityLog)
-        _catalogSources = State(initialValue: catalogSources)
-        _deployService = State(initialValue: TenantDeployService(
+        let deployService = TenantDeployService(
             tenantStore: tenantStore,
             activityLog: activityLog,
             catalogSources: catalogSources
+        )
+        _tenantStore = State(initialValue: tenantStore)
+        _activityLog = State(initialValue: activityLog)
+        _catalogSources = State(initialValue: catalogSources)
+        _deployService = State(initialValue: deployService)
+        // Settings › Connections: the tenants' own tenant.json files and
+        // Keychain items, unchanged
+        let storage = TenantConnectionStorage(
+            tenantStore: tenantStore,
+            backupURL: TenantConnectionStorage.defaultBackupURL,
+            signInID: { tenant in deployService.isTeamMode ? tenant.engineerClientID : nil }
+        )
+        _connections = State(initialValue: ConnectionStore(
+            storage: storage,
+            secrets: TenantSecrets.connectionSecrets,
+            log: { message in
+                Logger(subsystem: "be.jordythery.jamf-deployer", category: "Connections").error("\(message, privacy: .public)")
+            }
         ))
         Task.detached(priority: .background) { JamformerRunner.removeStaleExports() }
     }
@@ -34,17 +51,24 @@ struct MyApp: App {
 
     var body: some Scene {
         Window("Jamf Deployer", id: "main") {
-            ContentView()
-                .environment(tenantStore)
-                .environment(activityLog)
-                .environment(updates)
-                .environment(tour)
-                .environment(deployService)
-                .environment(appState)
-                .environment(terraform)
-                .environment(catalogSources)
-                .environment(componentUpdates)
-                .environment(exportSessions)
+            if Self.isUnitTestHost {
+                // unit tests run inside the app: no sync, no network, the
+                // store is never touched
+                Text("Running unit tests")
+                    .frame(minWidth: 300, minHeight: 100)
+            } else {
+                ContentView()
+                    .environment(tenantStore)
+                    .environment(activityLog)
+                    .environment(updates)
+                    .environment(tour)
+                    .environment(deployService)
+                    .environment(appState)
+                    .environment(terraform)
+                    .environment(catalogSources)
+                    .environment(componentUpdates)
+                    .environment(exportSessions)
+            }
         }
 
         Window("Activity Log", id: "activity-log") {
@@ -58,10 +82,11 @@ struct MyApp: App {
 
         AboutWindow(configuration: .jamfDeployer)
 
-        // General (Appearance first), Team, Advanced, then Updates.
+        // General (Appearance first), Connections, Team, Advanced, then Updates.
         SettingsWindow(updates: updates) {
             GeneralSettingsSections()
         } tabs: {
+            withStores(TenantConnectionsTab(store: connections))
             SettingsTab("Team", systemImage: "person.2") {
                 withStores(TeamSettingsView())
             }
@@ -108,6 +133,9 @@ struct MyApp: App {
             }
         }
     }
+
+    /// Set by Xcode when the app hosts the unit tests (Jamf DeployerTests).
+    private static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     /// The stores the Team and Advanced tabs read.
     private func withStores(_ content: some View) -> some View {

@@ -1,5 +1,6 @@
 import Foundation
 import DeployerKit
+import JTKit
 
 /// The Keychain items belonging to one tenant. Service names follow the
 /// `<bundle id>.<purpose>` convention; the account is the tenant's UUID.
@@ -51,9 +52,26 @@ nonisolated struct TenantSecrets: Sendable {
 
     private func item(purpose: String) -> KeychainItem {
         KeychainItem(
-            service: "\(Self.bundleID).\(purpose)",
+            service: Self.service(purpose: purpose),
             account: tenantID.uuidString
         )
+    }
+
+    private static func service(purpose: String) -> String {
+        "\(bundleID).\(purpose)"
+    }
+
+    /// The Keychain items Settings › Connections reads and writes: the same
+    /// items as `platformClientSecret` and `protectClientSecret` (account =
+    /// tenant UUID, created "when unlocked" without a label, as
+    /// `KeychainItem` does). The other items stay app-only.
+    static var connectionSecrets: [ConnectionSecretKind: SecretLocation] {
+        [
+            .main: SecretLocation(store: KeychainSecretStore(
+                service: service(purpose: "platform-client-secret"), accessibility: .whenUnlocked)),
+            .protect: SecretLocation(store: KeychainSecretStore(
+                service: service(purpose: "protect-client-secret"), accessibility: .whenUnlocked)),
+        ]
     }
 }
 

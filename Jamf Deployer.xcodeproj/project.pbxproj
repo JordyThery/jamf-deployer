@@ -10,11 +10,23 @@
 		08680C7A30831D600027157B /* DeployerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 08680C7930831D600027157B /* DeployerKit */; };
 		08680C89308324650027157B /* JamfDeployerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 08680C88308324650027157B /* JamfDeployerCore */; };
 		087B32A5308E418B00D0CB8A /* JTKit in Frameworks */ = {isa = PBXBuildFile; productRef = 087B32A4308E418B00D0CB8A /* JTKit */; };
+		087B412C308EA19C00D0CB8A /* JTKitTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 087B412B308EA19C00D0CB8A /* JTKitTestSupport */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		087B4125308EA19500D0CB8A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000100000000;
+			remoteInfo = "Jamf Deployer";
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Jamf Deployer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Jamf Deployer.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		082668953084A1CA00FF1E0D /* Jamf DeployerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Jamf DeployerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		087B4121308EA19500D0CB8A /* Jamf DeployerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Jamf DeployerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -26,6 +38,11 @@
 		082668963084A1CA00FF1E0D /* Jamf DeployerUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Jamf DeployerUITests";
+			sourceTree = "<group>";
+		};
+		087B4122308EA19500D0CB8A /* Jamf DeployerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Jamf DeployerTests";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -44,6 +61,12 @@
 			files = (
 			);
 		};
+		087B411E308EA19500D0CB8A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				087B412C308EA19C00D0CB8A /* JTKitTestSupport in Frameworks */,
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -52,6 +75,8 @@
 			children = (
 				000000000000000000000010 /* Jamf Deployer */,
 				082668963084A1CA00FF1E0D /* Jamf DeployerUITests */,
+				087B4122308EA19500D0CB8A /* Jamf DeployerTests */,
+				087B412A308EA19C00D0CB8A /* Frameworks */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -61,8 +86,16 @@
 			children = (
 				000000000000000000000120 /* Jamf Deployer.app */,
 				082668953084A1CA00FF1E0D /* Jamf DeployerUITests.xctest */,
+				087B4121308EA19500D0CB8A /* Jamf DeployerTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		087B412A308EA19C00D0CB8A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -110,6 +143,30 @@
 			productReference = 082668953084A1CA00FF1E0D /* Jamf DeployerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		087B4120308EA19500D0CB8A /* Jamf DeployerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 087B4127308EA19500D0CB8A /* Build configuration list for PBXNativeTarget "Jamf DeployerTests" */;
+			buildPhases = (
+				087B411D308EA19500D0CB8A /* Sources */,
+				087B411E308EA19500D0CB8A /* Frameworks */,
+				087B411F308EA19500D0CB8A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				087B4126308EA19500D0CB8A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				087B4122308EA19500D0CB8A /* Jamf DeployerTests */,
+			);
+			name = "Jamf DeployerTests";
+			packageProductDependencies = (
+				087B412B308EA19C00D0CB8A /* JTKitTestSupport */,
+			);
+			productName = "Jamf DeployerTests";
+			productReference = 087B4121308EA19500D0CB8A /* Jamf DeployerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -125,6 +182,10 @@
 					};
 					082668943084A1CA00FF1E0D = {
 						CreatedOnToolsVersion = 27.1;
+					};
+					087B4120308EA19500D0CB8A = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = 000000000000000100000000;
 					};
 				};
 			};
@@ -149,6 +210,7 @@
 			targets = (
 				000000000000000100000000 /* Jamf Deployer */,
 				082668943084A1CA00FF1E0D /* Jamf DeployerUITests */,
+				087B4120308EA19500D0CB8A /* Jamf DeployerTests */,
 			);
 		};
 /* End PBXProject section */
@@ -160,6 +222,11 @@
 			);
 		};
 		082668933084A1CA00FF1E0D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		087B411F308EA19500D0CB8A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -189,7 +256,20 @@
 			files = (
 			);
 		};
+		087B411D308EA19500D0CB8A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		087B4126308EA19500D0CB8A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000100000000 /* Jamf Deployer */;
+			targetProxy = 087B4125308EA19500D0CB8A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		000000000000000011000000 /* Debug configuration for PBXProject "Jamf Deployer" */ = {
@@ -460,6 +540,48 @@
 			};
 			name = Release;
 		};
+		087B4128308EA19500D0CB8A /* Debug configuration for PBXNativeTarget "Jamf DeployerTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K3LQ9NPBMG;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "be.jordythery.Jamf-DeployerTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Jamf Deployer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Jamf Deployer";
+			};
+			name = Debug;
+		};
+		087B4129308EA19500D0CB8A /* Release configuration for PBXNativeTarget "Jamf DeployerTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K3LQ9NPBMG;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "be.jordythery.Jamf-DeployerTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Jamf Deployer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Jamf Deployer";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -487,6 +609,14 @@
 			);
 			defaultConfigurationName = Release;
 		};
+		087B4127308EA19500D0CB8A /* Build configuration list for PBXNativeTarget "Jamf DeployerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				087B4128308EA19500D0CB8A /* Debug configuration for PBXNativeTarget "Jamf DeployerTests" */,
+				087B4129308EA19500D0CB8A /* Release configuration for PBXNativeTarget "Jamf DeployerTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -506,7 +636,7 @@
 			repositoryURL = "https://github.com/JordyThery/JTKit.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.4.4;
+				minimumVersion = 0.5.4;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -524,6 +654,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */;
 			productName = JTKit;
+		};
+		087B412B308EA19C00D0CB8A /* JTKitTestSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */;
+			productName = JTKitTestSupport;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
