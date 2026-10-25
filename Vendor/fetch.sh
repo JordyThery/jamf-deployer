@@ -10,6 +10,9 @@ JAMFPLATFORM_VERSION="1.6.0"
 JAMFPROTECT_VERSION="0.12.0"
 JAMFPRO_VERSION="0.42.0"
 JAMFORMER_VERSION="0.6.1"
+# jamformer's download has no LICENSE; the one from its repository at that tag.
+# Update the checksum with the version, and the text in JamfDeployerCore/Licences.
+JAMFORMER_LICENSE_SHA256="a0df87821e031b784e010f350e83ce099201fbf4a06718e8d8662430be5c5640"
 BACKEND_GIT_VERSION="0.1.12"
 
 echo "== OpenTofu $OPENTOFU_VERSION =="
@@ -62,6 +65,8 @@ BASE="https://github.com/Jamf-Concepts/jamformer/releases/download/v${JAMFORMER_
 curl -sL -O "$BASE/checksums.txt"
 shasum -a 256 -c <(grep " jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz$" checksums.txt)
 tar -xzf "jamformer-${JAMFORMER_VERSION}-darwin-universal.tar.gz" jamformer
+curl -fsSL -o LICENSE "https://raw.githubusercontent.com/Jamf-Concepts/jamformer/v${JAMFORMER_VERSION}/LICENSE"
+echo "${JAMFORMER_LICENSE_SHA256}  LICENSE" | shasum -a 256 -c
 
 echo "== terraform-backend-git $BACKEND_GIT_VERSION (plumber-cd, Apache-2.0) =="
 mkdir -p "$HERE/terraform-backend-git"

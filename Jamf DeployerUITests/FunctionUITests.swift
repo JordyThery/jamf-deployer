@@ -331,7 +331,7 @@ final class FunctionUITests: DeployerUITestCase {
 
         app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.windows.matching(NSPredicate(format: "title CONTAINS 'Settings' OR title CONTAINS 'General'")).firstMatch.waitForExistence(timeout: 10)
-                      || app.checkBoxes["Check for app updates automatically"].waitForExistence(timeout: 5), "Settings did not open")
+                      || app.checkBoxes["Show technical details"].waitForExistence(timeout: 5), "Settings did not open")
         app.typeKey("w", modifierFlags: .command)
     }
 

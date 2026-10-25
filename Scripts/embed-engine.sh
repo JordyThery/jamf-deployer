@@ -23,6 +23,12 @@ cp -f "${SRC}/Vendor/opentofu/bin/LICENSE" "${RESOURCES}/Vendor/opentofu/bin/LIC
 
 mkdir -p "${RESOURCES}/Vendor/jamformer"
 cp -f "${SRC}/Vendor/jamformer/jamformer" "${RESOURCES}/Vendor/jamformer/jamformer"
+# Its MIT licence must travel with it; fetch.sh downloads it separately.
+if [ ! -f "${SRC}/Vendor/jamformer/LICENSE" ]; then
+  echo "error: Vendor/jamformer/LICENSE missing — run Vendor/fetch.sh."
+  exit 1
+fi
+cp -f "${SRC}/Vendor/jamformer/LICENSE" "${RESOURCES}/Vendor/jamformer/LICENSE"
 
 # The Team Mode state backend, started by the app on this Mac only.
 mkdir -p "${RESOURCES}/Vendor/terraform-backend-git"

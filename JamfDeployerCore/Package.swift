@@ -14,6 +14,8 @@ let package = Package(
     targets: [
         .target(
             name: "JamfDeployerCore",
+            // Third-party licence texts, unchanged, for About and THIRD-PARTY-NOTICES.md.
+            resources: [.copy("Licences")],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
                 .enableUpcomingFeature("MemberImportVisibility"),

@@ -56,27 +56,23 @@ struct MyApp: App {
         }
         .keyboardShortcut("l", modifiers: [.command, .shift])
 
-        Window("About Jamf Deployer", id: "about") {
-            AboutView()
-        }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
+        AboutWindow(configuration: .jamfDeployer)
 
-        Settings {
-            SettingsView()
-                .environment(tenantStore)
-                .environment(catalogSources)
-                .environment(deployService)
-                .environment(componentUpdates)
-                .environment(activityLog)
+        // General (Appearance first), Team, Advanced, then Updates.
+        SettingsWindow(updates: updates) {
+            GeneralSettingsSections()
+        } tabs: {
+            SettingsTab("Team", systemImage: "person.2") {
+                withStores(TeamSettingsView())
+            }
+            SettingsTab("Advanced", systemImage: "wrench.and.screwdriver") {
+                withStores(AdvancedSettingsSections())
+            }
         }
 
         .commands {
-            CommandGroup(replacing: .appInfo) {
-                AboutCommand()
-                Button("Check for Updates…") {
-                    updates.checkManually()
-                }
+            AppInfoCommands(appName: "Jamf Deployer") {
+                updates.checkManually()
             }
             CommandMenu("Tenant") {
                 Button("Check for Changes", systemImage: "arrow.clockwise") {
@@ -112,15 +108,14 @@ struct MyApp: App {
             }
         }
     }
-}
 
-/// Opens the custom About window from the app menu.
-private struct AboutCommand: View {
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Button("About Jamf Deployer") {
-            openWindow(id: "about")
-        }
+    /// The stores the Team and Advanced tabs read.
+    private func withStores(_ content: some View) -> some View {
+        content
+            .environment(tenantStore)
+            .environment(catalogSources)
+            .environment(deployService)
+            .environment(componentUpdates)
+            .environment(activityLog)
     }
 }
