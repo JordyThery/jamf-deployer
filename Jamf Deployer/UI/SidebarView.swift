@@ -1,5 +1,5 @@
 import SwiftUI
-import DeployerKit
+import JTKit
 
 /// What the sidebar can select.
 nonisolated enum SidebarSelection: Hashable, Sendable {

@@ -1,5 +1,6 @@
 import SwiftUI
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Per-tenant page: drift, connection, preflight, managed objects, the

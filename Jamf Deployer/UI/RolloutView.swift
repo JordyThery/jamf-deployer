@@ -1,5 +1,5 @@
 import SwiftUI
-import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Rolls a change out to several tenants, ring by ring. Every tenant still

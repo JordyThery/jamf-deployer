@@ -1,5 +1,5 @@
 import Foundation
-import DeployerKit
+import JTKit
 
 /// The first-launch guided tour, re-openable from Help → Guided Tour.
 enum JamfDeployerTour {

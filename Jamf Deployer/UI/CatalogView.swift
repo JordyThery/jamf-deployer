@@ -1,6 +1,6 @@
 import SwiftUI
 import os
-import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// The building-block library: every block the catalog offers, grouped by

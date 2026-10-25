@@ -1,5 +1,6 @@
 import SwiftUI
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Adopt a hand-configured tenant: discover its objects, pick the ones the

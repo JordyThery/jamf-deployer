@@ -1,5 +1,5 @@
 import SwiftUI
-import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// The home screen: one table with every tenant and its health at a glance.

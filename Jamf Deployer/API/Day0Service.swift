@@ -1,5 +1,6 @@
 import Foundation
 import DeployerKit
+import JTKit
 
 /// One Day 0 step with its detected state.
 nonisolated struct Day0Step: Identifiable, Sendable {

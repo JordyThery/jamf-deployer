@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import DeployerKit
+import JTKit
 
 /// Export as Terraform: writes tenants as an ordinary Terraform repository
 /// (one module per building block, one folder per tenant, GitHub workflows),

@@ -1,5 +1,6 @@
 import SwiftUI
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// The connect-a-tenant flow: identity and connection type → integration

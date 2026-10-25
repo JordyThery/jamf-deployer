@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// The tenant's Export tab: capture reusable building blocks, take a full

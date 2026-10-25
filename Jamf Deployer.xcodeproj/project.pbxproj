@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		08680C7A30831D600027157B /* DeployerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 08680C7930831D600027157B /* DeployerKit */; };
 		08680C89308324650027157B /* JamfDeployerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 08680C88308324650027157B /* JamfDeployerCore */; };
+		087B32A5308E418B00D0CB8A /* JTKit in Frameworks */ = {isa = PBXBuildFile; productRef = 087B32A4308E418B00D0CB8A /* JTKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +34,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				087B32A5308E418B00D0CB8A /* JTKit in Frameworks */,
 				08680C7A30831D600027157B /* DeployerKit in Frameworks */,
 				08680C89308324650027157B /* JamfDeployerCore in Frameworks */,
 			);
@@ -84,6 +86,7 @@
 			packageProductDependencies = (
 				08680C7930831D600027157B /* DeployerKit */,
 				08680C88308324650027157B /* JamfDeployerCore */,
+				087B32A4308E418B00D0CB8A /* JTKit */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Jamf Deployer.app */;
@@ -137,6 +140,7 @@
 			packageReferences = (
 				08680C7830831D600027157B /* XCLocalSwiftPackageReference "DeployerKit" */,
 				08680C87308324650027157B /* XCLocalSwiftPackageReference "JamfDeployerCore" */,
+				087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -496,6 +500,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/JordyThery/JTKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		08680C7930831D600027157B /* DeployerKit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -504,6 +519,11 @@
 		08680C88308324650027157B /* JamfDeployerCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = JamfDeployerCore;
+		};
+		087B32A4308E418B00D0CB8A /* JTKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */;
+			productName = JTKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

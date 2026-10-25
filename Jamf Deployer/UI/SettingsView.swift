@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
-import DeployerKit
+import JTKit
 
 /// Versions of the tools that ship inside the app. They only change with app
 /// updates, never silently.

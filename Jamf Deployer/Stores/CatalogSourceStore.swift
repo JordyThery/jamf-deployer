@@ -1,5 +1,5 @@
 import Foundation
-import DeployerKit
+import JTKit
 import JamfDeployerCore
 import os
 

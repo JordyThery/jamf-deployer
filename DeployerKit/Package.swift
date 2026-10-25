@@ -1,8 +1,8 @@
 // swift-tools-version: 6.2
 
-// DeployerKit: the parts shared between Jamf Deployer and Intune Deployer —
-// update checking, guided tour, activity log, Keychain access, JSON
-// persistence, design-language components and text export.
+// DeployerKit: what is left of Jamf Deployer's first shared package —
+// Keychain access (moves to JTKit in ROADMAP step 4) and the version
+// comparison used for the bundled components. Everything else moved to JTKit.
 import PackageDescription
 
 let package = Package(

@@ -1,5 +1,5 @@
 import SwiftUI
-import DeployerKit
+import JTKit
 
 struct ContentView: View {
     @Environment(TenantStore.self) private var tenantStore
@@ -27,7 +27,7 @@ struct ContentView: View {
             get: { updates.isPresented },
             set: { updates.isPresented = $0 }
         )) {
-            UpdateView(checker: updates)
+            UpdateView()
         }
         .guidedTour(tour)
         .onChange(of: selection) {

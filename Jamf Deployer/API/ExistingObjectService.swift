@@ -1,5 +1,6 @@
 import Foundation
 import DeployerKit
+import JTKit
 
 /// Lists objects that already exist in a tenant, so blocks can point at
 /// them instead of creating their own.

@@ -1,5 +1,6 @@
 import Foundation
 import DeployerKit
+import JTKit
 
 /// Connection details for one tenant's Platform API integration.
 /// The secret is read from the Keychain by the caller and lives in memory

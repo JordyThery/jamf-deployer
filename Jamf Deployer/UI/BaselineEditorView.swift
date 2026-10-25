@@ -1,5 +1,6 @@
 import SwiftUI
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// The tenant's baseline: pick a preset or individual blocks, fill in each

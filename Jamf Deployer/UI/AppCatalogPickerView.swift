@@ -1,5 +1,6 @@
 import SwiftUI
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Searches Jamf's App Catalog and configures the selected apps for the

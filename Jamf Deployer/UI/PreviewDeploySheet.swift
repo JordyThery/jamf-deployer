@@ -1,6 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Preview changes → confirm → Deploy with live progress → results.

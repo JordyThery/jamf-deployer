@@ -1,5 +1,5 @@
 import SwiftUI
-import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Keeps a parsed provider schema cached on disk, generating it once from

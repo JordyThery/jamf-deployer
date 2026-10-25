@@ -1,5 +1,5 @@
 import Foundation
-import DeployerKit
+import JTKit
 
 /// Jamf Account Organization API: lists environments so the wizard can offer
 /// a picker instead of pasted UUIDs. Organization-scope integrations only —

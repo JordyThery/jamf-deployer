@@ -1,5 +1,5 @@
 import SwiftUI
-import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Per-block opt-in to newer catalog tags: shows what changed between the

@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import os
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// A plan the user is looking at. Only this exact saved plan can be

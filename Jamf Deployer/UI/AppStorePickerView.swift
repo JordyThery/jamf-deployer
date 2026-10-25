@@ -1,5 +1,6 @@
 import SwiftUI
 import DeployerKit
+import JTKit
 import JamfDeployerCore
 
 /// Picks App Store apps the tenant holds Apps and Books licenses for, for

@@ -1,5 +1,5 @@
 import SwiftUI
-import DeployerKit
+import JTKit
 
 @main
 struct MyApp: App {
@@ -28,7 +28,7 @@ struct MyApp: App {
     }
 
     @State private var updates = UpdateChecker(
-        feed: UpdateFeed(owner: "JordyThery", repository: "jamf-deployer", appName: "Jamf Deployer")
+        configuration: UpdateConfiguration(owner: "JordyThery", repository: "jamf-deployer", appName: "Jamf Deployer")
     )
     @State private var tour = JamfDeployerTour.makeState()
 
