@@ -43,8 +43,8 @@ struct TenantClientsTests {
         let first = clients.client(for: tenant, activityLog: nil)
         #expect(clients.client(for: tenant, activityLog: nil) === first)
 
-        async let a = first.get("/pro/v1/jamf-pro-version")
-        async let b = clients.client(for: tenant, activityLog: nil).get("/pro/v1/categories")
+        async let a = first.get("/pro/v1/jamf-pro-version", privileges: [])
+        async let b = clients.client(for: tenant, activityLog: nil).get("/pro/v1/categories", privileges: [.readCategories])
         _ = try await (a, b)
         #expect(await first.signInCount == 1)
         #expect(server.requests.filter { $0.path == "/auth/token" }.count == 1)
@@ -82,14 +82,14 @@ struct TenantClientsTests {
         let clients = registry(server)
         let tenant = platformTenant()
         let before = clients.client(for: tenant, activityLog: nil)
-        _ = try await before.get("/pro/v1/categories")
+        _ = try await before.get("/pro/v1/categories", privileges: [.readCategories])
 
         clients.secretChanged(account: tenant.id.uuidString)
         let after = clients.client(for: tenant, activityLog: nil)
         #expect(after !== before)
         // the old client's token is forgotten too, for a caller still holding it
         try await Task.sleep(for: .milliseconds(100))
-        _ = try await before.get("/pro/v1/categories")
+        _ = try await before.get("/pro/v1/categories", privileges: [.readCategories])
         #expect(await before.signInCount == 2)
 
         clients.drop(tenant.id)
@@ -121,7 +121,7 @@ struct JamfPlatformClientTests {
         let server = MockServer { request in
             request.path == "/auth/token" ? .json(200, tokenJSON("tok-1")) : .json(200, "{}")
         }
-        let (_, status) = try await client(platform, server: server).get("/pro/v1/categories", query: [URLQueryItem(name: "page-size", value: "1")])
+        let (_, status) = try await client(platform, server: server).get("/pro/v1/categories", query: [URLQueryItem(name: "page-size", value: "1")], privileges: [.readCategories])
         #expect(status == 200)
         let signIn = try #require(server.requests.first)
         #expect(signIn.bodyString == "grant_type=client_credentials&client_id=client-1&client_secret=s3cr3t%2Bwith%26specials%3D")
@@ -135,14 +135,14 @@ struct JamfPlatformClientTests {
         let server = MockServer { request in
             request.path == "/auth/token" ? .json(200, tokenJSON("tok")) : .json(403, #"{"httpStatus":403}"#)
         }
-        let (_, status) = try await client(platform, server: server).get("/pro/v1/scripts")
+        let (_, status) = try await client(platform, server: server).get("/pro/v1/scripts", privileges: [.readScripts])
         #expect(status == 403)
     }
 
     @Test func aRefusedSignInIsThrownInJTKitsFormat() async throws {
         let server = MockServer { _ in .json(401, #"{"error":"invalid_client"}"#) }
         await #expect {
-            _ = try await client(platform, server: server).get("/pro/v1/scripts")
+            _ = try await client(platform, server: server).get("/pro/v1/scripts", privileges: [.readScripts])
         } throws: { error in
             guard let error = error as? JamfPlatformError, case .signIn(401, _, _) = error.kind else { return false }
             return error.message().hasPrefix("Sign-in failed: HTTP 401")
@@ -158,8 +158,8 @@ struct JamfPlatformClientTests {
         let configuration = JamfAPIConfiguration(jamfProURL: URL(string: "https://acme.jamfcloud.com")!,
                                                  auth: .userAccount, clientID: "admin", clientSecret: "hunter2")
         let jamfPro = client(configuration, server: server)
-        _ = try await jamfPro.get("/pro/v1/categories")
-        _ = try await jamfPro.get("/proclassic/policies/name/Install Office 100%")
+        _ = try await jamfPro.get("/pro/v1/categories", privileges: [.readCategories])
+        _ = try await jamfPro.get("/proclassic/policies/name/Install Office 100%", privileges: [.readPolicies])
         #expect(server.requests.map(\.path) == ["/api/v1/auth/token", "/api/v1/categories", "/JSSResource/policies/name/Install%20Office%20100%25"])
         #expect(server.requests.last?.url.absoluteString == "https://acme.jamfcloud.com/JSSResource/policies/name/Install%20Office%20100%25")
         #expect(server.requests.first?.header("Authorization") == "Basic " + Data("admin:hunter2".utf8).base64EncodedString())
@@ -173,7 +173,7 @@ struct JamfPlatformClientTests {
         tenant.jamfProURL = "http://not-https.example.com"
         var configuration = JamfAPIConfiguration(tenant: tenant, signInID: "id")
         configuration.secret = { "x" }
-        await #expect(throws: JamfAPIError.self) { _ = try await client(configuration, server: server).get("/pro/v1/categories") }
+        await #expect(throws: JamfAPIError.self) { _ = try await client(configuration, server: server).get("/pro/v1/categories", privileges: [.readCategories]) }
         #expect(server.requests.isEmpty)
     }
 
@@ -182,14 +182,14 @@ struct JamfPlatformClientTests {
         let signIn = MockServer { request in
             request.url.host() == "evil.example" ? .json(200, tokenJSON("x")) : .redirect(to: evil)
         }
-        await #expect(throws: (any Error).self) { _ = try await client(platform, server: signIn).get("/pro/v1/scripts") }
+        await #expect(throws: (any Error).self) { _ = try await client(platform, server: signIn).get("/pro/v1/scripts", privileges: [.readScripts]) }
         #expect(!signIn.requests.contains { $0.url.host() == "evil.example" })
 
         let request = MockServer { request in
             if request.url.host() == "evil.example" { return .json(200, "{}") }
             return request.path == "/auth/token" ? .json(200, tokenJSON("tok")) : .redirect(to: evil)
         }
-        let (_, status) = try await client(platform, server: request).get("/pro/v1/scripts")
+        let (_, status) = try await client(platform, server: request).get("/pro/v1/scripts", privileges: [.readScripts])
         #expect(status == 307)
         #expect(!request.requests.contains { $0.url.host() == "evil.example" })
     }
@@ -203,7 +203,8 @@ struct JamfPlatformClientTests {
         configuration.connectionName = "Sandbox"
         // a POST is never repeated after a server error, so one attempt
         _ = try? await client(configuration, server: server, log: log)
-            .post("/pro/v1/volume-purchasing-locations", json: ["serviceToken": "vpp-token-value"])
+            .post("/pro/v1/volume-purchasing-locations", json: ["serviceToken": "vpp-token-value"],
+                  privileges: [.createVolumePurchasingLocations])
         let text = log.entries.map(ActivityLogExport.transcript(of:)).joined(separator: "\n")
         #expect(log.entries.contains { $0.category == "Sign-in" })
         #expect(log.entries.contains { $0.category == "API" && $0.status == 500 && $0.connection == "Sandbox" })
@@ -265,7 +266,7 @@ struct PlatformAdoptionTests {
         var configuration = JamfAPIConfiguration(tenant: tenant, signInID: "client-1")
         configuration.secret = { "secret" }
         await #expect {
-            _ = try await client(configuration, server: server).get("/pro/v1/categories")
+            _ = try await client(configuration, server: server).get("/pro/v1/categories", privileges: [.readCategories])
         } throws: { error in
             guard let error = error as? JamfPlatformError, case .invalidEnvironmentID("env-1") = error.kind else { return false }
             return true
@@ -282,7 +283,7 @@ struct PlatformAdoptionTests {
         tenant.tenantID = "legacy-tenant"
         var configuration = JamfAPIConfiguration(tenant: tenant, signInID: "client-1")
         configuration.secret = { "secret" }
-        _ = try await client(configuration, server: server).get("/pro/v1/categories")
+        _ = try await client(configuration, server: server).get("/pro/v1/categories", privileges: [.readCategories])
         #expect(server.requests.last?.header("X-Tenant-Id") == "legacy-tenant")
         #expect(server.requests.last?.header("X-Environment-Id") == nil)
     }
@@ -295,7 +296,7 @@ struct PlatformAdoptionTests {
         }
         struct Version: Decodable, Sendable { let version: String }
         await #expect {
-            _ = try await client(server: server).getDecoded(Version.self, path: "/pro/v1/jamf-pro-version")
+            _ = try await client(server: server).getDecoded(Version.self, path: "/pro/v1/jamf-pro-version", privileges: [])
         } throws: { error in
             let message = error.localizedDescription
             return message.contains("BAD_PERMISSIONS (scripts): Missing scripts:read")
@@ -311,7 +312,8 @@ struct PlatformAdoptionTests {
                 : .json(400, #"{"httpStatus":400,"traceId":"trace-9","errors":[{"code":"INVALID_FIELD","field":"serviceToken","description":"Token is expired"}]}"#)
         }
         await #expect {
-            _ = try await client(server: server).post("/pro/v1/volume-purchasing-locations", json: ["serviceToken": "x"])
+            _ = try await client(server: server).post("/pro/v1/volume-purchasing-locations", json: ["serviceToken": "x"],
+                                                privileges: [.createVolumePurchasingLocations])
         } throws: { error in
             error.localizedDescription.contains("INVALID_FIELD (serviceToken): Token is expired")
         }
@@ -354,11 +356,11 @@ struct PlatformAdoptionTests {
             case "/pro/v1/jamf-pro-version": .json(200, #"{"version":"11.33.0"}"#)
             case "/pro/v1/device-enrollments":
                 // the permission check reads one item; the expiry read reads them all
-                request.url.query()?.contains("page-size=1") == true
+                request.queryValue("page-size") == "1"
                     ? .json(200, #"{"totalCount":2,"results":[{"tokenExpirationDate":"2027-05-01"}]}"#)
                     : .json(200, #"{"totalCount":2,"results":[{"tokenExpirationDate":"2027-05-01"},{"tokenExpirationDate":"2026-12-01"}]}"#)
             case "/pro/v1/volume-purchasing-locations":
-                request.url.query()?.contains("page-size=1") == true
+                request.queryValue("page-size") == "1"
                     ? .json(200, #"{"totalCount":2,"results":[{"tokenExpiration":"2027-03-01T00:00:00Z"}]}"#)
                     : .json(200, #"{"totalCount":2,"results":[{"tokenExpiration":"2027-03-01T00:00:00Z"},{"tokenExpiration":"2027-01-15T00:00:00Z"}]}"#)
             default: .json(200, #"{"totalCount":0,"results":[]}"#)

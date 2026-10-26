@@ -9,6 +9,45 @@ public nonisolated enum ErrorTranslation {
         public var hint: String?
     }
 
+    /// How the tenant signs in, for the entries whose fix depends on it: a
+    /// direct Jamf Pro tenant has no region and no Jamf Account, and a user
+    /// account has no client secret.
+    public enum Connection: Sendable {
+        case platform
+        case jamfProAPIClient
+        case jamfProUser
+    }
+
+    /// The wording for direct Jamf Pro tenants, by `table` pattern: API
+    /// client, then user account. Patterns not listed read the same for
+    /// every connection.
+    static let jamfProWording: [String: (apiClient: Translation, user: Translation)] = [
+        "status 401": (
+            Translation(
+                message: "Jamf Pro did not accept the stored credentials.",
+                hint: "The client secret may have been rotated or the API client disabled. Check the client ID and client secret, and that the API client is enabled in Jamf Pro under Settings › API Roles and Clients."
+            ),
+            Translation(
+                message: "Jamf Pro did not accept the stored credentials.",
+                hint: "The password may have changed. Check the username and password, and update the password on the tenant page."
+            )
+        ),
+        "status 403": (
+            Translation(
+                message: "The API client is missing a privilege for this object.",
+                hint: "Add the privileges listed on the building block to the API role in Jamf Pro under Settings › API Roles and Clients."
+            ),
+            Translation(
+                message: "The user account is missing a privilege for this object.",
+                hint: "Add the privileges listed on the building block to the user account in Jamf Pro under Settings › User Accounts and Groups."
+            )
+        ),
+        "no such host": (
+            Translation(message: "The Jamf Pro address could not be found.", hint: "Check the tenant's Jamf Pro URL."),
+            Translation(message: "The Jamf Pro address could not be found.", hint: "Check the tenant's Jamf Pro URL.")
+        ),
+    ]
+
     static let table: [(pattern: String, message: String, hint: String?)] = [
         (
             "status 401",
@@ -128,8 +167,8 @@ public nonisolated enum ErrorTranslation {
         ),
     ]
 
-    public static func translate(_ raw: String) -> Translation {
-        translateIfKnown(raw) ?? Translation(
+    public static func translate(_ raw: String, for connection: Connection = .platform) -> Translation {
+        translateIfKnown(raw, for: connection) ?? Translation(
             message: "Something went wrong while talking to Jamf.",
             hint: "Open the technical details to see the exact error, or create a support bundle."
         )
@@ -137,9 +176,13 @@ public nonisolated enum ErrorTranslation {
 
     /// The table match alone — nil when the error is unrecognized, so
     /// callers can keep their own context-specific fallback.
-    public static func translateIfKnown(_ raw: String) -> Translation? {
+    public static func translateIfKnown(_ raw: String, for connection: Connection = .platform) -> Translation? {
         for entry in table where raw.localizedCaseInsensitiveContains(entry.pattern) {
-            return Translation(message: entry.message, hint: entry.hint)
+            switch (connection, jamfProWording[entry.pattern]) {
+            case (.jamfProAPIClient, let wording?): return wording.apiClient
+            case (.jamfProUser, let wording?): return wording.user
+            default: return Translation(message: entry.message, hint: entry.hint)
+            }
         }
         return nil
     }

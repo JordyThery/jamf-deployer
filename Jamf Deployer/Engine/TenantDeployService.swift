@@ -1661,10 +1661,21 @@ final class TenantDeployService {
     ) async -> String? {
         guard let path = CreateFailureRecovery.lookupPath(for: candidate),
               let (data, status) = try? await client.get(
-                  path, query: CreateFailureRecovery.lookupQuery(for: candidate), accept: "application/json"),
+                  path, query: CreateFailureRecovery.lookupQuery(for: candidate), accept: "application/json",
+                  privileges: lookupPrivileges(for: candidate)),
               status == 200
         else { return nil }
         return CreateFailureRecovery.objectID(in: data, for: candidate, excluding: managed)
+    }
+
+    /// The Jamf Pro privilege each lookup reads with, from JTKit's table.
+    /// Jamf Pro lists no privilege for App Installers.
+    nonisolated static func lookupPrivileges(for candidate: CreateFailureRecovery.Candidate) -> [JamfPro.Privilege] {
+        guard let path = CreateFailureRecovery.lookupPath(for: candidate) else { return [] }
+        if path.hasPrefix("/proclassic/policies/") { return [.readPolicies] }
+        if path.hasPrefix("/proclassic/osxconfigurationprofiles/") { return [.readMacOSConfigurationProfiles] }
+        if path.hasPrefix("/proclassic/patchsoftwaretitles") { return [.readPatchManagementSoftwareTitles] }
+        return []
     }
 
     // MARK: Changes made in Jamf (drift)
@@ -1784,20 +1795,12 @@ final class TenantDeployService {
     private func refreshTokenExpiry(_ tenant: inout Tenant) async {
         guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else { return }
         let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
-        nonisolated struct ADEPage: Decodable, Sendable {
-            nonisolated struct Instance: Decodable, Sendable { let tokenExpirationDate: String? }
-            let results: [Instance]
-        }
-        nonisolated struct VPPPage: Decodable, Sendable {
-            nonisolated struct Location: Decodable, Sendable { let tokenExpiration: String? }
-            let results: [Location]
-        }
         var snapshot = tenant.preflight ?? PreflightSnapshot(date: .now, allGreen: true)
-        if let page = try? await client.getDecoded(ADEPage.self, path: "/pro/v1/device-enrollments") {
-            snapshot.adeTokenExpiration = page.results.compactMap(\.tokenExpirationDate).min()
+        if let expiry = try? await PreflightService.adeTokenExpiry(client: client) {
+            snapshot.adeTokenExpiration = expiry
         }
-        if let page = try? await client.getDecoded(VPPPage.self, path: "/pro/v1/volume-purchasing-locations") {
-            snapshot.vppTokenExpiration = page.results.compactMap(\.tokenExpiration).min()
+        if let expiry = try? await PreflightService.vppTokenExpiry(client: client) {
+            snapshot.vppTokenExpiration = expiry
         }
         snapshot.date = .now
         tenant.preflight = snapshot

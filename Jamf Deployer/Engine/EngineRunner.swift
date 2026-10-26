@@ -46,7 +46,10 @@ actor EngineRunner {
                 }
                 let line = result.rawLines.first { $0.contains("Error:") }
                     ?? result.rawLines.last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                return line.map { "The engine stopped: \($0.replacing("│", with: "").trimmingCharacters(in: .whitespaces))" }
+                return line.map {
+                    let text = EngineOutputCleaner.readableErrorPages(in: $0)
+                    return "The engine stopped: \(text.replacing("│", with: "").trimmingCharacters(in: .whitespaces))"
+                }
                     ?? "The engine stopped with exit code \(result.exitCode)."
             }
         }
@@ -122,7 +125,8 @@ actor EngineRunner {
             else { continue }
             events.append(event)
             if let diagnostic = event.diagnostic, diagnostic.severity == "error" {
-                errorDiagnostics.append(diagnostic)
+                // a Classic API error page in it reads as its message
+                errorDiagnostics.append(EngineOutputCleaner.readableErrorPages(in: diagnostic))
             }
             onEvent(event)
         }

@@ -322,7 +322,8 @@ struct ExportView: View {
                     }
                 )
                 guard result.exitCode == 0 else {
-                    if let known = ErrorTranslation.translateIfKnown(result.logLines.suffix(25).joined(separator: "\n")) {
+                    if let known = ErrorTranslation.translateIfKnown(result.logLines.suffix(25).joined(separator: "\n"),
+                                                                       for: tenant.errorConnection) {
                         errorMessage = known.message + (known.hint.map { " \($0)" } ?? "")
                     } else {
                         errorMessage = "The exporter stopped with an error — see the log below."
