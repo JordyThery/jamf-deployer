@@ -51,7 +51,7 @@ struct ConnectTenantWizard: View {
     private var trimmedScopeID: String { scopeID.trimmingCharacters(in: .whitespacesAndNewlines) }
     @State private var usesLegacyTenantScope = false
     @State private var scopeID = ""
-    @State private var fetchedEnvironments: [OrganizationService.Environment] = []
+    @State private var fetchedEnvironments: [JamfPlatform.Environment] = []
     @State private var environmentFetchMessage: String?
     @State private var isFetchingEnvironments = false
 
@@ -333,8 +333,8 @@ struct ConnectTenantWizard: View {
         Task {
             defer { isFetchingEnvironments = false }
             do {
-                fetchedEnvironments = try await OrganizationService.environments(
-                    gatewayURL: region.gatewayURL,
+                fetchedEnvironments = try await JamfPlatformClient.environments(
+                    region: region,
                     clientID: trimmedClientID,
                     clientSecret: trimmedSecret,
                     activityLog: activityLog

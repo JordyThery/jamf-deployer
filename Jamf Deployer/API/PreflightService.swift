@@ -1,5 +1,6 @@
 import Foundation
 import JamfDeployerCore
+import JTKit
 
 /// One green/amber/red row in the preflight list, with a fix-it hint.
 nonisolated struct PreflightCheck: Identifiable, Sendable, Equatable {
@@ -29,16 +30,22 @@ nonisolated struct PreflightReport: Sendable {
 nonisolated enum PreflightService {
     static let minimumJamfProVersion = (major: 11, minor: 31)
 
-    /// Dry-read probes for the permissions the app needs from day one.
-    /// Each tuple: title, path, required permission shown in the hint.
-    /// `permission` is the Platform privilege; `jamfProPrivilege` the Jamf
-    /// Pro API role privilege for Jamf Pro API connections.
-    private static let permissionProbes: [(title: String, path: String, permission: String, jamfProPrivilege: String)] = [
-        ("Read categories", "/pro/v1/categories", "categories:read", "Read Categories"),
-        ("Read scripts", "/pro/v1/scripts", "scripts:read", "Read Scripts"),
-        ("Read Automated Device Enrollment", "/pro/v1/device-enrollments", "device-enrollment-program-instances:read", "Read Device Enrollment Program Instances"),
-        ("Read volume purchasing", "/pro/v1/volume-purchasing-locations", "volume-purchasing-locations:read", "Read Volume Purchasing Locations"),
+    /// Read-only checks for the permissions the app needs from day one, run
+    /// by JTKit: the Platform permission, and the Jamf Pro API role privilege
+    /// for Jamf Pro API connections.
+    static let permissionChecks: [JamfPlatform.PermissionCheck] = [
+        .init("Read categories", path: "/pro/v1/categories", permission: "categories:read",
+              jamfProPrivilege: "Read Categories"),
+        .init("Read scripts", path: "/pro/v1/scripts", permission: "scripts:read",
+              jamfProPrivilege: "Read Scripts"),
+        .init("Read Automated Device Enrollment", path: adePath, permission: "device-enrollment-program-instances:read",
+              jamfProPrivilege: "Read Device Enrollment Program Instances"),
+        .init("Read volume purchasing", path: vppPath, permission: "volume-purchasing-locations:read",
+              jamfProPrivilege: "Read Volume Purchasing Locations"),
     ]
+
+    private static let adePath = "/pro/v1/device-enrollments"
+    private static let vppPath = "/pro/v1/volume-purchasing-locations"
 
     static func run(
         client: JamfPlatformClient,
@@ -92,40 +99,32 @@ nonisolated enum PreflightService {
             return PreflightReport(checks: checks, snapshot: snapshot)
         }
 
-        // 2. Permission dry reads. Also harvest token expiry dates for the
-        //    dashboard while we're there.
-        for probe in permissionProbes {
-            do {
-                let (data, status) = try await client.get(probe.path, query: [URLQueryItem(name: "page-size", value: "1")])
-                switch status {
-                case 200:
-                    harvest(path: probe.path, data: data, into: &snapshot)
-                    await record(PreflightCheck(
-                        id: probe.path, title: probe.title,
-                        outcome: .pass, detail: "Allowed."
-                    ))
-                case 401, 403:
-                    await record(PreflightCheck(
-                        id: probe.path, title: probe.title,
-                        outcome: .fail,
-                        detail: isJamfPro
-                            ? "Not allowed. Add the \"\(probe.jamfProPrivilege)\" privilege to the API role or user account in Jamf Pro."
-                            : "Not allowed. Add the \"\(probe.permission)\" permission to the API integration in Jamf Account."
-                    ))
-                default:
-                    await record(PreflightCheck(
-                        id: probe.path, title: probe.title,
-                        outcome: .warn, detail: "Unexpected answer (HTTP \(status))."
-                    ))
-                }
-            } catch {
-                await record(PreflightCheck(
-                    id: probe.path, title: probe.title,
-                    outcome: .warn,
-                    detail: "Could not check: \(error.localizedDescription)"
-                ))
+        // 2. Permission checks, 4 at a time. Shown as running until they
+        //    are all back.
+        let checksBefore = checks
+        checks += permissionChecks.map {
+            PreflightCheck(id: $0.path, title: $0.name, outcome: .running, detail: "Checking…")
+        }
+        await publish()
+        var allowed: Set<String> = []
+        do {
+            let results = try await client.checkPermissions(permissionChecks)
+            checks = checksBefore + results.map { check, result in
+                if result == .allowed { allowed.insert(check.path) }
+                return permissionRow(check, result, server: client.server)
+            }
+        } catch {
+            checks = checksBefore + permissionChecks.map {
+                PreflightCheck(id: $0.path, title: $0.name, outcome: .warn,
+                               detail: "Could not check: \(error.localizedDescription)")
             }
         }
+        await publish()
+
+        // Token expiry dates for the dashboard, from the whole lists: the
+        // first to expire of every ADE instance and volume purchasing location.
+        await readTokenExpiry(client: client, ade: allowed.contains(adePath), vpp: allowed.contains(vppPath),
+                              into: &snapshot)
 
         // 3. Cloud Services Connection (needed for the App Catalog block,
         //    which Jamf Pro API connections cannot use).
@@ -184,23 +183,43 @@ nonisolated enum PreflightService {
         return PreflightReport(checks: checks, snapshot: snapshot)
     }
 
-    /// Pulls dashboard fields out of probe responses so preflight doubles as
-    /// the first token-expiry read.
-    private static func harvest(path: String, data: Data, into snapshot: inout PreflightSnapshot) {
-        struct ADEPage: Decodable {
-            struct Instance: Decodable { let tokenExpirationDate: String? }
+    /// One permission check's row: only a 403 is "Not allowed".
+    static func permissionRow(
+        _ check: JamfPlatform.PermissionCheck,
+        _ result: JamfPlatform.PermissionResult,
+        server: JamfPlatform.Server
+    ) -> PreflightCheck {
+        let (outcome, detail): (PreflightCheck.Outcome, String) = switch result {
+        case .allowed: (.pass, "Allowed.")
+        case .missingPermission: (.fail, "Not allowed. \(check.hint(on: server))")
+        case .notFound: (.warn, "Could not check: not found (HTTP 404).")
+        case .failed(let status): (.warn, "Could not check: unexpected answer (HTTP \(status)).")
+        case .unreachable(let message): (.warn, "Could not check: \(message)")
+        }
+        return PreflightCheck(id: check.path, title: check.name, outcome: outcome, detail: detail)
+    }
+
+    /// Reads the ADE instances and volume purchasing locations the checks
+    /// allowed, so preflight doubles as the first token-expiry read. A list
+    /// that can't be read leaves its date empty.
+    static func readTokenExpiry(
+        client: JamfPlatformClient,
+        ade: Bool,
+        vpp: Bool,
+        into snapshot: inout PreflightSnapshot
+    ) async {
+        struct ADEPage: Decodable, Sendable {
+            struct Instance: Decodable, Sendable { let tokenExpirationDate: String? }
             let results: [Instance]
         }
-        struct VPPPage: Decodable {
-            struct Location: Decodable { let tokenExpiration: String? }
+        struct VPPPage: Decodable, Sendable {
+            struct Location: Decodable, Sendable { let tokenExpiration: String? }
             let results: [Location]
         }
-        if path.hasSuffix("device-enrollments"),
-           let page = try? JSONDecoder().decode(ADEPage.self, from: data) {
+        if ade, let page = try? await client.getDecoded(ADEPage.self, path: adePath) {
             snapshot.adeTokenExpiration = page.results.compactMap(\.tokenExpirationDate).min()
         }
-        if path.hasSuffix("volume-purchasing-locations"),
-           let page = try? JSONDecoder().decode(VPPPage.self, from: data) {
+        if vpp, let page = try? await client.getDecoded(VPPPage.self, path: vppPath) {
             snapshot.vppTokenExpiration = page.results.compactMap(\.tokenExpiration).min()
         }
     }

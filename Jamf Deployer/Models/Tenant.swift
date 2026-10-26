@@ -1,25 +1,13 @@
 import Foundation
 import JamfDeployerCore
+import JTKit
 
 /// One connected Jamf tenant and everything the app knows about it.
 /// Persisted as `tenants/<id>/tenant.json` in Application Support; secrets
 /// never live here — they stay in the Keychain.
 nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
-    enum Region: String, Codable, CaseIterable, Sendable {
-        case us, eu, apac
-
-        var gatewayURL: URL {
-            URL(string: "https://\(rawValue).api.jamfcloud.com")!
-        }
-
-        var displayName: String {
-            switch self {
-            case .us: "US"
-            case .eu: "EU"
-            case .apac: "APAC"
-            }
-        }
-    }
+    /// JTKit's region; saved as "us", "eu" or "apac", as before.
+    typealias Region = JamfRegion
 
     /// How the API integration is scoped. Environment is what new
     /// integrations should use; tenant scope is legacy.

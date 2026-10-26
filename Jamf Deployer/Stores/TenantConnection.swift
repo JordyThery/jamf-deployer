@@ -42,7 +42,7 @@ nonisolated struct TenantConnection: ConnectionRecord {
             service: tenant.isJamfPro ? .jamfPro : .jamfPlatform,
             signIn: usesPassword ? .usernamePassword : .apiClient,
             serverURL: tenant.jamfProURL ?? "",
-            region: JamfRegion(rawValue: tenant.region.rawValue) ?? .us,
+            region: tenant.region,
             environmentID: tenant.environmentID ?? "",
             clientID: usesPassword ? "" : signInName,
             username: usesPassword ? signInName : "",

@@ -104,6 +104,18 @@ struct TenantConnectionTests {
         #expect(try JSONFile.encode(Workspace.decode(original)) == original)
     }
 
+    /// The region is JTKit's since step 6; every saved value reads as before
+    /// and is written back unchanged.
+    @Test(arguments: [("us", JamfRegion.us), ("eu", .eu), ("apac", .apac)])
+    func everySavedRegionReadsAndWritesAsBefore(raw: String, region: JamfRegion) throws {
+        let text = String(decoding: try Self.fixture("platform-new"), as: UTF8.self)
+            .replacingOccurrences(of: #""region" : "us""#, with: #""region" : "\#(raw)""#)
+        let original = Data(text.utf8)
+        let tenant = try Workspace.decode(original)
+        #expect(tenant.region == region)
+        #expect(try JSONFile.encode(tenant) == original)
+    }
+
     @Test(arguments: fixtureNames)
     func savingWithoutChangesLeavesTheFileUntouched(_ name: String) throws {
         let original = try Self.fixture(name)

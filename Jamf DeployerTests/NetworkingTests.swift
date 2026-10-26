@@ -9,8 +9,11 @@ import JTKitTestSupport
 // tenant, the six Keychain items on JTKit's store, and engine output
 // cleaned before it is logged or written.
 
+private let environment1 = "6F1C2B3A-4D5E-4F60-8172-93A4B5C6D7E8"
+private let environment2 = "0A1B2C3D-4E5F-4061-8273-94A5B6C7D8E9"
+
 private func platformTenant(name: String = "Sandbox") -> Tenant {
-    Tenant(name: name, region: .us, clientID: "client-1", environmentID: "env-1", isProduction: false)
+    Tenant(name: name, region: .us, clientID: "client-1", environmentID: environment1, isProduction: false)
 }
 
 private func tokenJSON(_ token: String) -> String {
@@ -56,7 +59,7 @@ struct TenantClientsTests {
         switch field {
         case "name": tenant.name = "Renamed"
         case "region": tenant.region = .eu
-        case "environment": tenant.environmentID = "env-2"
+        case "environment": tenant.environmentID = environment2
         case "scope": tenant.environmentID = nil; tenant.tenantID = "tenant-1"
         case "jamfPro": tenant.connection = .jamfPro; tenant.jamfProURL = "https://acme.jamfcloud.com"
         default: signInID.value = "engineer-2"
@@ -112,7 +115,7 @@ struct JamfPlatformClientTests {
 
     private let platform = JamfAPIConfiguration(
         gatewayURL: URL(string: "https://us.api.jamfcloud.com")!, clientID: "client-1",
-        clientSecret: "s3cr3t+with&specials=", environmentID: "env-1")
+        clientSecret: "s3cr3t+with&specials=", environmentID: environment1)
 
     @Test func platformSignsInStrictlyAndSendsTheScopeHeader() async throws {
         let server = MockServer { request in
@@ -125,7 +128,7 @@ struct JamfPlatformClientTests {
         let get = try #require(server.requests.last)
         #expect(get.url.absoluteString == "https://us.api.jamfcloud.com/pro/v1/categories?page-size=1")
         #expect(get.header("Authorization") == "Bearer tok-1")
-        #expect(get.header("X-Environment-Id") == "env-1")
+        #expect(get.header("X-Environment-Id") == environment1)
     }
 
     @Test func anErrorStatusComesBackAsTheStatus() async throws {
@@ -136,13 +139,13 @@ struct JamfPlatformClientTests {
         #expect(status == 403)
     }
 
-    @Test func aRefusedSignInIsNotAuthenticated() async throws {
+    @Test func aRefusedSignInIsThrownInJTKitsFormat() async throws {
         let server = MockServer { _ in .json(401, #"{"error":"invalid_client"}"#) }
         await #expect {
             _ = try await client(platform, server: server).get("/pro/v1/scripts")
         } throws: { error in
-            if case JamfAPIError.notAuthenticated("HTTP 401") = error { return true }
-            return false
+            guard let error = error as? JamfPlatformError, case .signIn(401, _, _) = error.kind else { return false }
+            return error.message().hasPrefix("Sign-in failed: HTTP 401")
         }
     }
 
@@ -199,13 +202,163 @@ struct JamfPlatformClientTests {
         var configuration = platform
         configuration.connectionName = "Sandbox"
         // a POST is never repeated after a server error, so one attempt
-        _ = try await client(configuration, server: server, log: log)
+        _ = try? await client(configuration, server: server, log: log)
             .post("/pro/v1/volume-purchasing-locations", json: ["serviceToken": "vpp-token-value"])
         let text = log.entries.map(ActivityLogExport.transcript(of:)).joined(separator: "\n")
         #expect(log.entries.contains { $0.category == "Sign-in" })
         #expect(log.entries.contains { $0.category == "API" && $0.status == 500 && $0.connection == "Sandbox" })
         for secret in ["s3cr3t", "tok-secret-value", "vpp-token-value"] {
             #expect(!text.contains(secret))
+        }
+    }
+}
+
+@MainActor
+@Suite("Platform API from JTKit")
+struct PlatformAdoptionTests {
+    private let platform = JamfAPIConfiguration(
+        gatewayURL: URL(string: "https://us.api.jamfcloud.com")!, clientID: "client-1",
+        clientSecret: "secret", environmentID: environment1)
+
+    private func client(_ configuration: JamfAPIConfiguration? = nil, server: MockServer) -> JamfPlatformClient {
+        JamfPlatformClient(configuration: configuration ?? platform, activityLog: nil, session: server.session)
+    }
+
+    @Test func anEnvironmentIDThatIsNotAUUIDSendsNothing() async throws {
+        let server = MockServer { _ in .json(200, tokenJSON("tok")) }
+        var tenant = platformTenant()
+        tenant.environmentID = "env-1"
+        var configuration = JamfAPIConfiguration(tenant: tenant, signInID: "client-1")
+        configuration.secret = { "secret" }
+        await #expect {
+            _ = try await client(configuration, server: server).get("/pro/v1/categories")
+        } throws: { error in
+            guard let error = error as? JamfPlatformError, case .invalidEnvironmentID("env-1") = error.kind else { return false }
+            return true
+        }
+        #expect(server.requests.isEmpty)
+    }
+
+    @Test func aLegacyTenantIDIsSentAsBefore() async throws {
+        let server = MockServer { request in
+            request.path == "/auth/token" ? .json(200, tokenJSON("tok")) : .json(200, "{}")
+        }
+        var tenant = platformTenant()
+        tenant.environmentID = nil
+        tenant.tenantID = "legacy-tenant"
+        var configuration = JamfAPIConfiguration(tenant: tenant, signInID: "client-1")
+        configuration.secret = { "secret" }
+        _ = try await client(configuration, server: server).get("/pro/v1/categories")
+        #expect(server.requests.last?.header("X-Tenant-Id") == "legacy-tenant")
+        #expect(server.requests.last?.header("X-Environment-Id") == nil)
+    }
+
+    @Test func aJamfErrorShowsItsCodeTraceIDAndHint() async throws {
+        let server = MockServer { request in
+            request.path == "/auth/token"
+                ? .json(200, tokenJSON("tok"))
+                : .json(403, #"{"httpStatus":403,"traceId":"trace-123","errors":[{"code":"BAD_PERMISSIONS","field":"scripts","description":"Missing scripts:read"}]}"#)
+        }
+        struct Version: Decodable, Sendable { let version: String }
+        await #expect {
+            _ = try await client(server: server).getDecoded(Version.self, path: "/pro/v1/jamf-pro-version")
+        } throws: { error in
+            let message = error.localizedDescription
+            return message.contains("BAD_PERMISSIONS (scripts): Missing scripts:read")
+                && message.contains("trace-123")
+                && message.contains("Jamf Account")
+        }
+    }
+
+    @Test func aDay0WriteErrorIsThrownInJTKitsFormat() async throws {
+        let server = MockServer { request in
+            request.path == "/auth/token"
+                ? .json(200, tokenJSON("tok"))
+                : .json(400, #"{"httpStatus":400,"traceId":"trace-9","errors":[{"code":"INVALID_FIELD","field":"serviceToken","description":"Token is expired"}]}"#)
+        }
+        await #expect {
+            _ = try await client(server: server).post("/pro/v1/volume-purchasing-locations", json: ["serviceToken": "x"])
+        } throws: { error in
+            error.localizedDescription.contains("INVALID_FIELD (serviceToken): Token is expired")
+        }
+    }
+
+    @Test func preflightTellsAMissingPermissionFromNotFoundAndFailed() async throws {
+        let server = MockServer { request in
+            switch request.path {
+            case "/auth/token": .json(200, tokenJSON("tok"))
+            case "/pro/v1/jamf-pro-version": .json(200, #"{"version":"11.33.0-t1"}"#)
+            case "/pro/v1/categories": .json(200, #"{"totalCount":0,"results":[]}"#)
+            case "/pro/v1/scripts": .json(403, #"{"httpStatus":403}"#)
+            case "/pro/v1/device-enrollments": .json(404, #"{"httpStatus":404}"#)
+            case "/pro/v1/volume-purchasing-locations": .json(401, #"{"httpStatus":401}"#)
+            default: .json(200, #"{"totalCount":0,"results":[]}"#)
+            }
+        }
+        let report = await PreflightService.run(client: client(server: server)) { _ in }
+        let rows = Dictionary(uniqueKeysWithValues: report.checks.map { ($0.id, $0) })
+        #expect(rows["/pro/v1/categories"]?.outcome == .pass)
+        #expect(rows["/pro/v1/scripts"]?.outcome == .fail)
+        #expect(rows["/pro/v1/scripts"]?.detail == "Not allowed. Add the “scripts:read” permission to the API integration in Jamf Account.")
+        #expect(rows["/pro/v1/device-enrollments"]?.outcome == .warn)
+        #expect(rows["/pro/v1/device-enrollments"]?.detail.contains("HTTP 404") == true)
+        #expect(rows["/pro/v1/volume-purchasing-locations"]?.outcome == .warn)
+        #expect(rows["/pro/v1/volume-purchasing-locations"]?.detail.contains("HTTP 401") == true)
+        #expect(report.checks.map(\.id).prefix(6) == ["auth", "version", "/pro/v1/categories", "/pro/v1/scripts",
+                                                     "/pro/v1/device-enrollments", "/pro/v1/volume-purchasing-locations"])
+    }
+
+    @Test func aJamfProTenantIsToldWhichPrivilegeToAdd() {
+        let row = PreflightService.permissionRow(PreflightService.permissionChecks[1], .missingPermission, server: .jamfPro)
+        #expect(row.detail == "Not allowed. Add the “Read Scripts” privilege to the API role in Jamf Pro under Settings › API Roles and Clients.")
+    }
+
+    @Test func preflightTakesTheFirstExpiryFromTheWholeList() async throws {
+        let server = MockServer { request in
+            switch request.path {
+            case "/auth/token": .json(200, tokenJSON("tok"))
+            case "/pro/v1/jamf-pro-version": .json(200, #"{"version":"11.33.0"}"#)
+            case "/pro/v1/device-enrollments":
+                // the permission check reads one item; the expiry read reads them all
+                request.url.query()?.contains("page-size=1") == true
+                    ? .json(200, #"{"totalCount":2,"results":[{"tokenExpirationDate":"2027-05-01"}]}"#)
+                    : .json(200, #"{"totalCount":2,"results":[{"tokenExpirationDate":"2027-05-01"},{"tokenExpirationDate":"2026-12-01"}]}"#)
+            case "/pro/v1/volume-purchasing-locations":
+                request.url.query()?.contains("page-size=1") == true
+                    ? .json(200, #"{"totalCount":2,"results":[{"tokenExpiration":"2027-03-01T00:00:00Z"}]}"#)
+                    : .json(200, #"{"totalCount":2,"results":[{"tokenExpiration":"2027-03-01T00:00:00Z"},{"tokenExpiration":"2027-01-15T00:00:00Z"}]}"#)
+            default: .json(200, #"{"totalCount":0,"results":[]}"#)
+            }
+        }
+        let report = await PreflightService.run(client: client(server: server)) { _ in }
+        #expect(report.snapshot.adeTokenExpiration == "2026-12-01")
+        #expect(report.snapshot.vppTokenExpiration == "2027-01-15T00:00:00Z")
+    }
+
+    @Test func environmentsAreListedSortedWithoutAScopeHeader() async throws {
+        let server = MockServer { request in
+            request.path == "/auth/token"
+                ? .json(200, tokenJSON("tok"))
+                : .json(200, #"{"results":[{"id":"\#(environment2)","name":"Production"},{"id":"\#(environment1)","name":"Lab"}]}"#)
+        }
+        let environments = try await JamfPlatformClient.environments(
+            region: .eu, clientID: "client-1", clientSecret: "secret", activityLog: nil, session: server.session)
+        #expect(environments.map(\.name) == ["Lab", "Production"])
+        let list = try #require(server.requests.last)
+        #expect(list.url.absoluteString == "https://eu.api.jamfcloud.com/organization/v1/environments")
+        #expect(list.header("X-Environment-Id") == nil && list.header("X-Tenant-Id") == nil)
+    }
+
+    @Test func anEnvironmentScopedIntegrationIsToldWhereToFindTheID() async throws {
+        let server = MockServer { request in
+            request.path == "/auth/token" ? .json(200, tokenJSON("tok")) : .json(403, #"{"httpStatus":403}"#)
+        }
+        await #expect {
+            _ = try await JamfPlatformClient.environments(
+                region: .us, clientID: "client-1", clientSecret: "secret", activityLog: nil, session: server.session)
+        } throws: { error in
+            guard let error = error as? JamfPlatformError, case .cannotListEnvironments = error.kind else { return false }
+            return error.message().contains("account.jamf.com")
         }
     }
 }

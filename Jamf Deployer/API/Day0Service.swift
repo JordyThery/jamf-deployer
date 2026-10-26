@@ -183,21 +183,16 @@ final class Day0Service {
     /// The ADE public key the user uploads to Apple Business Manager.
     func downloadADEPublicKey(tenant: Tenant) async throws -> Data {
         let client = try client(for: tenant)
-        let (data, status) = try await client.getRaw("/pro/v1/device-enrollments/public-key", accept: "application/x-pem-file")
-        guard status == 200 else { throw JamfAPIError.http(status: status, path: "/pro/v1/device-enrollments/public-key") }
-        return data
+        return try await client.getRaw("/pro/v1/device-enrollments/public-key", accept: "application/x-pem-file")
     }
 
     /// Uploads the .p7m server token downloaded from Apple Business Manager.
     func uploadADEToken(tenant: Tenant, tokenFile: Data, name: String) async throws {
         let client = try client(for: tenant)
-        let (_, status) = try await client.post("/pro/v1/device-enrollments/upload-token", json: [
+        _ = try await client.post("/pro/v1/device-enrollments/upload-token", json: [
             "tokenFileName": name,
             "encodedToken": tokenFile.base64EncodedString(),
         ])
-        guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/pro/v1/device-enrollments/upload-token")
-        }
     }
 
     /// Uploads the .vpptoken from Apple Business Manager. The file content
@@ -206,26 +201,20 @@ final class Day0Service {
         let client = try client(for: tenant)
         let serviceToken = String(decoding: tokenFile, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let (_, status) = try await client.post("/pro/v1/volume-purchasing-locations", json: [
+        _ = try await client.post("/pro/v1/volume-purchasing-locations", json: [
             "name": name,
             "serviceToken": serviceToken,
         ])
-        guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/pro/v1/volume-purchasing-locations")
-        }
     }
 
     /// Creates a minimal macOS Self Service branding configuration.
     func createBranding(tenant: Tenant, brandingName: String) async throws {
         let client = try client(for: tenant)
-        let (_, status) = try await client.post("/pro/v1/self-service/branding/macos", json: [
+        _ = try await client.post("/pro/v1/self-service/branding/macos", json: [
             "applicationName": brandingName,
             "brandingName": brandingName,
             "homeHeading": "Welcome to \(brandingName)",
         ])
-        guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/pro/v1/self-service/branding/macos")
-        }
     }
 
     /// Links Jamf Pro to a Jamf Protect tenant.
@@ -235,13 +224,10 @@ final class Day0Service {
         if !graphqlURL.hasSuffix("/graphql") {
             graphqlURL = graphqlURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/graphql"
         }
-        let (_, status) = try await client.post("/pro/v1/jamf-protect/register", json: [
+        _ = try await client.post("/pro/v1/jamf-protect/register", json: [
             "protectUrl": graphqlURL,
             "clientId": clientID,
             "password": password,
         ])
-        guard status == 200 || status == 201 else {
-            throw JamfAPIError.http(status: status, path: "/pro/v1/jamf-protect/register")
-        }
     }
 }

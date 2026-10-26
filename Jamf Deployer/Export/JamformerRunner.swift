@@ -1,5 +1,6 @@
 import Foundation
 import JamfDeployerCore
+import JTKit
 
 /// Runs the bundled jamformer as a child process for Export, Adopt and
 /// Clone. Credentials go in as environment variables only; the secret scan
