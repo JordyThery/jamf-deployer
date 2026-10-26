@@ -1,8 +1,10 @@
 import Foundation
+import JamfDeployerCore
 
 /// Runs the bundled jamformer as a child process for Export, Adopt and
 /// Clone. Credentials go in as environment variables only; the secret scan
-/// is never skipped and its findings are surfaced in the app.
+/// is never skipped and its findings are surfaced in the app, as locations
+/// only: the scanned text never reaches a screen or a log.
 actor JamformerRunner {
     struct ResourceType: Sendable, Identifiable, Hashable {
         /// The -include-resources filter key (e.g. "policy").
@@ -14,9 +16,12 @@ actor JamformerRunner {
 
     struct ExportResult: Sendable {
         var outputURL: URL
+        /// Output lines, without the secret scan's scanned text.
         var logLines: [String]
-        /// Lines the secret scan reported (empty = clean).
-        var secretFindings: [String]
+        /// What the secret scan reported (empty = clean).
+        var secretFindings: [JamformerSecretFinding]
+        /// The findings tied to the exported objects holding them.
+        var secretObjects: [SecretObjectFinding] = []
         var exitCode: Int32
     }
 
@@ -150,6 +155,7 @@ actor JamformerRunner {
                 try? FileManager.default.removeItem(at: retryURL.appending(path: file))
             }
         }
+        result.secretObjects = SecretScan.objectFindings(result.secretFindings.map(\.location), in: result.outputURL)
         return result
     }
 
@@ -181,13 +187,15 @@ actor JamformerRunner {
         // Drain stderr concurrently so neither pipe can fill and deadlock —
         // and stream it: the exporter reports errors there.
         let stderrHandle = stderr.fileHandleForReading
+        // Every line keeps its place (blank ones too: the secret scan's
+        // report has blank lines inside it); what is shown or logged has the
+        // scanned text removed.
         let stderrTask = Task<[String], Never> {
             var collected: [String] = []
             for await line in EngineRunner.lines(from: stderrHandle) {
                 let clean = Self.stripTerminalNoise(line)
-                guard !clean.isEmpty else { continue }
                 collected.append(clean)
-                onLine?(clean)
+                if !clean.isEmpty { onLine?(SecretScan.withoutScannedText(clean)) }
             }
             return collected
         }
@@ -195,38 +203,24 @@ actor JamformerRunner {
         var lines: [String] = []
         for await line in EngineRunner.lines(from: stdout.fileHandleForReading) {
             let clean = Self.stripTerminalNoise(line)
-            guard !clean.isEmpty else { continue }
             lines.append(clean)
-            onLine?(clean)
+            if !clean.isEmpty { onLine?(SecretScan.withoutScannedText(clean)) }
         }
         lines.append(contentsOf: await stderrTask.value)
         await EngineRunner.awaitTermination(terminated)
 
-        // The gitleaks-based scan is always on; collect what it reported.
-        var findings: [String] = []
-        var inFindings = false
-        for line in lines {
-            let lowered = line.lowercased()
-            if lowered.contains("secret") && (lowered.contains("detected") || lowered.contains("found")) {
-                if lowered.contains("no secrets") {
-                    inFindings = false
-                } else {
-                    inFindings = true
-                    findings.append(line.trimmingCharacters(in: .whitespaces))
-                    continue
-                }
-            }
-            if inFindings {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty { inFindings = false } else { findings.append(trimmed) }
-            }
-        }
+        return Self.result(lines: lines, exitCode: process.terminationStatus)
+    }
 
-        return ExportResult(
+    /// The result of one run from its output lines: the gitleaks-based
+    /// scan is always on, so its report is read here; the lines kept for
+    /// the log lose the scanned text.
+    nonisolated static func result(lines: [String], exitCode: Int32) -> ExportResult {
+        ExportResult(
             outputURL: URL(filePath: "/"),
-            logLines: lines,
-            secretFindings: findings,
-            exitCode: process.terminationStatus
+            logLines: lines.filter { !$0.isEmpty }.map(SecretScan.withoutScannedText),
+            secretFindings: SecretScan.parseJamformerReport(lines),
+            exitCode: exitCode
         )
     }
 

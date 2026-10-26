@@ -43,7 +43,11 @@ struct AdoptView: View {
     /// Selected objects that could not be staged, and why.
     @State private var stagingNote: String?
     @State private var logTail: [String] = []
-    @State private var secretFindings: [String] = []
+    /// Possible secrets, by object: from jamformer's scan and the app's own.
+    @State private var secretObjects: [SecretObjectFinding] = []
+    /// Objects holding a possible secret: they cannot be staged, because
+    /// adopted objects are saved in the store (and in Team Mode shared).
+    @State private var secretAddresses: Set<String> = []
 
     private let runner = JamformerRunner()
 
@@ -134,21 +138,16 @@ struct AdoptView: View {
                     TextField("Filter objects", text: $objectFilter)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 180)
-                    Button("All") { selectedObjects.formUnion(filteredObjects.map(\.address)) }
+                    Button("All") { selectedObjects.formUnion(filteredObjects.map(\.address).filter { !secretAddresses.contains($0) }) }
                         .help("Selects every object the filter shows")
                     Button("None") { selectedObjects.subtract(filteredObjects.map(\.address)) }
                         .help("Deselects every object the filter shows")
                 }
                 .controlSize(.small)
-                if !secretFindings.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("The secret scan reported findings. Adopted objects are stored in the tenant record, so review these first:", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow)
-                        ForEach(secretFindings, id: \.self) { finding in
-                            Text(finding).font(.caption.monospaced())
-                        }
-                    }
-                    .font(.caption)
+                if !secretObjects.isEmpty {
+                    SecretObjectsNotice(
+                        findings: secretObjects,
+                        message: "These may contain a secret, so they can't be adopted: adopted objects are saved in the tenant record. Remove the secret in Jamf (a script parameter, for example), then discover again.")
                 }
                 if !unmanageableNotes.isEmpty {
                     Text("Left out — the app cannot manage these: " + unmanageableNotes.joined(separator: "; ") + ". They stay in Jamf unchanged.")
@@ -177,8 +176,14 @@ struct AdoptView: View {
                             }
                         }
                         .toggleStyle(.checkbox)
+                        .disabled(secretAddresses.contains(object.address))
                         Spacer()
-                        if object.hasProvenanceTag {
+                        if secretAddresses.contains(object.address) {
+                            let rules = secretObjects.filter { $0.address == object.address }.map(\.rule).joined(separator: ", ")
+                            StatusBadge("Possible secret", style: .warning)
+                                .help(rules)
+                                .accessibilityLabel("Possible secret: \(rules)")
+                        } else if object.hasProvenanceTag {
                             StatusBadge("Created by a building block", style: .warning)
                                 .help("Tagged by Jamf Deployer, so it likely belongs to a building block")
                         }
@@ -280,7 +285,6 @@ struct AdoptView: View {
                         Task { @MainActor in logTail.append(line) }
                     }
                 )
-                secretFindings = result.secretFindings
                 guard result.exitCode == 0 else {
                     step = .failed("The discovery stopped with an error. Check the Activity Log.")
                     return
@@ -297,7 +301,14 @@ struct AdoptView: View {
                     .sorted { $0.key < $1.key }
                     .map { "\($0.value.count) object\($0.value.count == 1 ? "" : "s"): \($0.key)" }
 
-                selectedObjects = Set(objects.filter { !$0.hasProvenanceTag }.map(\.address))
+                // jamformer's findings plus the app's own scan, which the
+                // store check before every commit also runs.
+                let own = SecretScan.objectFindings(SecretScan.scanExport(result.outputURL), in: result.outputURL)
+                var seen: Set<String> = []
+                secretObjects = (result.secretObjects + own).filter { seen.insert($0.id).inserted }
+                secretAddresses = Set(secretObjects.compactMap(\.address))
+
+                selectedObjects = Set(objects.filter { !$0.hasProvenanceTag && !secretAddresses.contains($0.address) }.map(\.address))
                 step = objects.isEmpty
                     ? .failed(alreadyAdopted.isEmpty
                         ? "No objects of the chosen types were found."
@@ -319,9 +330,11 @@ struct AdoptView: View {
             // Objects a block already manages, and those the app cannot
             // manage, cannot be pulled in for an object that needs them.
             let blockManaged = Set(objects.filter(\.hasProvenanceTag).map(\.address)).subtracting(selectedObjects)
+            // Objects holding a possible secret never reach the store, and
+            // neither does anything that needs them.
             let selection = ExportedObjectInventory.adoptableSelection(
-                directory: exportURL, kept: selectedObjects, alreadyManaged: alreadyAdopted,
-                unavailable: unmanageableAddresses.union(blockManaged))
+                directory: exportURL, kept: selectedObjects.subtracting(secretAddresses), alreadyManaged: alreadyAdopted,
+                unavailable: unmanageableAddresses.union(blockManaged).union(secretAddresses))
             let kept = selection.kept
             let leftOutNames = objects.filter { selection.leftOut.contains($0.address) }.map(\.displayName).sorted()
             stagingNote = leftOutNames.isEmpty ? nil
@@ -335,6 +348,21 @@ struct AdoptView: View {
             try ExportedObjectInventory.normalizeImportBlocks(directory: exportURL)
             try ExportedObjectInventory.inlineVariables(directory: exportURL)
             try ExportedObjectInventory.protectOmittedSections(directory: exportURL)
+
+            // Sensitive values are never written into the configuration:
+            // they stay variables, with their values in this Mac's Keychain.
+            let sensitive = ExportedObjectInventory.sensitiveVariables(directory: exportURL)
+            let secrets = TenantSecrets(tenantID: tenant.id)
+            for variable in sensitive {
+                guard let value = variable.value else {
+                    step = .failed("Jamf did not export the sensitive value “\(variable.name)”, so nothing was staged.")
+                    return
+                }
+                guard secrets.adoptedVariable(variable.name).save(value) else {
+                    step = .failed("The sensitive value “\(variable.name)” could not be stored in the Keychain, so nothing was staged.")
+                    return
+                }
+            }
 
             // Strip provider wiring; the workspace supplies its own.
             let fileManager = FileManager.default
@@ -353,6 +381,8 @@ struct AdoptView: View {
             } else {
                 try Self.merge(exportURL, into: destination)
             }
+            try ExportedObjectInventory.mergeSensitiveDeclarations(
+                sensitive, into: destination.appending(path: TenantDeployService.adoptedSensitiveVariablesFile))
             step = .ready(count: kept.count)
             activityLog.append(ActivityLogEntry(
                 category: "Adopt", operation: "stage", detail: tenant.name,

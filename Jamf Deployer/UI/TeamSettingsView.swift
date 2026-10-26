@@ -224,7 +224,7 @@ struct TeamSettingsView: View {
             do {
                 try await Self.backUpStore()
                 try await deployService.gitStore.ensureRepo()
-                _ = try await deployService.gitStore.commitAll(message: "Prepare team space")
+                _ = try await deployService.commitStore(message: "Prepare team space")
                 do {
                     try await deployService.gitStore.attachRemote(remote)
                 } catch {
@@ -236,7 +236,7 @@ struct TeamSettingsView: View {
                     guard TeamPassphrase.item.save(newPassphrase) else { throw TeamError.keychain }
                     await deployService.syncTeamState()
                     try await deployService.moveStateToTeam(tenants: tenantStore.tenants)
-                    _ = try await deployService.gitStore.commitAll(message: "Create team space")
+                    _ = try await deployService.commitStore(message: "Create team space")
                     try await deployService.gitStore.pushRebasing()
                 } catch {
                     // Local state is only retired once everything succeeded.
@@ -287,7 +287,7 @@ struct TeamSettingsView: View {
                     let importedTenants = tenantStore.tenants.filter { imported.contains($0.id) }
                     try await deployService.moveStateToTeam(tenants: importedTenants)
                     if !imported.isEmpty {
-                        _ = try await deployService.gitStore.commitAll(
+                        _ = try await deployService.commitStore(
                             message: "Import \(imported.count) tenant\(imported.count == 1 ? "" : "s") from a joining Mac")
                         try await deployService.gitStore.pushRebasing()
                     }
@@ -320,7 +320,7 @@ struct TeamSettingsView: View {
                 try await deployService.moveStateToLocal()
                 try await deployService.gitStore.detachRemote()
                 adoptEngineerClientIDs()
-                _ = try? await deployService.gitStore.commitAll(message: "Leave team space")
+                _ = try? await deployService.commitStore(message: "Leave team space")
                 await deployService.syncTeamState()
                 TeamPassphrase.item.delete()
                 hasTeamPassphrase = false

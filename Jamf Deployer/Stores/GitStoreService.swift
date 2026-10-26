@@ -1,4 +1,5 @@
 import Foundation
+import JamfDeployerCore
 import os
 
 /// The store on disk is a Git repository — always, remote or not. Solo use
@@ -16,6 +17,9 @@ actor GitStoreService {
         case commandFailed(String, output: String)
         case pushRejected
         case remoteHasCredentials
+        /// The store holds possible secrets nobody marked "not a secret":
+        /// nothing was committed.
+        case possibleSecrets([SecretFinding])
 
         var errorDescription: String? {
             switch self {
@@ -27,6 +31,8 @@ actor GitStoreService {
                 "The team space moved while this Mac was working. Sync and try again."
             case .remoteHasCredentials:
                 "Remove the credentials from the repository URL. Git uses your own sign-in (SSH key or gh auth login)."
+            case .possibleSecrets(let findings):
+                "Nothing was saved to the store: \(findings.count == 1 ? "one place looks" : "\(findings.count) places look") like a secret (\(findings.prefix(3).map { "\($0.path), line \($0.line)" }.joined(separator: "; "))\(findings.count > 3 ? "; …" : "")). Review \(findings.count == 1 ? "it" : "them") in the main window."
             }
         }
     }
@@ -86,14 +92,119 @@ actor GitStoreService {
         }
     }
 
-    /// Stages everything and commits when there are changes.
+    /// Stages everything and commits when there are changes. First the
+    /// whole store is checked for possible secrets; any not marked "not a
+    /// secret" stop the commit.
     @discardableResult
     func commitAll(message: String) async throws -> Bool {
+        let findings = try await unacknowledgedFindings()
+        guard findings.isEmpty else { throw GitError.possibleSecrets(findings) }
         try await run("add", "-A")
         let status = try await run("status", "--porcelain")
         guard !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         try await run("commit", "-m", message)
         return true
+    }
+
+    // MARK: Secret check
+
+    /// "Not a secret" acknowledgements: location and rule only, never the
+    /// value. Committed, so the whole team shares them. A finding whose line
+    /// moves is asked about again.
+    nonisolated static let acknowledgementsFile = "secret-scan-acknowledgements.json"
+
+    struct Acknowledgements: Codable {
+        var notSecrets: [SecretFinding] = []
+    }
+
+    /// One possible secret in the store.
+    struct StoreFinding: Sendable, Hashable, Identifiable {
+        var finding: SecretFinding
+        /// Only in an earlier version: removed or changed since. Git keeps it.
+        var inEarlierVersion: Bool
+        var id: SecretFinding { finding }
+    }
+
+    /// Possible secrets in what the next commit would hold (every file Git
+    /// tracks or would add), without the acknowledged ones.
+    func unacknowledgedFindings() async throws -> [SecretFinding] {
+        let acknowledged = Set(acknowledgements().notSecrets)
+        return try await currentFindings().filter { !acknowledged.contains($0) }
+    }
+
+    /// Possible secrets in the files the next commit would hold.
+    func currentFindings() async throws -> [SecretFinding] {
+        let listing = try await run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        let paths = Set(listing.split(separator: "\0").map(String.init))
+            .filter { $0 != Self.acknowledgementsFile }
+            .sorted()
+        let storeURL = storeURL
+        return await Task.detached {
+            var findings: [SecretFinding] = []
+            for path in paths {
+                guard let data = try? Data(contentsOf: storeURL.appending(path: path)),
+                      let text = SecretScan.scannableText(data) else { continue }
+                findings += SecretScan.scan(text: text, path: path)
+            }
+            return findings
+        }.value
+    }
+
+    /// Marks a finding as not a secret; the next commit records it.
+    func acknowledge(_ finding: SecretFinding) throws {
+        var current = acknowledgements()
+        guard !current.notSecrets.contains(finding) else { return }
+        current.notSecrets.append(finding)
+        current.notSecrets.sort { ($0.path, $0.line, $0.rule) < ($1.path, $1.line, $1.rule) }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(current).write(to: storeURL.appending(path: Self.acknowledgementsFile), options: .atomic)
+    }
+
+    func acknowledgements() -> Acknowledgements {
+        guard let data = try? Data(contentsOf: storeURL.appending(path: Self.acknowledgementsFile)),
+              let decoded = try? JSONDecoder().decode(Acknowledgements.self, from: data) else { return Acknowledgements() }
+        return decoded
+    }
+
+    /// The one-time check of a store from before this check existed: the
+    /// current files (acknowledged ones left out) and every earlier version
+    /// Git keeps.
+    func fullCheck() async throws -> [StoreFinding] {
+        var result = try await unacknowledgedFindings().map { StoreFinding(finding: $0, inEarlierVersion: false) }
+        var seen = Set(result.map(\.finding))
+        guard (try? await run("rev-parse", "--verify", "-q", "HEAD")) != nil else { return result }
+        let current = Set(try await run("ls-tree", "-r", "HEAD").split(separator: "\n").compactMap { line -> String? in
+            let fields = line.split(separator: " ", maxSplits: 3)
+            return fields.count >= 3 ? String(fields[2].prefix(while: { !$0.isWhitespace })) : nil
+        })
+        // Every blob the store's history reached, with a path it had. Only
+        // main: the state branch holds encrypted engine state, not files.
+        var pathByBlob: [String: String] = [:]
+        for line in try await run("rev-list", "--objects", "HEAD").split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, pathByBlob[String(parts[0])] == nil else { continue }
+            pathByBlob[String(parts[0])] = String(parts[1])
+        }
+        let objects = pathByBlob.keys.filter { !current.contains($0) }.sorted()
+        guard !objects.isEmpty else { return result }
+        let types = try await runWithInput(objects.joined(separator: "\n") + "\n",
+                                           "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)")
+        let blobs = types.split(separator: "\n").compactMap { line -> String? in
+            let fields = line.split(separator: " ")
+            guard fields.count == 3, fields[1] == "blob", let size = Int(fields[2]),
+                  size <= SecretScan.maximumFileSize else { return nil }
+            return String(fields[0])
+        }
+        for blob in blobs {
+            guard let path = pathByBlob[blob], path != Self.acknowledgementsFile,
+                  let data = try? await runData("cat-file", "blob", blob),
+                  let text = SecretScan.scannableText(data) else { continue }
+            for finding in SecretScan.scan(text: text, path: path) where seen.insert(finding).inserted {
+                result.append(StoreFinding(finding: finding, inEarlierVersion: true))
+            }
+        }
+        return result
     }
 
     // MARK: Remote / team space
@@ -216,6 +327,15 @@ actor GitStoreService {
         try await execute(arguments, input: input)
     }
 
+    /// A command's output as bytes (file contents from Git's history).
+    private func runData(_ arguments: String...) async throws -> Data {
+        let storeURL = storeURL
+        let logger = logger
+        return try await Task.detached {
+            try Self.executeSyncData(arguments, input: nil, storeURL: storeURL, logger: logger)
+        }.value
+    }
+
     /// Runs git off the actor: network operations (pull, push, ls-remote)
     /// can stall for minutes and must not park an executor thread.
     private func execute(_ arguments: [String], input: String?) async throws -> String {
@@ -229,6 +349,12 @@ actor GitStoreService {
     private nonisolated static func executeSync(
         _ arguments: [String], input: String?, storeURL: URL, logger: Logger
     ) throws -> String {
+        String(decoding: try executeSyncData(arguments, input: input, storeURL: storeURL, logger: logger), as: UTF8.self)
+    }
+
+    private nonisolated static func executeSyncData(
+        _ arguments: [String], input: String?, storeURL: URL, logger: Logger
+    ) throws -> Data {
         guard Self.isGitAvailable else { throw GitError.gitUnavailable }
         let process = Process()
         let stdin = Pipe()
@@ -250,12 +376,12 @@ actor GitStoreService {
         }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        let text = String(decoding: data, as: UTF8.self)
         guard process.terminationStatus == 0 else {
+            let text = String(decoding: data, as: UTF8.self)
             // Only the subcommand: arguments can hold a remote URL with credentials.
             logger.error("git \(arguments.first ?? "", privacy: .public) failed: \(text.prefix(200), privacy: .private)")
             throw GitError.commandFailed(arguments.first ?? "", output: text)
         }
-        return text
+        return data
     }
 }

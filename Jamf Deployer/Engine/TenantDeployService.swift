@@ -85,6 +85,27 @@ final class TenantDeployService {
     private(set) var lastSync: Date?
     private(set) var syncMessage: String?
 
+    /// Possible secrets shown in the store review sheet: a commit they
+    /// stopped, or the one-time check of a store from before the check.
+    struct StoreSecretReview: Identifiable {
+        enum Kind {
+            /// The commit that was stopped, to try again.
+            case commitBlocked(message: String)
+            /// Stopped elsewhere (Team settings): nothing to retry here.
+            case commitStopped
+            case existingStore
+        }
+        let id = UUID()
+        var kind: Kind
+        var findings: [GitStoreService.StoreFinding]
+        /// Marked "not a secret" while the sheet is open.
+        var acknowledged: Set<SecretFinding> = []
+    }
+    var storeSecretReview: StoreSecretReview?
+
+    /// Set once every store on this Mac has had the one-time check.
+    static let storeSecretCheckDefaultsKey = "storeSecretCheckDone"
+
     init(tenantStore: TenantStore, activityLog: ActivityLog, catalogSources: CatalogSourceStore? = nil) {
         self.tenantStore = tenantStore
         self.activityLog = activityLog
@@ -423,6 +444,10 @@ final class TenantDeployService {
             for secret in (try? WorkspaceGenerator.moduleCalls(export.input).secrets) ?? [] {
                 lines.append("secret \(env) TF_VAR_\(secret.name.uppercased())")
             }
+            // The adopted configuration's sensitive values, like secret settings.
+            for name in adoptedSensitiveVariables(for: tenant) {
+                lines.append("secret \(env) TF_VAR_\(name.uppercased())")
+            }
         }
         return lines.joined(separator: "\n") + "\n"
     }
@@ -494,9 +519,19 @@ final class TenantDeployService {
         await recordInStore("Remove tenant \(tenant.name) — \(engineerName)")
     }
 
-    /// Commits the store and, in Team Mode, publishes it.
+    /// Commits the store and, in Team Mode, publishes it. Possible secrets
+    /// stop both and open the review sheet; nothing leaves this Mac.
     private func recordInStore(_ message: String) async {
-        _ = try? await gitStore.commitAll(message: message)
+        do {
+            _ = try await gitStore.commitAll(message: message)
+        } catch GitStoreService.GitError.possibleSecrets(let findings) {
+            storeSecretReview = StoreSecretReview(
+                kind: .commitBlocked(message: message),
+                findings: findings.map { .init(finding: $0, inEarlierVersion: false) })
+            return
+        } catch {
+            // As before: a store that cannot commit (no Git) keeps working.
+        }
         if isTeamMode {
             do {
                 try await gitStore.pushRebasing()
@@ -504,6 +539,53 @@ final class TenantDeployService {
                 syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
             await syncTeamState()
+        }
+    }
+
+    /// Commits the store for Team settings; possible secrets open the
+    /// review sheet and the error goes on to the caller.
+    @discardableResult
+    func commitStore(message: String) async throws -> Bool {
+        do {
+            return try await gitStore.commitAll(message: message)
+        } catch GitStoreService.GitError.possibleSecrets(let findings) {
+            storeSecretReview = StoreSecretReview(
+                kind: .commitStopped, findings: findings.map { .init(finding: $0, inEarlierVersion: false) })
+            throw GitStoreService.GitError.possibleSecrets(findings)
+        }
+    }
+
+    /// Marks a finding in the review sheet as not a secret.
+    func acknowledgeStoreFinding(_ finding: SecretFinding) async throws {
+        try await gitStore.acknowledge(finding)
+        storeSecretReview?.acknowledged.insert(finding)
+    }
+
+    /// Closes the review sheet; a stopped commit is tried again when asked.
+    func closeStoreSecretReview(retry: Bool) async {
+        guard let review = storeSecretReview else { return }
+        storeSecretReview = nil
+        if case .existingStore = review.kind {
+            UserDefaults.standard.set(true, forKey: Self.storeSecretCheckDefaultsKey)
+        }
+        if retry, case .commitBlocked(let message) = review.kind {
+            await recordInStore(message)
+        }
+    }
+
+    /// The one-time check of a store from before the secret check: its
+    /// files and its history. Findings open the review sheet, which advises
+    /// rotating those secrets; nothing in the history is rewritten.
+    func checkExistingStoreOnce() async {
+        guard !UserDefaults.standard.bool(forKey: Self.storeSecretCheckDefaultsKey),
+              GitStoreService.isGitAvailable,
+              FileManager.default.fileExists(atPath: GitStoreService.storeURL.appending(path: ".git").path),
+              let findings = try? await gitStore.fullCheck()
+        else { return }
+        if findings.isEmpty {
+            UserDefaults.standard.set(true, forKey: Self.storeSecretCheckDefaultsKey)
+        } else if storeSecretReview == nil {
+            storeSecretReview = StoreSecretReview(kind: .existingStore, findings: findings)
         }
     }
 
@@ -831,6 +913,9 @@ final class TenantDeployService {
             guard parts.count == 2 else { continue }
             secretRefs["TF_VAR_\(variableName)"] = ref(secrets.blockSetting(blockID: parts[0], key: parts[1]))
         }
+        for name in adoptedSensitiveVariables(for: tenant) {
+            secretRefs["TF_VAR_\(name)"] = ref(secrets.adoptedVariable(name))
+        }
         guard let cliConfig = try? EngineLocator.ensureCLIConfig() else { return }
         let script = TerminalScript.render(TerminalScript.Input(
             enginePath: EngineLocator.tofuURL.path,
@@ -863,7 +948,24 @@ final class TenantDeployService {
             }
             environment["TF_VAR_\(variableName)"] = value
         }
+        for name in adoptedSensitiveVariables(for: tenant) {
+            guard let value = TenantSecrets(tenantID: tenant.id).adoptedVariable(name).load() else {
+                throw DeployError.missingAdoptedSecret(name)
+            }
+            environment["TF_VAR_\(name)"] = value
+        }
         return environment
+    }
+
+    /// The adopted configuration's sensitive variables: declared in the
+    /// tenant record, their values in this Mac's Keychain. Not used while
+    /// a hand-over releases the adopted objects.
+    static let adoptedSensitiveVariablesFile = "adopted_sensitive_variables.tf"
+
+    func adoptedSensitiveVariables(for tenant: Tenant) -> [String] {
+        guard !tenant.handOverPending else { return [] }
+        return ExportedObjectInventory.declaredVariableNames(
+            in: adoptedURL(for: tenant).appending(path: Self.adoptedSensitiveVariablesFile))
     }
 
     /// The tenant's selections plus every always-on block the catalog has
@@ -1832,6 +1934,7 @@ final class TenantDeployService {
         case missingTeamPassphrase
         case noTeamSpace
         case missingSecretSetting(block: String, setting: String)
+        case missingAdoptedSecret(String)
         case previewInProgress
         case tenantBusy
         case missingStatePassphrase
@@ -1862,6 +1965,8 @@ final class TenantDeployService {
                 "Team Mode is on, but this Mac has no team space connected. Check Settings → Team."
             case .missingSecretSetting(let block, let setting):
                 "The \"\(block)\" block needs its \"\(setting)\" secret on this Mac. Enter it in the block's settings — secrets stay in each engineer's Keychain."
+            case .missingAdoptedSecret(let name):
+                "The adopted configuration needs its sensitive value \"\(name)\", which is kept in the Keychain of the Mac that adopted it. Adopt the object again on this Mac to store the value here."
             case .previewInProgress:
                 "A preview is open for this tenant. Finish or close it before checking for changes."
             case .missingStatePassphrase:

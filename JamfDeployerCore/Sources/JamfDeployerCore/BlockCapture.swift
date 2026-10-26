@@ -27,7 +27,9 @@ public nonisolated enum BlockCapture {
         public var sourceDirectory: URL
         /// The catalog source root the block is saved into.
         public var catalogRootDirectory: URL
-        public var secretFindings: [String]
+        /// jamformer's secret scan findings for the export they refer to
+        /// (`resolutionDirectory`, else `sourceDirectory`).
+        public var secretFindings: [JamformerSecretFinding]
         /// Scope ID of the tenant the objects were exported from; used to
         /// warn when the block is enabled in its own origin tenant.
         public var originTenantScopeID: String?
@@ -46,7 +48,7 @@ public nonisolated enum BlockCapture {
             namePrefix: String,
             sourceDirectory: URL,
             catalogRootDirectory: URL,
-            secretFindings: [String] = [],
+            secretFindings: [JamformerSecretFinding] = [],
             originTenantScopeID: String? = nil,
             rebind: RebindMode = .fidelity,
             prefixAllNames: Bool = false,
@@ -144,6 +146,19 @@ public nonisolated enum BlockCapture {
         /// The block takes a category chosen per tenant.
         public var usesCategory: Bool = false
         public var warnings: [String]
+        /// Possible secrets that became secret settings. Their values are
+        /// not kept: each tenant enters its own.
+        public var secretSettings: [CapturedSecret] = []
+    }
+
+    /// A possible secret replaced by a secret setting: where it was and
+    /// which rule found it, never the value.
+    public struct CapturedSecret: Sendable, Equatable {
+        public var key: String
+        public var title: String
+        /// "Script “Bind to AD”".
+        public var objectDescription: String
+        public var rule: String
     }
 
     public enum CaptureError: LocalizedError {
@@ -151,6 +166,12 @@ public nonisolated enum BlockCapture {
         case nothingToCapture(reasons: [String] = [])
         case invalidBlockID
         case blockExists(String)
+        /// The scan reported a secret in a captured object, but the value
+        /// could not be found to replace it.
+        case secretNotLocated(object: String, rule: String)
+        /// The secret is in a support file the object loads in a way the
+        /// capture cannot turn into a template.
+        case secretNotReplaceable(object: String)
 
         public var errorDescription: String? {
             switch self {
@@ -162,6 +183,10 @@ public nonisolated enum BlockCapture {
                 "Block IDs use lowercase letters, digits and dashes only."
             case .blockExists(let id):
                 "A block with the ID “\(id)” already exists in this source. Choose another ID, or delete the existing block first."
+            case .secretNotLocated(let object, let rule):
+                "The secret scan found a possible secret in \(object) (\(rule)), but it could not be replaced by a secret setting. Leave this object out, or remove the secret in Jamf and export again."
+            case .secretNotReplaceable(let object):
+                "\(object) holds a possible secret in a file it loads in a way the capture cannot turn into a secret setting. Leave this object out, or remove the secret in Jamf and export again."
             }
         }
     }
@@ -630,6 +655,13 @@ public nonisolated enum BlockCapture {
             warnings.append("Left out references to objects that are not part of this capture: \(danglingAddresses.sorted().joined(separator: ", ")). Review the block before deploying.")
         }
 
+        // 1b3. Possible secrets become secret settings: each value is
+        // replaced by a sensitive variable (support files become templates),
+        // entered per tenant and kept in the Keychain. Values stay in memory.
+        let secretPlan = try planSecretSettings(request: request, fileTexts: fileTexts, localAddresses: localAddresses)
+        fileTexts = secretPlan.fileTexts
+        var secretSettings = secretPlan.settings
+
         // 1c. Write the files and count what survived.
         for (name, text) in fileTexts {
             guard text.contains("resource ") || text.contains("data ") else { continue }
@@ -730,8 +762,28 @@ public nonisolated enum BlockCapture {
         for match in capturedText.matches(of: /var\.([a-zA-Z0-9_]+)/) {
             referenced.insert(String(match.1))
         }
-        for name in referenced.subtracting(generatedVariables).sorted() where !name.hasPrefix("dep_") {
-            if var declaration = exportedDeclarations[name] {
+        for setting in secretSettings {
+            variables += """
+
+
+            variable "\(setting.key)" {
+              description = \(hclStringLiteral(setting.title))
+              type        = string
+              sensitive   = true
+            }
+            """
+        }
+        let secretKeys = Set(secretSettings.map(\.key))
+        for name in referenced.subtracting(generatedVariables).subtracting(secretKeys).sorted() where !name.hasPrefix("dep_") {
+            if let declaration = exportedDeclarations[name], ExportedObjectInventory.isSensitive(declaration) {
+                // A sensitive value never becomes a default: it is a secret
+                // setting, entered per tenant.
+                variables += "\n\n" + ExportedObjectInventory.withoutDefault(declaration)
+                    .replacingOccurrences(of: "support_files/", with: "files/")
+                secretSettings.append(CapturedSecret(
+                    key: name, title: "Sensitive value “\(name)”",
+                    objectDescription: "The variable “\(name)”", rule: "Marked sensitive in the export"))
+            } else if var declaration = exportedDeclarations[name] {
                 let hasDefault = declaration.range(
                     of: #"(?m)^\s*default\s*="#, options: .regularExpression) != nil
                 // exportedValues holds the raw escaped text between the
@@ -944,7 +996,12 @@ public nonisolated enum BlockCapture {
                 let destination = blockURL.appending(path: "files/\(relative)")
                 try fileManager.createDirectory(
                     at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try fileManager.copyItem(at: item, to: destination)
+                if let templated = secretPlan.templatedSupportFiles[relative] {
+                    // The file held a secret: it is written as a template.
+                    try Data(templated.utf8).write(to: destination)
+                } else {
+                    try fileManager.copyItem(at: item, to: destination)
+                }
             }
         }
 
@@ -1033,7 +1090,15 @@ public nonisolated enum BlockCapture {
                 "required": true,
                 "description": "Name of this tenant's Apps and Books (volume purchasing) location. It needs licenses for every app in this block.",
                 "section": "Apps and Books",
-            ]] : []),
+            ]] : []) + secretSettings.map { setting in [
+                "key": setting.key,
+                "title": setting.title,
+                "type": "secret",
+                "default": "",
+                "required": true,
+                "description": "\(setting.objectDescription): \(setting.rule). Enter this tenant's value; it is kept in the Keychain, never in the block.",
+                "section": "Secrets",
+            ] },
             "objectsCreated": typeCounts.sorted { $0.key < $1.key }.map { "\(objectLabel(for: $0.key)) (\($0.value))" },
         ]
         if let origin = request.originTenantScopeID {
@@ -1056,11 +1121,13 @@ public nonisolated enum BlockCapture {
         **Review before use**: check names, scope and settings before deploying
         this block to other tenants.
         """
-        if !request.secretFindings.isEmpty {
-            readme += "\n\n## Secret scan findings\n\n"
-            readme += request.secretFindings.map { "- \($0)" }.joined(separator: "\n")
-            readme += "\n\nMove these values into sensitive settings before using the block."
-            warnings.append("The secret scan reported findings — they are listed in the block's README and must be reviewed.")
+        // Only where each secret was and which rule found it, never the
+        // scanned text, and only for objects in this block.
+        if !secretSettings.isEmpty {
+            readme += "\n\n## Secret settings\n\n"
+            readme += "The secret scan found possible secrets in these objects. Each value was replaced by a secret setting, entered for each tenant and kept in the Keychain:\n\n"
+            readme += secretSettings.map { "- \($0.objectDescription): \($0.rule). Setting: \($0.title)." }.joined(separator: "\n")
+            warnings.append("Possible secrets in \(secretSettings.count == 1 ? "one place" : "\(secretSettings.count) places") became secret settings; enter them on each tenant before deploying.")
         }
         try Data(readme.utf8).write(to: blockURL.appending(path: "README.md"))
 
@@ -1071,7 +1138,8 @@ public nonisolated enum BlockCapture {
             usesPlatformScope: usesPlatformScope,
             usesJamfProMobileScope: usesJamfProMobileScope,
             usesCategory: usesCategory,
-            warnings: warnings
+            warnings: warnings,
+            secretSettings: secretSettings
         )
     }
 

@@ -95,11 +95,14 @@ public nonisolated enum ExportedObjectInventory {
     /// Replaces `var.NAME` references whose value the export supplies
     /// (terraform.tfvars, or a declared default) with that value, so adopted
     /// configuration stands alone once the export's variables.tf is dropped.
+    /// Sensitive variables are never inlined: they stay variables, and
+    /// `sensitiveVariables` hands their values to the Keychain.
     public static func inlineVariables(directory: URL) throws {
         let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
         let values = BlockCapture.parseTfvars(at: directory.appending(path: "terraform.tfvars"))
+        let sensitive = Set(declarations.filter { isSensitive($0.value) }.keys)
         var literal: [String: String] = [:]
-        for (name, declaration) in declarations {
+        for (name, declaration) in declarations where !sensitive.contains(name) {
             if let value = values[name] {
                 literal[name] = "\"\(value)\""
             } else if let match = declaration.firstMatch(of: /(?m)^\s*default\s*=\s*(.+?)\s*$/) {
@@ -110,7 +113,7 @@ public nonisolated enum ExportedObjectInventory {
                 if !opensBlock { literal[name] = value }
             }
         }
-        for (name, value) in values where literal[name] == nil { literal[name] = "\"\(value)\"" }
+        for (name, value) in values where literal[name] == nil && !sensitive.contains(name) { literal[name] = "\"\(value)\"" }
         guard !literal.isEmpty else { return }
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf")
@@ -121,6 +124,68 @@ public nonisolated enum ExportedObjectInventory {
             }
             if updated != text { try Data(updated.utf8).write(to: file) }
         }
+    }
+
+    /// A sensitive variable the configuration still references after
+    /// `inlineVariables`: its declaration, without any default, and the
+    /// value terraform.tfvars gave it (nil when the export has none).
+    public struct SensitiveVariable: Sendable, Equatable {
+        public var name: String
+        public var declaration: String
+        public var value: String?
+    }
+
+    /// The sensitive variables the directory's resources reference. The
+    /// declarations lose any `default`, so the value only ever comes from
+    /// the Keychain at deploy time.
+    public static func sensitiveVariables(directory: URL) -> [SensitiveVariable] {
+        let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
+        let values = BlockCapture.parseTfvars(at: directory.appending(path: "terraform.tfvars"))
+        var referenced: Set<String> = []
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf")
+            && !["variables.tf", "provider.tf"].contains(file.lastPathComponent) {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            for match in text.matches(of: /\bvar\.([a-zA-Z0-9_]+)\b/) { referenced.insert(String(match.1)) }
+        }
+        return declarations
+            .filter { referenced.contains($0.key) && isSensitive($0.value) }
+            .sorted { $0.key < $1.key }
+            .map { name, declaration in
+                var value = values[name]
+                if value == nil, let match = declaration.firstMatch(of: /(?m)^\s*default\s*=\s*"(.*)"\s*$/) {
+                    value = String(match.1)
+                }
+                return SensitiveVariable(name: name, declaration: withoutDefault(declaration), value: value)
+            }
+    }
+
+    static func isSensitive(_ declaration: String) -> Bool {
+        declaration.range(of: #"(?m)^\s*sensitive\s*=\s*true\b"#, options: .regularExpression) != nil
+    }
+
+    /// The declaration without its single-line `default = …` line.
+    static func withoutDefault(_ declaration: String) -> String {
+        declaration.replacingOccurrences(of: #"(?m)^\s*default\s*=.*\n?"#, with: "", options: .regularExpression)
+    }
+
+    /// Variable names declared in a file, e.g. the adopted configuration's
+    /// sensitive variables.
+    public static func declaredVariableNames(in file: URL) -> [String] {
+        BlockCapture.parseVariableDeclarations(at: file).keys.sorted()
+    }
+
+    /// Writes the sensitive variables' declarations into `file`, keeping the
+    /// ones already there (a later Adopt adds to the same file).
+    public static func mergeSensitiveDeclarations(_ variables: [SensitiveVariable], into file: URL) throws {
+        var declarations = BlockCapture.parseVariableDeclarations(at: file)
+        for variable in variables where declarations[variable.name] == nil {
+            declarations[variable.name] = variable.declaration
+        }
+        guard !declarations.isEmpty else { return }
+        let header = "# Sensitive values of the adopted configuration. Their values are never in\n# this repository: each is kept in the Keychain and passed in at deploy time.\n\n"
+        let body = declarations.sorted { $0.key < $1.key }.map(\.value).joined(separator: "\n\n")
+        try Data((header + body + "\n").utf8).write(to: file, options: .atomic)
     }
 
     /// Points `.id` references to objects that will not be adopted at the
@@ -222,6 +287,33 @@ public nonisolated enum ExportedObjectInventory {
                 try Data((kept.joined(separator: "\n\n") + "\n").utf8).write(to: file)
             }
         }
+        try removeUnusedSupportFiles(directory: directory)
+    }
+
+    /// Removes support files no remaining configuration loads: the scripts
+    /// and profiles of objects left out must not travel with the rest (they
+    /// can hold secrets, and adopted files are saved in the store).
+    static func removeUnusedSupportFiles(directory: URL) throws {
+        let fileManager = FileManager.default
+        let supportURL = directory.appending(path: "support_files")
+        guard fileManager.fileExists(atPath: supportURL.path) else { return }
+        // Every .tf file counts, variables.tf too: a variable default can
+        // point at a support file.
+        let configuration = ((try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "tf" }
+            .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
+        let base = supportURL.resolvingSymlinksInPath().path
+        var unused: [URL] = []
+        let enumerator = fileManager.enumerator(at: supportURL, includingPropertiesForKeys: [.isRegularFileKey])
+        while let item = enumerator?.nextObject() as? URL {
+            guard (try? item.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            let resolved = item.resolvingSymlinksInPath().path
+            guard resolved.hasPrefix(base + "/") else { continue }
+            let relative = String(resolved.dropFirst(base.count + 1))
+            if !configuration.contains("support_files/\(relative)") { unused.append(item) }
+        }
+        for item in unused { try fileManager.removeItem(at: item) }
     }
 
     /// jamformer emits Terraform-style identity imports

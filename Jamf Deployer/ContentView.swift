@@ -29,6 +29,12 @@ struct ContentView: View {
         )) {
             UpdateView()
         }
+        .sheet(item: Binding(
+            get: { deployService.storeSecretReview },
+            set: { if $0 == nil { Task { await deployService.closeStoreSecretReview(retry: false) } } }
+        )) { review in
+            StoreSecretsSheet(review: review)
+        }
         .guidedTour(tour)
         .onChange(of: selection) {
             appState.selection = selection
@@ -41,6 +47,7 @@ struct ContentView: View {
         }
         .task {
             await deployService.syncTeamState()
+            await deployService.checkExistingStoreOnce()
             await updates.checkAutomatically()
             await componentUpdates.checkIfDue()
         }

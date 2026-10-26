@@ -1,0 +1,37 @@
+API integration scope: environment (00000000-0000-4000-8000-000000000000)
+Verifying authentication...
+Generating Terraform configuration for Jamf Platform...
+Initialising Terraform provider...
+Discovering and generating configuration...
+  Found 1 pro script
+  Found 2 pro macos configuration profile
+Post-processing generated configuration...
+  Processing pro_script (1 resources)...
+  Processing pro_macos_configuration_profile (2 resources)...
+  Skipping jamfplatform_pro_macos_configuration_profile "Default Plan - Jamf Protect Configuration": vendor-managed profile (PayloadIdentifier: com.jamf.protect.cebb8be1-d606-4b63-ba34-d62f4acb27a5)
+
+!  Secret scan found 2 potential secret(s):
+
+  In support files:
+
+    support_files/macos_configuration_profiles/ZZ Secret Scan Test.mobileconfig
+      Line 18   FAKE*************-456  (Password or secret in plist/XML configuration)
+
+    support_files/scripts/ZZ Secret Scan Test.zsh
+      Line 3    FAKE***************-123  (Password value in HCL attribute)
+
+
+  Review these findings before committing to version control.
+
+
+✓ 2 resources across 2 types in 2 files
+  Output: /tmp/jd-secret-test/export
+
+Next steps:
+  cd /tmp/jd-secret-test/export
+  terraform plan    # Review the import plan
+  terraform apply   # Import resources into state
+  rm *_import.tf   # Remove import blocks after apply
+
+⚠  Review carefully before running terraform apply. The generated
+   configuration may need manual fixes for provider validation errors.

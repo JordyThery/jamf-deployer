@@ -361,14 +361,8 @@ struct ExportView: View {
     private func resultSection(_ result: JamformerRunner.ExportResult) -> some View {
         GroupBox(kind.rawValue) {
             VStack(alignment: .leading, spacing: 10) {
-                if !result.secretFindings.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("The secret scan reported findings — review them before this export goes anywhere:", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow)
-                        ForEach(result.secretFindings, id: \.self) { finding in
-                            Text(finding).font(.caption.monospaced())
-                        }
-                    }
+                if !result.secretObjects.isEmpty {
+                    SecretObjectsNotice(findings: result.secretObjects, message: secretNotice)
                 }
 
                 switch kind {
@@ -445,6 +439,16 @@ struct ExportView: View {
         }
     }
 
+    /// What happens to possible secrets with this kind of export.
+    private var secretNotice: String {
+        switch kind {
+        case .block, .clone:
+            "These may contain a secret. In a captured block or a clone, each one becomes a secret setting, entered for each tenant and kept in the Keychain."
+        case .snapshot, .documentation:
+            "These may contain a secret, and this export keeps them as Jamf returned them: store it somewhere safe."
+        }
+    }
+
     @ViewBuilder
     private func cloneForm(_ result: JamformerRunner.ExportResult) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -508,6 +512,7 @@ struct ExportView: View {
             target.blockSelections.append(selection)
             tenantStore.update(target)
             captureOutcome = "Staged \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") on “\(target.name)”. Open that tenant and Preview Changes to deploy the clone."
+                + (captured.secretSettings.isEmpty ? "" : " First enter the clone's \(captured.secretSettings.count == 1 ? "secret setting" : "\(captured.secretSettings.count) secret settings") on “\(target.name)”: secrets are never cloned.")
             activityLog.append(ActivityLogEntry(
                 category: "Export", operation: "clone", detail: "\(tenant.name) → \(target.name)",
                 status: 200, duration: nil, note: "\(captured.objectCount) objects"

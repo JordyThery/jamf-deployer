@@ -90,6 +90,16 @@ nonisolated struct TenantSecrets: Sendable {
         )
     }
 
+    /// Block ID under which the adopted configuration's sensitive values
+    /// are stored. No block can have it: block IDs start with a letter or digit.
+    static let adoptedBlockID = "_adopted"
+
+    /// A sensitive value of the tenant's adopted configuration (one of the
+    /// variables in `adopted/adopted_sensitive_variables.tf`).
+    func adoptedVariable(_ name: String) -> KeychainItem {
+        blockSetting(blockID: Self.adoptedBlockID, key: name)
+    }
+
     func deleteAll() {
         platformClientSecret.delete()
         protectClientSecret.delete()
