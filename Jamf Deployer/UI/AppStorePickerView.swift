@@ -38,10 +38,6 @@ struct AppStorePickerView: View {
         var name: String
     }
 
-    nonisolated private struct LocationsPage: Decodable, Sendable {
-        var results: [Location]
-    }
-
     nonisolated private struct Content: Decodable, Identifiable, Sendable {
         var adamId: String
         var name: String
@@ -50,10 +46,6 @@ struct AppStorePickerView: View {
         var licenseCountTotal: Int?
         var licenseCountInUse: Int?
         var id: String { adamId }
-    }
-
-    nonisolated private struct ContentPage: Decodable, Sendable {
-        var results: [Content]
     }
 
     @State private var locations: [Location] = []
@@ -259,7 +251,8 @@ struct AppStorePickerView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            locations = try await client.getDecoded(LocationsPage.self, path: "/pro/v1/volume-purchasing-locations").results
+            locations = try await client.allPages("/pro/v1/volume-purchasing-locations", as: Location.self,
+                                                  privileges: [.readVolumePurchasingLocations])
             // The binding writes through the tenant store, so read the
             // choice from a local rather than back from the binding.
             let chosen = locations.contains(where: { $0.name == locationName }) ? locationName : (locations.first?.name ?? "")
@@ -278,11 +271,10 @@ struct AppStorePickerView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            content = try await client.getDecoded(
-                ContentPage.self,
-                path: "/pro/v1/volume-purchasing-locations/\(location.id)/content",
-                query: [URLQueryItem(name: "page-size", value: "2000")]
-            ).results
+            content = try await client.allPages(
+                "/pro/v1/volume-purchasing-locations/\(location.id)/content", as: Content.self,
+                pageSize: 2000, privileges: [.readVolumePurchasingLocations]
+            )
             loadError = nil
         } catch {
             loadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

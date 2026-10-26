@@ -42,7 +42,8 @@ nonisolated struct JamfAPIConfiguration: Sendable {
         let usesPassword = tenant.isJamfPro && tenant.jamfProAuth == .userAccount
         secret = {
             guard let value = item.load() else {
-                throw JamfAPIError.notAuthenticated(usesPassword ? "no password saved" : "no client secret saved")
+                throw JamfAPIError.notAuthenticated(usesPassword ? "no password saved" : "no client secret saved",
+                                                    flavor: usesPassword ? .jamfProUser : tenant.isJamfPro ? .jamfProAPIClient : .platform)
             }
             return value
         }
@@ -101,12 +102,23 @@ nonisolated struct JamfAPIConfiguration: Sendable {
 /// The app's own errors, before anything is sent. Jamf's answers come as
 /// JTKit's `JamfPlatformError`.
 nonisolated enum JamfAPIError: LocalizedError {
-    case notAuthenticated(String)
+    /// No secret saved; worded for the connection, as JTKit's sign-in hints
+    /// are: a direct Jamf Pro tenant has no region and no Jamf Account, and
+    /// a user account no client secret.
+    case notAuthenticated(String, flavor: JamfAPIConfiguration.Flavor)
+    /// A Jamf Pro tenant whose saved URL is not a valid instance URL.
+    case invalidInstanceURL
 
     var errorDescription: String? {
         switch self {
-        case .notAuthenticated(let detail):
-            "Jamf did not accept the credentials. Check them and the region or Jamf Pro URL. (\(detail))"
+        case .notAuthenticated(let detail, .platform):
+            "Jamf did not accept the credentials. Check the client ID, client secret and region. (\(detail))"
+        case .notAuthenticated(let detail, .jamfProAPIClient):
+            "Jamf Pro did not accept the credentials. Check the client ID and client secret, and that the API client is enabled in Jamf Pro under Settings › API Roles and Clients. (\(detail))"
+        case .notAuthenticated(let detail, .jamfProUser):
+            "Jamf Pro did not accept the credentials. Check the username and password. (\(detail))"
+        case .invalidInstanceURL:
+            "The saved Jamf Pro URL is not valid. Check the tenant's Jamf Pro URL."
         }
     }
 }
@@ -159,7 +171,10 @@ actor JamfPlatformClient {
         // kept and thrown at the first request, so nothing is sent.
         func client(_ errorStatus: JamfPlatform.Client.ErrorStatus) -> Result<JamfPlatform.Client, JamfPlatformError> {
             Result {
+                // the sign-in method decides where a hint points: the API
+                // role, or a user account's own privileges and password
                 try JamfPlatform.Client(baseURL: configuration.gatewayURL, scope: configuration.scope, server: server,
+                                        signIn: configuration.flavor == .jamfProUser ? .usernamePassword : .apiClient,
                                         tokens: tokens, recorder: recorder, errorStatus: errorStatus)
             }
             .mapError { $0 as? JamfPlatformError ?? JamfPlatformError(.invalidResponse($0.localizedDescription)) }
@@ -170,34 +185,41 @@ actor JamfPlatformClient {
 
     // MARK: Requests
 
+    // Every request names its Jamf Pro privileges from JTKit's table, so a
+    // refusal (403) on a Jamf Pro connection names the missing one.
+
     /// GET a path relative to the gateway root (e.g. "/pro/v1/categories").
     /// An error status comes back as the status; a refused sign-in is thrown.
     /// `accept` overrides JTKit's default (XML for Classic API paths).
-    func get(_ path: String, query: [URLQueryItem] = [], accept: String? = nil) async throws -> (Data, Int) {
-        let response = try await send(HTTPRequest(method: "GET", path: path, query: query, accept: accept), on: statusReturning)
+    func get(_ path: String, query: [URLQueryItem] = [], accept: String? = nil,
+             privileges: [JamfPro.Privilege]) async throws -> (Data, Int) {
+        let response = try await send(HTTPRequest(method: "GET", path: path, query: query, accept: accept),
+                                      privileges: privileges, on: statusReturning)
         return (response.data, response.status)
     }
 
     /// GET with a non-JSON Accept header (file downloads like the ADE
     /// public key).
-    func getRaw(_ path: String, accept: String) async throws -> Data {
-        try await send(HTTPRequest(method: "GET", path: path, accept: accept), on: statusThrowing).data
+    func getRaw(_ path: String, accept: String, privileges: [JamfPro.Privilege]) async throws -> Data {
+        try await send(HTTPRequest(method: "GET", path: path, accept: accept), privileges: privileges, on: statusThrowing).data
     }
 
     /// POST a JSON body. Never recorded in the log: Day 0 bodies carry
     /// tokens (ADE, volume purchasing).
-    func post(_ path: String, json: [String: any Sendable]) async throws -> Data {
+    func post(_ path: String, json: [String: any Sendable], privileges: [JamfPro.Privilege]) async throws -> Data {
         let body = try JSONSerialization.data(withJSONObject: json)
         return try await send(HTTPRequest(method: "POST", path: path, body: body, contentType: "application/json"),
-                              on: statusThrowing).data
+                              privileges: privileges, on: statusThrowing).data
     }
 
     func getDecoded<T: Decodable & Sendable>(
         _ type: T.Type,
         path: String,
-        query: [URLQueryItem] = []
+        query: [URLQueryItem] = [],
+        privileges: [JamfPro.Privilege]
     ) async throws -> T {
-        let response = try await send(HTTPRequest(method: "GET", path: path, query: query), on: statusThrowing)
+        let response = try await send(HTTPRequest(method: "GET", path: path, query: query), privileges: privileges,
+                                      on: statusThrowing)
         do {
             return try JSONDecoder().decode(type, from: response.data)
         } catch {
@@ -206,13 +228,77 @@ actor JamfPlatformClient {
         }
     }
 
+    /// Every item of a Jamf Pro list, with JTKit's page reader: an answer
+    /// without `results` is an error, not an empty list, and a list that
+    /// never ends stops after 1,000 pages with an error.
+    func allPages<Item: Sendable>(
+        _ path: String,
+        query: [URLQueryItem] = [],
+        pageSize: Int = 100,
+        privileges: [JamfPro.Privilege],
+        item: @escaping @Sendable (LosslessJSON) -> Item?
+    ) async throws -> [Item] {
+        try checkInstanceURL()
+        return try await statusThrowing.get().allPages(Self.encodedPath(path), query: query, pageSize: pageSize,
+                                                       privileges: privileges, item: item)
+    }
+
+    /// `allPages`, each result decoded as `Item`; a result that can't be
+    /// decoded is left out (it still counts towards the end of the list).
+    func allPages<Item: Decodable & Sendable>(
+        _ path: String,
+        as type: Item.Type,
+        query: [URLQueryItem] = [],
+        pageSize: Int = 100,
+        privileges: [JamfPro.Privilege]
+    ) async throws -> [Item] {
+        try await allPages(path, query: query, pageSize: pageSize, privileges: privileges) { Self.decoded(type, $0) }
+    }
+
+    /// `page`, each result decoded as `Item`.
+    func page<Item: Decodable & Sendable>(
+        _ path: String,
+        as type: Item.Type,
+        page: Int = 0,
+        pageSize: Int,
+        query: [URLQueryItem] = [],
+        privileges: [JamfPro.Privilege]
+    ) async throws -> JamfPlatform.Page<Item> {
+        try await self.page(path, page: page, pageSize: pageSize, query: query, privileges: privileges) {
+            Self.decoded(type, $0)
+        }
+    }
+
+    private static func decoded<Item: Decodable>(_ type: Item.Type, _ json: LosslessJSON) -> Item? {
+        try? JSONDecoder().decode(type, from: json.serialized())
+    }
+
+    /// One page of a Jamf Pro list (counts, a search's first results), with
+    /// JTKit's page reader.
+    func page<Item: Sendable>(
+        _ path: String,
+        page: Int = 0,
+        pageSize: Int,
+        query: [URLQueryItem] = [],
+        privileges: [JamfPro.Privilege],
+        item: @escaping @Sendable (LosslessJSON) -> Item?
+    ) async throws -> JamfPlatform.Page<Item> {
+        try checkInstanceURL()
+        return try await statusThrowing.get().page(Self.encodedPath(path), page: page, pageSize: pageSize, query: query,
+                                                   privileges: privileges, item: item)
+    }
+
+    /// The Jamf Pro version, with JTKit's call; also the credentials probe.
+    func jamfProVersion() async throws -> String {
+        try checkInstanceURL()
+        return try await statusThrowing.get().jamfProVersion().version
+    }
+
     /// JTKit's read-only permission check: only a 403 is a missing permission.
     func checkPermissions(
         _ checks: [JamfPlatform.PermissionCheck]
     ) async throws -> [(check: JamfPlatform.PermissionCheck, result: JamfPlatform.PermissionResult)] {
-        guard !configuration.hasInvalidInstanceURL else {
-            throw JamfAPIError.notAuthenticated("the saved Jamf Pro URL is not valid")
-        }
+        try checkInstanceURL()
         let encoded = checks.map { check in
             var check = check
             check.path = Self.encodedPath(check.path)
@@ -233,13 +319,21 @@ actor JamfPlatformClient {
         get async { await tokens.signInCount }
     }
 
-    private func send(_ request: HTTPRequest, on client: Result<JamfPlatform.Client, JamfPlatformError>) async throws -> HTTPResponse {
-        guard !configuration.hasInvalidInstanceURL else {
-            throw JamfAPIError.notAuthenticated("the saved Jamf Pro URL is not valid")
-        }
+    /// How this client signs in, for hints that depend on it.
+    nonisolated var signIn: SignInMethod {
+        configuration.flavor == .jamfProUser ? .usernamePassword : .apiClient
+    }
+
+    private func checkInstanceURL() throws {
+        guard !configuration.hasInvalidInstanceURL else { throw JamfAPIError.invalidInstanceURL }
+    }
+
+    private func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege],
+                      on client: Result<JamfPlatform.Client, JamfPlatformError>) async throws -> HTTPResponse {
+        try checkInstanceURL()
         var request = request
         request.path = Self.encodedPath(request.path)
-        return try await client.get().send(request)
+        return try await client.get().send(request, privileges: privileges)
     }
 
     /// The environments an organization-scope integration sees, for the

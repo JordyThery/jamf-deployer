@@ -31,18 +31,21 @@ nonisolated enum PreflightService {
     static let minimumJamfProVersion = (major: 11, minor: 31)
 
     /// Read-only checks for the permissions the app needs from day one, run
-    /// by JTKit: the Platform permission, and the Jamf Pro API role privilege
-    /// for Jamf Pro API connections.
+    /// by JTKit: the Platform permission, and for Jamf Pro connections the
+    /// privilege from JTKit's table.
     static let permissionChecks: [JamfPlatform.PermissionCheck] = [
         .init("Read categories", path: "/pro/v1/categories", permission: "categories:read",
-              jamfProPrivilege: "Read Categories"),
+              jamfProPrivilege: JamfPro.Privilege.readCategories.rawValue),
         .init("Read scripts", path: "/pro/v1/scripts", permission: "scripts:read",
-              jamfProPrivilege: "Read Scripts"),
+              jamfProPrivilege: JamfPro.Privilege.readScripts.rawValue),
         .init("Read Automated Device Enrollment", path: adePath, permission: "device-enrollment-program-instances:read",
-              jamfProPrivilege: "Read Device Enrollment Program Instances"),
+              jamfProPrivilege: JamfPro.Privilege.readDeviceEnrollmentProgramInstances.rawValue),
         .init("Read volume purchasing", path: vppPath, permission: "volume-purchasing-locations:read",
-              jamfProPrivilege: "Read Volume Purchasing Locations"),
+              jamfProPrivilege: JamfPro.Privilege.readVolumePurchasingLocations.rawValue),
     ]
+
+    /// The Jamf Pro privileges for connecting, as the wizard lists them.
+    static var jamfProPrivileges: [String] { permissionChecks.compactMap(\.jamfProPrivilege) }
 
     private static let adePath = "/pro/v1/device-enrollments"
     private static let vppPath = "/pro/v1/volume-purchasing-locations"
@@ -68,8 +71,7 @@ nonisolated enum PreflightService {
 
         // 1. Credentials + Jamf Pro version in one probe.
         do {
-            struct Version: Decodable { let version: String }
-            let version = try await client.getDecoded(Version.self, path: "/pro/v1/jamf-pro-version").version
+            let version = try await client.jamfProVersion()
             snapshot.jamfProVersion = version
             await record(PreflightCheck(
                 id: "auth", title: "Credentials",
@@ -111,7 +113,7 @@ nonisolated enum PreflightService {
             let results = try await client.checkPermissions(permissionChecks)
             checks = checksBefore + results.map { check, result in
                 if result == .allowed { allowed.insert(check.path) }
-                return permissionRow(check, result, server: client.server)
+                return permissionRow(check, result, server: client.server, signIn: client.signIn)
             }
         } catch {
             checks = checksBefore + permissionChecks.map {
@@ -129,9 +131,11 @@ nonisolated enum PreflightService {
         // 3. Cloud Services Connection (needed for the App Catalog block,
         //    which Jamf Pro API connections cannot use).
         if !isJamfPro { do {
+            // Platform API only: no Jamf Pro privilege.
             let (_, status) = try await client.get(
                 "/pro/v1/app-installers/titles",
-                query: [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")]
+                query: [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")],
+                privileges: []
             )
             if status == 200 {
                 await record(PreflightCheck(
@@ -154,10 +158,9 @@ nonisolated enum PreflightService {
 
         // 4. Existing content: decides whether to suggest Adopt first.
         do {
-            struct Page: Decodable { let totalCount: Int }
-            async let categories = client.getDecoded(Page.self, path: "/pro/v1/categories", query: [URLQueryItem(name: "page-size", value: "1")])
-            async let scripts = client.getDecoded(Page.self, path: "/pro/v1/scripts", query: [URLQueryItem(name: "page-size", value: "1")])
-            let total = try await categories.totalCount + scripts.totalCount
+            async let categories = client.page("/pro/v1/categories", pageSize: 1, privileges: [.readCategories]) { _ in () }
+            async let scripts = client.page("/pro/v1/scripts", pageSize: 1, privileges: [.readScripts]) { _ in () }
+            let total = try await count(categories) + count(scripts)
             snapshot.tenantHasContent = total > 0
             if total > 0 {
                 await record(PreflightCheck(
@@ -183,15 +186,25 @@ nonisolated enum PreflightService {
         return PreflightReport(checks: checks, snapshot: snapshot)
     }
 
-    /// One permission check's row: only a 403 is "Not allowed".
+    /// A list's total: `totalCount`, or what the page holds when Jamf
+    /// leaves it out.
+    private static func count(_ page: JamfPlatform.Page<Void>) -> Int {
+        page.totalCount ?? page.results.count + page.unreadableCount
+    }
+
+    /// One permission check's row: only a 403 is "Not allowed". On a Jamf
+    /// Pro connection the hint names the privilege, and where to add it:
+    /// the API role, or the user account for a username and password.
     static func permissionRow(
         _ check: JamfPlatform.PermissionCheck,
         _ result: JamfPlatform.PermissionResult,
-        server: JamfPlatform.Server
+        server: JamfPlatform.Server,
+        signIn: SignInMethod = .apiClient
     ) -> PreflightCheck {
+        let hint = JamfPlatform.PermissionCheck.hint(for: [check], on: server, signIn: signIn) ?? check.hint(on: server)
         let (outcome, detail): (PreflightCheck.Outcome, String) = switch result {
         case .allowed: (.pass, "Allowed.")
-        case .missingPermission: (.fail, "Not allowed. \(check.hint(on: server))")
+        case .missingPermission: (.fail, "Not allowed. \(hint)")
         case .notFound: (.warn, "Could not check: not found (HTTP 404).")
         case .failed(let status): (.warn, "Could not check: unexpected answer (HTTP \(status)).")
         case .unreachable(let message): (.warn, "Could not check: \(message)")
@@ -208,20 +221,26 @@ nonisolated enum PreflightService {
         vpp: Bool,
         into snapshot: inout PreflightSnapshot
     ) async {
-        struct ADEPage: Decodable, Sendable {
-            struct Instance: Decodable, Sendable { let tokenExpirationDate: String? }
-            let results: [Instance]
+        if ade, let expiry = try? await adeTokenExpiry(client: client) {
+            snapshot.adeTokenExpiration = expiry
         }
-        struct VPPPage: Decodable, Sendable {
-            struct Location: Decodable, Sendable { let tokenExpiration: String? }
-            let results: [Location]
+        if vpp, let expiry = try? await vppTokenExpiry(client: client) {
+            snapshot.vppTokenExpiration = expiry
         }
-        if ade, let page = try? await client.getDecoded(ADEPage.self, path: adePath) {
-            snapshot.adeTokenExpiration = page.results.compactMap(\.tokenExpirationDate).min()
-        }
-        if vpp, let page = try? await client.getDecoded(VPPPage.self, path: vppPath) {
-            snapshot.vppTokenExpiration = page.results.compactMap(\.tokenExpiration).min()
-        }
+    }
+
+    /// The first ADE token to expire, over every instance (all pages).
+    static func adeTokenExpiry(client: JamfPlatformClient) async throws -> String? {
+        struct Instance: Decodable, Sendable { let tokenExpirationDate: String? }
+        return try await client.allPages(adePath, as: Instance.self, privileges: [.readDeviceEnrollmentProgramInstances])
+            .compactMap(\.tokenExpirationDate).min()
+    }
+
+    /// The first volume purchasing token to expire, over every location.
+    static func vppTokenExpiry(client: JamfPlatformClient) async throws -> String? {
+        struct Location: Decodable, Sendable { let tokenExpiration: String? }
+        return try await client.allPages(vppPath, as: Location.self, privileges: [.readVolumePurchasingLocations])
+            .compactMap(\.tokenExpiration).min()
     }
 
     static func meetsMinimumVersion(_ raw: String) -> Bool {

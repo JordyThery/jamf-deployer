@@ -19,11 +19,6 @@ struct AppCatalogPickerView: View {
         var version: String?
     }
 
-    nonisolated private struct TitlesPage: Decodable, Sendable {
-        var totalCount: Int
-        var results: [Title]
-    }
-
     @State private var searchText = ""
     @State private var titles: [Title] = []
     @State private var totalCount = 0
@@ -243,21 +238,20 @@ struct AppCatalogPickerView: View {
             // A slower earlier search must not overwrite this one's results.
             defer { if searchRun == run { isLoading = false } }
             do {
-                var items = [
-                    URLQueryItem(name: "page", value: "0"),
-                    URLQueryItem(name: "page-size", value: "50"),
-                    URLQueryItem(name: "sort", value: "titleName:asc"),
-                ]
+                var items = [URLQueryItem(name: "sort", value: "titleName:asc")]
                 if !query.isEmpty {
                     items.append(URLQueryItem(
                         name: "filter",
                         value: #"titleName=="*\#(query)*",publisher=="*\#(query)*""#
                     ))
                 }
-                let page = try await client.getDecoded(TitlesPage.self, path: "/pro/v1/app-installers/titles", query: items)
+                // The first 50 matches, with JTKit's page reader. The App
+                // Catalog is Platform API only: no Jamf Pro privilege.
+                let page = try await client.page("/pro/v1/app-installers/titles", as: Title.self, pageSize: 50,
+                                                 query: items, privileges: [])
                 guard searchRun == run else { return }
                 titles = page.results
-                totalCount = page.totalCount
+                totalCount = page.totalCount ?? page.results.count
             } catch {
                 guard searchRun == run else { return }
                 loadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

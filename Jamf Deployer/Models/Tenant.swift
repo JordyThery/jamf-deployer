@@ -89,6 +89,12 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
 
     var isJamfPro: Bool { connection == .jamfPro }
 
+    /// How the engine error table words its fixes for this tenant.
+    var errorConnection: ErrorTranslation.Connection {
+        guard isJamfPro else { return .platform }
+        return jamfProAuth == .userAccount ? .jamfProUser : .jamfProAPIClient
+    }
+
     /// What identifies the connection in lists: the environment ID for
     /// Platform tenants, the instance host for Jamf Pro tenants.
     var connectionLabel: String {

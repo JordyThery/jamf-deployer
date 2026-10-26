@@ -114,12 +114,8 @@ struct TenantConnectionsTab: View {
                                                  tenantID: tenant.tenantID)
         }
         let client = JamfPlatformClient(configuration: configuration, activityLog: activityLog)
-        let version = try await client.getDecoded(JamfProVersion.self, path: "/pro/v1/jamf-pro-version").version
+        let version = try await client.jamfProVersion()
         return "Connected · Jamf Pro \(PreflightService.displayVersion(version))"
-    }
-
-    private nonisolated struct JamfProVersion: Decodable, Sendable {
-        let version: String
     }
 
     private nonisolated struct RemovalError: LocalizedError {

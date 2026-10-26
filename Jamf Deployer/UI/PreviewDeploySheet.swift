@@ -150,7 +150,7 @@ struct PreviewDeploySheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(outcome.errors.enumerated()), id: \.offset) { _, raw in
-                            let translated = ErrorTranslation.translate(raw)
+                            let translated = ErrorTranslation.translate(raw, for: tenant?.errorConnection ?? .platform)
                             VStack(alignment: .leading, spacing: 4) {
                                 Label(translated.message, systemImage: "xmark.circle.fill")
                                     .foregroundStyle(.red)
@@ -476,7 +476,7 @@ struct PreviewDeploySheet: View {
             if let described = (error as? LocalizedError)?.errorDescription {
                 stage = .failed(described, detail: Self.readableDetail(error))
             } else {
-                let translated = ErrorTranslation.translate(raw)
+                let translated = ErrorTranslation.translate(raw, for: tenant.errorConnection)
                 stage = .failed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: Self.readableDetail(error))
             }
         }
@@ -491,7 +491,9 @@ struct PreviewDeploySheet: View {
                 [diagnostic.address, diagnostic.summary, diagnostic.detail]
                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
             }
-            return diagnostics.isEmpty ? result.rawLines.suffix(40).joined(separator: "\n") : diagnostics.joined(separator: "\n\n")
+            return diagnostics.isEmpty
+                ? EngineOutputCleaner.readableErrorPages(in: result.rawLines.suffix(40).joined(separator: "\n"))
+                : diagnostics.joined(separator: "\n\n")
         }
         return (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
@@ -518,7 +520,7 @@ struct PreviewDeploySheet: View {
                 if let described = (error as? LocalizedError)?.errorDescription {
                     stage = .deployFailed(described, detail: Self.readableDetail(error))
                 } else {
-                    let translated = ErrorTranslation.translate(raw)
+                    let translated = ErrorTranslation.translate(raw, for: tenant.errorConnection)
                     stage = .deployFailed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: Self.readableDetail(error))
                 }
             }

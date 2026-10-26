@@ -12,13 +12,9 @@ nonisolated enum ExistingObjectService {
         }
     }
 
-    private struct Page: Decodable, Sendable {
-        struct Item: Decodable, Sendable {
-            let id: String
-            let name: String
-        }
-        let totalCount: Int
-        let results: [Item]
+    private struct Item: Decodable, Sendable {
+        let id: String
+        let name: String
     }
 
     struct ComputerGroup: Sendable, Hashable {
@@ -35,7 +31,8 @@ nonisolated enum ExistingObjectService {
     /// Smart and static computer groups, by Jamf Pro ID.
     static func computerGroups(tenant: Tenant, activityLog: ActivityLog?) async throws -> [ComputerGroup] {
         let client = try client(for: tenant, activityLog: activityLog)
-        let items = try await client.getDecoded([GroupItem].self, path: "/pro/v1/computer-groups")
+        let items = try await client.getDecoded([GroupItem].self, path: "/pro/v1/computer-groups",
+                                             privileges: [.readSmartComputerGroups, .readStaticComputerGroups])
         return items
             .map { ComputerGroup(ref: ExistingObjectRef(id: $0.id, name: $0.name), isSmart: $0.smartGroup) }
             .sorted { $0.ref.name.localizedStandardCompare($1.ref.name) == .orderedAscending }
@@ -50,7 +47,8 @@ nonisolated enum ExistingObjectService {
     /// Smart and static mobile device groups, by Jamf Pro ID.
     static func mobileDeviceGroups(tenant: Tenant, activityLog: ActivityLog?) async throws -> [ComputerGroup] {
         let client = try client(for: tenant, activityLog: activityLog)
-        let items = try await client.getDecoded([MobileGroupItem].self, path: "/pro/v1/mobile-device-groups")
+        let items = try await client.getDecoded([MobileGroupItem].self, path: "/pro/v1/mobile-device-groups",
+                                             privileges: [.readSmartMobileDeviceGroups, .readStaticMobileDeviceGroups])
         return items
             .map { ComputerGroup(ref: ExistingObjectRef(id: String($0.id), name: $0.name), isSmart: $0.isSmartGroup) }
             .sorted { $0.ref.name.localizedStandardCompare($1.ref.name) == .orderedAscending }
@@ -59,7 +57,9 @@ nonisolated enum ExistingObjectService {
     /// Jamf Pro categories.
     static func categories(tenant: Tenant, activityLog: ActivityLog?) async throws -> [ExistingObjectRef] {
         let client = try client(for: tenant, activityLog: activityLog)
-        return try await pagedList(path: "/pro/v1/categories", client: client)
+        return try await client.allPages("/pro/v1/categories", as: Item.self, pageSize: 200, privileges: [.readCategories])
+            .map { ExistingObjectRef(id: $0.id, name: $0.name) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     private static func client(for tenant: Tenant, activityLog: ActivityLog?) throws -> JamfPlatformClient {
@@ -67,20 +67,5 @@ nonisolated enum ExistingObjectService {
             throw LookupError.missingSecret
         }
         return TenantClients.shared.client(for: tenant, activityLog: activityLog)
-    }
-
-    private static func pagedList(path: String, client: JamfPlatformClient) async throws -> [ExistingObjectRef] {
-        var objects: [ExistingObjectRef] = []
-        var page = 0
-        while true {
-            let result = try await client.getDecoded(Page.self, path: path, query: [
-                URLQueryItem(name: "page", value: String(page)),
-                URLQueryItem(name: "page-size", value: "200"),
-            ])
-            objects += result.results.map { ExistingObjectRef(id: $0.id, name: $0.name) }
-            if result.results.isEmpty || objects.count >= result.totalCount { break }
-            page += 1
-        }
-        return objects.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }

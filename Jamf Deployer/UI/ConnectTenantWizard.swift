@@ -165,12 +165,8 @@ struct ConnectTenantWizard: View {
         "applications:read",
     ]
 
-    private static let jamfProPrivileges = [
-        "Read Categories",
-        "Read Scripts",
-        "Read Device Enrollment Program Instances",
-        "Read Volume Purchasing Locations",
-    ]
+    /// From the preflight's checks, so the list matches what is checked.
+    private static let jamfProPrivileges = PreflightService.jamfProPrivileges
 
     @ViewBuilder
     private var integrationStep: some View {

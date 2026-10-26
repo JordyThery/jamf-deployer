@@ -65,7 +65,8 @@ final class Day0Service {
 
         // Jamf Pro URL for deep links.
         nonisolated struct ServerURL: Decodable, Sendable { let url: String? }
-        if let server = try? await client.getDecoded(ServerURL.self, path: "/pro/v1/jamf-pro-server-url"),
+        if let server = try? await client.getDecoded(ServerURL.self, path: "/pro/v1/jamf-pro-server-url",
+                                                     privileges: [.readJSSURL]),
            let raw = server.url, let url = URL(string: raw) {
             jamfProURL = url
         }
@@ -80,16 +81,13 @@ final class Day0Service {
         }
 
         // ADE.
-        nonisolated struct ADEPage: Decodable, Sendable {
-            nonisolated struct Instance: Decodable, Sendable {
-                let name: String
-                let tokenExpirationDate: String?
-            }
-            let totalCount: Int
-            let results: [Instance]
+        nonisolated struct ADEInstance: Decodable, Sendable {
+            let name: String
+            let tokenExpirationDate: String?
         }
-        if let page = try? await client.getDecoded(ADEPage.self, path: "/pro/v1/device-enrollments") {
-            if let instance = page.results.first {
+        if let instances = try? await client.allPages("/pro/v1/device-enrollments", as: ADEInstance.self,
+                                                      privileges: [.readDeviceEnrollmentProgramInstances]) {
+            if let instance = instances.first {
                 add("ade", "Automated Device Enrollment",
                     .done(detail: "“\(instance.name)” connected\(instance.tokenExpirationDate.map { ", token expires \($0)" } ?? "")."))
             } else {
@@ -101,16 +99,13 @@ final class Day0Service {
         }
 
         // VPP.
-        nonisolated struct VPPPage: Decodable, Sendable {
-            nonisolated struct Location: Decodable, Sendable {
-                let name: String?
-                let tokenExpiration: String?
-            }
-            let totalCount: Int
-            let results: [Location]
+        nonisolated struct VPPLocation: Decodable, Sendable {
+            let name: String?
+            let tokenExpiration: String?
         }
-        if let page = try? await client.getDecoded(VPPPage.self, path: "/pro/v1/volume-purchasing-locations") {
-            if let location = page.results.first {
+        if let locations = try? await client.allPages("/pro/v1/volume-purchasing-locations", as: VPPLocation.self,
+                                                      privileges: [.readVolumePurchasingLocations]) {
+            if let location = locations.first {
                 add("vpp", "Apps and Books (volume purchasing)",
                     .done(detail: "“\(location.name ?? "Location")” connected\(location.tokenExpiration.map { ", token expires \($0.prefix(10))" } ?? "")."))
             } else {
@@ -122,10 +117,10 @@ final class Day0Service {
         }
 
         // Self Service branding.
-        nonisolated struct BrandingPage: Decodable, Sendable { let totalCount: Int }
-        if let page = try? await client.getDecoded(BrandingPage.self, path: "/pro/v1/self-service/branding/macos") {
+        if let page = try? await client.page("/pro/v1/self-service/branding/macos", pageSize: 1,
+                                             privileges: [.readSelfServiceBrandingConfiguration], item: { _ in () }) {
             add("branding", "Self Service branding",
-                page.totalCount > 0
+                (page.totalCount ?? page.results.count + page.unreadableCount) > 0
                     ? .done(detail: "Branding is configured.")
                     : .pending(detail: "Give Self Service your organization's name before users first see it."))
         } else {
@@ -134,7 +129,7 @@ final class Day0Service {
 
         // SSO.
         let ssoState: Day0Step.State
-        if let (data, status) = try? await client.get("/pro/v3/sso"), status == 200,
+        if let (data, status) = try? await client.get("/pro/v3/sso", privileges: [.readSSOSettings]), status == 200,
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let enabled = (object["ssoEnabled"] as? Bool) ?? (object["enabled"] as? Bool)
             switch enabled {
@@ -148,7 +143,8 @@ final class Day0Service {
         add("sso", "Single sign-on", ssoState)
 
         // Jamf Protect link.
-        if let (data, status) = try? await client.get("/pro/v1/jamf-protect") {
+        if let (data, status) = try? await client.get(
+            "/pro/v1/jamf-protect", privileges: [.readJamfProtectSettings, .readJamfProtectDeployments]) {
             if status == 200,
                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                object["registrationId"] != nil {
@@ -165,7 +161,8 @@ final class Day0Service {
         // Cloud Services Connection (status only).
         if let (_, status) = try? await client.get(
             "/pro/v1/app-installers/titles",
-            query: [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")]
+            query: [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")],
+            privileges: [] // Platform API only
         ) {
             add("csc", "Cloud Services Connection",
                 status == 200
@@ -183,7 +180,8 @@ final class Day0Service {
     /// The ADE public key the user uploads to Apple Business Manager.
     func downloadADEPublicKey(tenant: Tenant) async throws -> Data {
         let client = try client(for: tenant)
-        return try await client.getRaw("/pro/v1/device-enrollments/public-key", accept: "application/x-pem-file")
+        return try await client.getRaw("/pro/v1/device-enrollments/public-key", accept: "application/x-pem-file",
+                                        privileges: [.readDeviceEnrollmentProgramInstances])
     }
 
     /// Uploads the .p7m server token downloaded from Apple Business Manager.
@@ -192,7 +190,7 @@ final class Day0Service {
         _ = try await client.post("/pro/v1/device-enrollments/upload-token", json: [
             "tokenFileName": name,
             "encodedToken": tokenFile.base64EncodedString(),
-        ])
+        ], privileges: [.createDeviceEnrollmentProgramInstances])
     }
 
     /// Uploads the .vpptoken from Apple Business Manager. The file content
@@ -204,7 +202,7 @@ final class Day0Service {
         _ = try await client.post("/pro/v1/volume-purchasing-locations", json: [
             "name": name,
             "serviceToken": serviceToken,
-        ])
+        ], privileges: [.createVolumePurchasingLocations])
     }
 
     /// Creates a minimal macOS Self Service branding configuration.
@@ -214,7 +212,7 @@ final class Day0Service {
             "applicationName": brandingName,
             "brandingName": brandingName,
             "homeHeading": "Welcome to \(brandingName)",
-        ])
+        ], privileges: [.createSelfServiceBrandingConfiguration])
     }
 
     /// Links Jamf Pro to a Jamf Protect tenant.
@@ -228,6 +226,6 @@ final class Day0Service {
             "protectUrl": graphqlURL,
             "clientId": clientID,
             "password": password,
-        ])
+        ], privileges: [.updateJamfProtectSettings])
     }
 }

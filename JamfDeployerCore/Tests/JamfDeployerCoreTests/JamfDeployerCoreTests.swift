@@ -2514,3 +2514,54 @@ struct DeleteOrderRetryTests {
         #expect(!DeleteOrderRetry.hasChanges(try Self.plan([("a", ["no-op"])])))
     }
 }
+
+/// ROADMAP step 7: a direct Jamf Pro tenant has no region and no Jamf
+/// Account, and a user account no client secret.
+struct ErrorTranslationConnectionTests {
+    private let unauthorized = "Error: API request failed with status 401 Unauthorized"
+    private let forbidden = "Error: API returned status 403 Forbidden for /api/v1/categories"
+    private let noHost = "Error: dial tcp: lookup acme.jamfcloud.com: no such host"
+
+    @Test func platformWordingIsUnchanged() {
+        #expect(ErrorTranslation.translate(unauthorized).hint
+                == "The API integration may have been rotated or disabled. Update the client secret in the tenant's settings.")
+        #expect(ErrorTranslation.translate(forbidden, for: .platform).hint
+                == "Open the integration in Jamf Account and grant the permissions listed on the building block.")
+        #expect(ErrorTranslation.translate(noHost, for: .platform).hint == "Check the tenant's region setting.")
+    }
+
+    @Test(arguments: [ErrorTranslation.Connection.jamfProAPIClient, .jamfProUser])
+    func directJamfProNeverMentionsRegionOrJamfAccount(connection: ErrorTranslation.Connection) {
+        for raw in [unauthorized, forbidden, noHost] {
+            let translated = ErrorTranslation.translate(raw, for: connection)
+            let text = translated.message + " " + (translated.hint ?? "")
+            #expect(!text.contains("region"))
+            #expect(!text.contains("Jamf Account"))
+            #expect(text.contains("Jamf Pro"))
+        }
+        #expect(ErrorTranslation.translate(noHost, for: connection).hint == "Check the tenant's Jamf Pro URL.")
+    }
+
+    @Test func anAPIClientIsPointedToItsAPIRole() {
+        let translated = ErrorTranslation.translate(forbidden, for: .jamfProAPIClient)
+        #expect(translated.message == "The API client is missing a privilege for this object.")
+        #expect(translated.hint?.contains("API role in Jamf Pro under Settings › API Roles and Clients") == true)
+        #expect(ErrorTranslation.translate(unauthorized, for: .jamfProAPIClient).hint?.contains("client secret") == true)
+    }
+
+    @Test func aUserAccountIsPointedToItsAccountAndPassword() {
+        let forbiddenText = ErrorTranslation.translate(forbidden, for: .jamfProUser)
+        #expect(forbiddenText.message == "The user account is missing a privilege for this object.")
+        #expect(forbiddenText.hint?.contains("user account in Jamf Pro under Settings › User Accounts and Groups") == true)
+        let unauthorizedText = ErrorTranslation.translate(unauthorized, for: .jamfProUser)
+        #expect(unauthorizedText.hint?.contains("username and password") == true)
+        #expect(unauthorizedText.hint?.contains("client secret") == false)
+    }
+
+    @Test(arguments: [ErrorTranslation.Connection.platform, .jamfProAPIClient, .jamfProUser])
+    func otherEntriesReadTheSameForEveryConnection(connection: ErrorTranslation.Connection) {
+        let raw = "Error: [DUPLICATE_FIELD] name: duplicate name"
+        #expect(ErrorTranslation.translate(raw, for: connection).message == ErrorTranslation.translate(raw).message)
+        #expect(ErrorTranslation.translateIfKnown("some entirely novel failure", for: connection) == nil)
+    }
+}
