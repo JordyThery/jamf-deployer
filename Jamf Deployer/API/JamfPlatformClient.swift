@@ -172,8 +172,9 @@ actor JamfPlatformClient {
 
     /// GET a path relative to the gateway root (e.g. "/pro/v1/categories").
     /// An error status comes back as the status; a refused sign-in is thrown.
-    func get(_ path: String, query: [URLQueryItem] = []) async throws -> (Data, Int) {
-        let response = try await send(HTTPRequest(method: "GET", path: path, query: query), on: statusReturning)
+    /// `accept` overrides JTKit's default (XML for Classic API paths).
+    func get(_ path: String, query: [URLQueryItem] = [], accept: String? = nil) async throws -> (Data, Int) {
+        let response = try await send(HTTPRequest(method: "GET", path: path, query: query, accept: accept), on: statusReturning)
         return (response.data, response.status)
     }
 

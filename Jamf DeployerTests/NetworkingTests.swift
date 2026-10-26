@@ -211,6 +211,40 @@ struct JamfPlatformClientTests {
             #expect(!text.contains(secret))
         }
     }
+
+    /// The Classic API answers in XML unless asked for JSON (as seen on the
+    /// Sandbox, 2026-10-26); the answers below are trimmed from that tenant.
+    /// The lookup after a failed create reads JSON, so it must ask for it.
+    @Test func aFailedCreateIsLookedUpInJSONOnTheClassicAPI() async throws {
+        let server = MockServer { request in
+            if request.path == "/auth/token" { return .json(200, tokenJSON("tok")) }
+            let json = request.header("Accept") == "application/json"
+            switch (request.path, json) {
+            case ("/proclassic/policies/name/JD%20Repro%20-%20Classic%20lookup", true):
+                return .json(200, #"{"policy":{"general":{"id":193,"name":"JD Repro - Classic lookup","enabled":false}}}"#)
+            case ("/proclassic/policies/name/JD%20Repro%20-%20Classic%20lookup", false):
+                return MockResponse(status: 200, headers: ["Content-Type": "text/xml;charset=utf-8"], body: Data(
+                    #"<?xml version="1.0" encoding="UTF-8"?><policy><general><id>193</id><name>JD Repro - Classic lookup</name><enabled>false</enabled></general></policy>"#.utf8))
+            case ("/proclassic/patchsoftwaretitles", true):
+                return .json(200, #"{"patch_software_titles":[{"name_id":"MicrosoftOutlook2016","source_id":"1","name":"Microsoft Outlook","id":"1"}]}"#)
+            case ("/proclassic/patchsoftwaretitles", false):
+                return MockResponse(status: 200, headers: ["Content-Type": "text/xml;charset=utf-8"], body: Data(
+                    #"<?xml version="1.0" encoding="UTF-8"?><patch_software_titles><size>1</size><patch_software_title><name_id>MicrosoftOutlook2016</name_id><source_id>1</source_id><name>Microsoft Outlook</name><id>1</id></patch_software_title></patch_software_titles>"#.utf8))
+            default:
+                return .json(404, "{}")
+            }
+        }
+        let jamf = client(platform, server: server)
+        let policy = CreateFailureRecovery.Candidate(
+            address: "module.cap.jamfplatform_pro_policy.repro", resourceType: "jamfplatform_pro_policy",
+            name: "JD Repro - Classic lookup")
+        let title = CreateFailureRecovery.Candidate(
+            address: "module.cap.jamfplatform_pro_patch_software_title.outlook",
+            resourceType: "jamfplatform_pro_patch_software_title", name: "Microsoft Outlook")
+        #expect(await TenantDeployService.createdObjectID(for: policy, client: jamf, excluding: []) == "193")
+        #expect(await TenantDeployService.createdObjectID(for: title, client: jamf, excluding: []) == "1")
+        #expect(await TenantDeployService.createdObjectID(for: policy, client: jamf, excluding: ["193"]) == nil)
+    }
 }
 
 @MainActor

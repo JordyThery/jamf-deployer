@@ -10,6 +10,12 @@ public nonisolated enum CreateFailureRecovery {
         public var address: String
         public var resourceType: String
         public var name: String
+
+        public init(address: String, resourceType: String, name: String) {
+            self.address = address
+            self.resourceType = resourceType
+            self.name = name
+        }
     }
 
     /// Resource types a server error on create can leave behind, and the API

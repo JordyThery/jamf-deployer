@@ -1636,10 +1636,8 @@ final class TenantDeployService {
             }
         }
         for candidate in candidates {
-            guard let path = CreateFailureRecovery.lookupPath(for: candidate),
-                  let (data, status) = try? await client.get(path, query: CreateFailureRecovery.lookupQuery(for: candidate)), status == 200,
-                  let id = CreateFailureRecovery.objectID(
-                      in: data, for: candidate, excluding: managed[candidate.resourceType] ?? [])
+            guard let id = await Self.createdObjectID(
+                for: candidate, client: client, excluding: managed[candidate.resourceType] ?? [])
             else { continue }
             // Two failed creates with the same name must not share one object.
             guard !found.values.contains(id) else { continue }
@@ -1650,6 +1648,23 @@ final class TenantDeployService {
         let text = CreateFailureRecovery.importFile(found.map { (address: $0.key, id: $0.value) })
         try? Data(text.utf8).write(to: fileURL)
         return candidates.count { found[$0.address] != nil }
+    }
+
+    /// The Jamf ID of the object a failed create left behind, looked up by
+    /// its planned name; nil when there is none or it is ambiguous. Asks for
+    /// JSON: the Classic API otherwise answers in XML, which the lookup
+    /// can't read.
+    nonisolated static func createdObjectID(
+        for candidate: CreateFailureRecovery.Candidate,
+        client: JamfPlatformClient,
+        excluding managed: Set<String>
+    ) async -> String? {
+        guard let path = CreateFailureRecovery.lookupPath(for: candidate),
+              let (data, status) = try? await client.get(
+                  path, query: CreateFailureRecovery.lookupQuery(for: candidate), accept: "application/json"),
+              status == 200
+        else { return nil }
+        return CreateFailureRecovery.objectID(in: data, for: candidate, excluding: managed)
     }
 
     // MARK: Changes made in Jamf (drift)
