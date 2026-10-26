@@ -1,7 +1,6 @@
 import Foundation
 import AppKit
 import os
-import DeployerKit
 import JTKit
 import JamfDeployerCore
 
@@ -606,6 +605,8 @@ final class TenantDeployService {
     /// also append them to a file so test runs can be read back without log
     /// access.
     static func trace(_ message: String) {
+        // engine error summaries can quote a server's answer
+        let message = EngineOutputCleaner.cleaned(message)
         decisionsLog.info("\(message, privacy: .public)")
         #if DEBUG
         let line = Data("\(Date().formatted(.iso8601)) \(message)\n".utf8)
@@ -1350,7 +1351,10 @@ final class TenantDeployService {
            let redacted = PlanRedactor.redact(planData) {
             try? redacted.write(to: entryURL.appending(path: "plan.json"))
         }
-        let logText = result.rawLines.joined(separator: "\n")
+        // The engine's own masking misses secrets inside a server's answer
+        // (a provider error can quote what it sent), so every line is
+        // cleaned before it reaches the team repository.
+        let logText = EngineOutputCleaner.cleanedLog(result.rawLines)
         try? Data(logText.utf8).write(to: entryURL.appending(path: "log.jsonl"))
 
         let entry = DeployHistoryEntry(
@@ -1507,15 +1511,12 @@ final class TenantDeployService {
     ) async -> Int {
         let candidates = CreateFailureRecovery.candidates(diagnostics: diagnostics, plan: plan)
         guard !candidates.isEmpty,
-              let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load(),
+              TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil,
               let stateData = try? await runner.rawCommandOutput(arguments: ["show", "-json"])
         else { return 0 }
         // Objects the state already tracks are never adopted a second time.
         let managed = CreateFailureRecovery.managedIDs(stateJSON: stateData)
-        let client = JamfPlatformClient(
-            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
-            activityLog: activityLog
-        )
+        let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
         let fileURL = adoptedURL(for: tenant).appending(path: Self.recoveredImportsFile)
         // Keep recoveries from earlier deploys that have not been applied yet.
         var found: [String: String] = [:]
@@ -1656,11 +1657,8 @@ final class TenantDeployService {
     }
 
     private func refreshTokenExpiry(_ tenant: inout Tenant) async {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else { return }
-        let client = JamfPlatformClient(
-            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
-            activityLog: activityLog
-        )
+        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else { return }
+        let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
         nonisolated struct ADEPage: Decodable, Sendable {
             nonisolated struct Instance: Decodable, Sendable { let tokenExpirationDate: String? }
             let results: [Instance]
@@ -1778,7 +1776,7 @@ final class TenantDeployService {
         } catch {
             activityLog.append(ActivityLogEntry(
                 category: "Engine", operation: "hand over", detail: tenant.name,
-                status: 500, duration: nil, note: "The adopted configuration could not be archived: \(error.localizedDescription)"
+                status: 500, duration: nil, note: EngineOutputCleaner.cleaned("The adopted configuration could not be archived: \(error.localizedDescription)")
             ))
         }
     }

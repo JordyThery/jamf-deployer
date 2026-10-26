@@ -1,5 +1,4 @@
 import Foundation
-import DeployerKit
 import JTKit
 
 /// One Day 0 step with its detected state.
@@ -33,13 +32,10 @@ final class Day0Service {
     private(set) var isDetecting = false
 
     private func client(for tenant: Tenant) throws -> JamfPlatformClient {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
+        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
             throw TenantDeployService.DeployError.missingCredentials
         }
-        return JamfPlatformClient(
-            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
-            activityLog: activityLog
-        )
+        return TenantClients.shared.client(for: tenant, activityLog: activityLog)
     }
 
     // MARK: Detection

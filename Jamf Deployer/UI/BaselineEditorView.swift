@@ -1,5 +1,4 @@
 import SwiftUI
-import DeployerKit
 import JTKit
 import JamfDeployerCore
 

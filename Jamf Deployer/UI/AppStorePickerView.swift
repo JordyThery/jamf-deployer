@@ -1,5 +1,4 @@
 import SwiftUI
-import DeployerKit
 import JTKit
 import JamfDeployerCore
 
@@ -248,14 +247,11 @@ struct AppStorePickerView: View {
     // MARK: Loading
 
     private func client() -> JamfPlatformClient? {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
+        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
             loadError = "The tenant's stored credentials are missing."
             return nil
         }
-        return JamfPlatformClient(
-            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
-            activityLog: activityLog
-        )
+        return TenantClients.shared.client(for: tenant, activityLog: activityLog)
     }
 
     private func loadLocations() async {

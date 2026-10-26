@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
-import DeployerKit
 import JTKit
 import JamfDeployerCore
 

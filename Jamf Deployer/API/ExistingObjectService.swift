@@ -1,5 +1,4 @@
 import Foundation
-import DeployerKit
 import JTKit
 
 /// Lists objects that already exist in a tenant, so blocks can point at
@@ -64,13 +63,10 @@ nonisolated enum ExistingObjectService {
     }
 
     private static func client(for tenant: Tenant, activityLog: ActivityLog?) throws -> JamfPlatformClient {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
+        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
             throw LookupError.missingSecret
         }
-        return JamfPlatformClient(
-            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
-            activityLog: activityLog
-        )
+        return TenantClients.shared.client(for: tenant, activityLog: activityLog)
     }
 
     private static func pagedList(path: String, client: JamfPlatformClient) async throws -> [ExistingObjectRef] {

@@ -1,6 +1,5 @@
 import Foundation
 import JamfDeployerCore
-import DeployerKit
 
 /// One green/amber/red row in the preflight list, with a fix-it hint.
 nonisolated struct PreflightCheck: Identifiable, Sendable, Equatable {

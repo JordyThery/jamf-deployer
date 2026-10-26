@@ -1,5 +1,4 @@
 import Foundation
-import DeployerKit
 
 /// Watches the moving pieces the app bundles — engine, providers, exporter —
 /// and reports when upstream has moved past the pinned versions. Purely
@@ -17,7 +16,7 @@ final class ComponentUpdateChecker {
 
         var hasUpdate: Bool {
             guard let latest else { return false }
-            return UpdateChecker.isNewer(latest, than: pinned)
+            return ComponentVersion.isNewer(latest, than: pinned)
         }
     }
 
@@ -56,5 +55,21 @@ final class ComponentUpdateChecker {
             if tag.hasPrefix("v") { tag.removeFirst() }
             components[index].latest = tag
         }
+    }
+}
+
+/// The version comparison for the bundled components (from DeployerKit).
+/// The app's own update check comes from JTKit.
+nonisolated enum ComponentVersion {
+    /// Dot-separated numeric comparison; missing components count as 0.
+    static func isNewer(_ candidate: String, than installed: String) -> Bool {
+        let a = candidate.split(separator: ".").map { Int($0) ?? 0 }
+        let b = installed.split(separator: ".").map { Int($0) ?? 0 }
+        for index in 0..<max(a.count, b.count) {
+            let x = index < a.count ? a[index] : 0
+            let y = index < b.count ? b[index] : 0
+            if x != y { return x > y }
+        }
+        return false
     }
 }

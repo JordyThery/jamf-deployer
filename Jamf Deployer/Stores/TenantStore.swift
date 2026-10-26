@@ -62,6 +62,7 @@ final class TenantStore {
     /// caller is responsible for confirming with the user first.
     func remove(_ tenant: Tenant) {
         tenants.removeAll { $0.id == tenant.id }
+        TenantClients.shared.drop(tenant.id)
         TenantSecrets(tenantID: tenant.id).deleteAll()
         try? FileManager.default.removeItem(at: workspaceURL(for: tenant))
     }

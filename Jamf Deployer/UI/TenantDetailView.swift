@@ -1,5 +1,4 @@
 import SwiftUI
-import DeployerKit
 import JTKit
 import JamfDeployerCore
 
@@ -586,7 +585,7 @@ struct TenantDetailView: View {
     }
 
     private func runPreflight(tenant: Tenant) {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
+        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
             checks = [PreflightCheck(
                 id: "secret", title: "Stored credentials",
                 outcome: .fail,
@@ -598,10 +597,7 @@ struct TenantDetailView: View {
         }
         isRunningPreflight = true
         checks = []
-        let client = JamfPlatformClient(
-            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
-            activityLog: activityLog
-        )
+        let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
         Task {
             let report = await PreflightService.run(client: client, connection: tenant.connection) { progress in
                 checks = progress

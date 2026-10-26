@@ -1,6 +1,54 @@
 import Foundation
-import DeployerKit
 import JTKit
+
+/// One of the app's Keychain items, read and written through JTKit's
+/// `KeychainSecretStore`. New items are created "when unlocked" without a
+/// label, as DeployerKit's `KeychainItem` did, so every existing item keeps
+/// being found under the same service and account.
+///
+/// Saving an empty value deletes the item. Every save or delete of a
+/// tenant's item (account = tenant UUID) drops that tenant's API client, so
+/// the next request signs in with what is saved now.
+nonisolated struct KeychainItem: Sendable {
+    let service: String
+    let account: String
+
+    init(service: String, account: String) {
+        self.service = service
+        self.account = account
+    }
+
+    private var store: KeychainSecretStore {
+        KeychainSecretStore(service: service, accessibility: .whenUnlocked)
+    }
+
+    func load() -> String? {
+        store.secret(for: account)
+    }
+
+    /// Saves the value, replacing any existing one; an empty value deletes
+    /// the item (and counts as saved, as before).
+    @discardableResult
+    func save(_ value: String) -> Bool {
+        guard !value.isEmpty else {
+            delete()
+            return true
+        }
+        let saved = store.setSecret(value, for: account)
+        TenantClients.shared.secretChanged(account: account)
+        return saved
+    }
+
+    func delete() {
+        store.setSecret(nil, for: account)
+        TenantClients.shared.secretChanged(account: account)
+    }
+
+    /// Deletes every item of `service` whose account starts with `prefix`.
+    static func deleteAll(service: String, accountPrefix prefix: String) {
+        KeychainSecretStore(service: service, accessibility: .whenUnlocked).deleteSecrets(withAccountPrefix: prefix)
+    }
+}
 
 /// The Keychain items belonging to one tenant. Service names follow the
 /// `<bundle id>.<purpose>` convention; the account is the tenant's UUID.
@@ -63,15 +111,33 @@ nonisolated struct TenantSecrets: Sendable {
 
     /// The Keychain items Settings › Connections reads and writes: the same
     /// items as `platformClientSecret` and `protectClientSecret` (account =
-    /// tenant UUID, created "when unlocked" without a label, as
-    /// `KeychainItem` does). The other items stay app-only.
+    /// tenant UUID, created "when unlocked" without a label). A change made
+    /// there drops the tenant's API client too.
     static var connectionSecrets: [ConnectionSecretKind: SecretLocation] {
         [
-            .main: SecretLocation(store: KeychainSecretStore(
-                service: service(purpose: "platform-client-secret"), accessibility: .whenUnlocked)),
-            .protect: SecretLocation(store: KeychainSecretStore(
-                service: service(purpose: "protect-client-secret"), accessibility: .whenUnlocked)),
+            .main: SecretLocation(store: ReportingSecretStore(base: KeychainSecretStore(
+                service: service(purpose: "platform-client-secret"), accessibility: .whenUnlocked))),
+            .protect: SecretLocation(store: ReportingSecretStore(base: KeychainSecretStore(
+                service: service(purpose: "protect-client-secret"), accessibility: .whenUnlocked))),
         ]
+    }
+}
+
+/// A secret store that tells the tenant clients about every change, so a
+/// secret edited in Settings › Connections is used at the next request.
+nonisolated struct ReportingSecretStore: SecretStore {
+    let base: KeychainSecretStore
+    var clients: TenantClients = .shared
+
+    func secret(for account: String) -> String? {
+        base.secret(for: account)
+    }
+
+    @discardableResult
+    func setSecret(_ secret: String?, for account: String) -> Bool {
+        let saved = base.setSecret(secret, for: account)
+        clients.secretChanged(account: account)
+        return saved
     }
 }
 

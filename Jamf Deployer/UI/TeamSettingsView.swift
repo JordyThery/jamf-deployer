@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import DeployerKit
 
 /// Settings → Team: the safe switch into (and out of) a shared store.
 ///

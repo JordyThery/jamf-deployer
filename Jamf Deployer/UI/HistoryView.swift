@@ -1,5 +1,4 @@
 import SwiftUI
-import DeployerKit
 import JamfDeployerCore
 
 /// Every deploy across the fleet: who, when, what.

@@ -1,5 +1,4 @@
 import SwiftUI
-import DeployerKit
 import JTKit
 import JamfDeployerCore
 
@@ -228,16 +227,13 @@ struct AppCatalogPickerView: View {
     // MARK: Search
 
     private func search() {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
+        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
             loadError = "The tenant's stored credentials are missing."
             return
         }
         isLoading = true
         loadError = nil
-        let client = JamfPlatformClient(
-            configuration: JamfAPIConfiguration(tenant: tenant, clientSecret: secret),
-            activityLog: activityLog
-        )
+        let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
         // Quotes and backslashes would end the RSQL string literal early.
         let query = searchText.trimmingCharacters(in: .whitespaces)
             .replacing("\\", with: "").replacing("\"", with: "")

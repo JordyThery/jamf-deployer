@@ -1,5 +1,4 @@
 import Foundation
-import DeployerKit
 import os
 
 /// The store on disk is a Git repository — always, remote or not. Solo use

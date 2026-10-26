@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-import DeployerKit
 import JTKit
 import JTKitTestSupport
 @testable import Jamf_Deployer
@@ -365,8 +364,9 @@ struct TenantConnectionTests {
     @Test func secretsUseTheKeychainItemsTheAppAlwaysUsed() throws {
         let locations = TenantSecrets.connectionSecrets
         #expect(Set(locations.keys) == [.main, .protect])
-        let main = try #require(locations[.main]?.store as? KeychainSecretStore)
-        let protect = try #require(locations[.protect]?.store as? KeychainSecretStore)
+        // wrapped so a change made in Settings drops the tenant's API client
+        let main = try #require(locations[.main]?.store as? ReportingSecretStore).base
+        let protect = try #require(locations[.protect]?.store as? ReportingSecretStore).base
         #expect(main.service == "be.jordythery.jamf-deployer.platform-client-secret")
         #expect(protect.service == "be.jordythery.jamf-deployer.protect-client-secret")
         #expect(main.accessibility == .whenUnlocked && protect.accessibility == .whenUnlocked)

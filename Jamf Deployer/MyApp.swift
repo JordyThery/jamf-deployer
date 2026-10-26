@@ -71,14 +71,10 @@ struct MyApp: App {
             }
         }
 
-        Window("Activity Log", id: "activity-log") {
-            ActivityLogView(
-                log: activityLog,
-                emptyDescription: "Calls to Jamf and engine runs appear here as they happen."
-            )
-            .frame(minWidth: 640, minHeight: 320)
-        }
-        .keyboardShortcut("l", modifiers: [.command, .shift])
+        ActivityLogWindow(
+            log: activityLog,
+            emptyDescription: "Calls to Jamf and engine runs appear here as they happen."
+        )
 
         AboutWindow(configuration: .jamfDeployer)
 
