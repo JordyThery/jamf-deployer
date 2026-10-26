@@ -110,6 +110,14 @@ final class TenantDeployService {
         self.tenantStore = tenantStore
         self.activityLog = activityLog
         self.catalogSources = catalogSources ?? CatalogSourceStore()
+        // A changed source list is recorded in the store like every other
+        // change (and shared in Team Mode).
+        self.catalogSources.onChange = { [weak self] message in
+            Task { @MainActor in
+                guard let self else { return }
+                await self.recordInStore("\(message) — \(self.engineerName)")
+            }
+        }
         // A backend left behind by a crash or force-quit is stopped.
         StateBackendService.stopLeftoverBackend()
         // The state backend is a child process; it must not outlive the app.

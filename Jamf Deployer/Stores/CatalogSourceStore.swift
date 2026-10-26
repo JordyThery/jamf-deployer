@@ -64,11 +64,16 @@ final class CatalogSourceStore {
     private(set) var customSources: [CustomSource] = []
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "CatalogSources")
 
-    private var fileURL: URL {
-        GitStoreService.storeURL.appending(path: "catalog-sources.json")
-    }
+    private let fileURL: URL
 
-    init() {
+    /// Called after the source list changed and was saved, with a message
+    /// describing the change, so the store records it (and, in Team Mode,
+    /// shares it). Set by the deploy service.
+    var onChange: ((String) -> Void)?
+
+    /// The store's catalog-sources.json; injectable for tests.
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? GitStoreService.storeURL.appending(path: "catalog-sources.json")
         customSources = load()
     }
 
@@ -110,12 +115,15 @@ final class CatalogSourceStore {
         let source = CustomSource(id: UUID(), name: name, path: folderURL.path)
         customSources.append(source)
         save()
+        onChange?("Add catalog source “\(name)”")
         return source
     }
 
     func removeSource(_ source: CustomSource) {
+        guard customSources.contains(where: { $0.id == source.id }) else { return }
         customSources.removeAll { $0.id == source.id }
         save()
+        onChange?("Remove catalog source “\(source.name)”")
     }
 
     /// Official catalog merged with every readable custom source; the
@@ -179,6 +187,7 @@ final class CatalogSourceStore {
         )
         customSources.append(source)
         save()
+        onChange?("Add catalog source “\(name)” at \(tag)")
         return source
     }
 
