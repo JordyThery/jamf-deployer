@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Walks through the app's main functions against two test tenants: catalog
 /// sources, the baseline editor, deploys, drift handling, removals,

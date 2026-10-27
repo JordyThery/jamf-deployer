@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Drives the real app against two test tenants. These tests deploy for real
 /// and expect credentials in the runner's environment, so run them through

@@ -1,16 +1,17 @@
 import XCTest
 import AppKit
+import JTKitUITestSupport
 
-/// Shared helpers for UI tests that drive the real app against test
-/// tenants. Credentials arrive as environment variables (see Scripts/).
-class DeployerUITestCase: XCTestCase {
-    var app: XCUIApplication!
+/// Jamf Deployer's UI test helpers on top of JTKit's (launching the Debug
+/// build, finding and driving elements, the failure dump and screenshot).
+/// Credentials arrive as environment variables (see Scripts/).
+class DeployerUITestCase: JTKitUITestCase {
+    override var appName: String { "Jamf Deployer" }
 
-    override func setUpWithError() throws {
-        continueAfterFailure = false
-        app = makeApp()
-        app.launch()
-        app.activate()
+    // The guided tour would cover the window on a reset Mac.
+    override var demoLaunchArguments: [String] { ["-hasSeenGuidedTour", "YES"] }
+
+    override func didLaunch() {
         // A larger window keeps long forms on screen (clicks need a hit point).
         let window = app.windows["main"].firstMatch
         if window.waitForExistence(timeout: 10), window.frame.height < 800 {
@@ -19,107 +20,7 @@ class DeployerUITestCase: XCTestCase {
         }
     }
 
-    override func tearDown() {
-        if let run = testRun, run.failureCount > 0 {
-            print("UIDUMP-BEGIN\n\(app.debugDescription)\nUIDUMP-END")
-        }
-        NSPasteboard.general.clearContents()
-        app.terminate()
-    }
-
-    /// The Debug build next to the test runner (not an installed release).
-    func makeApp() -> XCUIApplication {
-        let products = Bundle(for: Self.self).bundleURL
-            .deletingLastPathComponent() // …/Runner.app/Contents/PlugIns
-            .deletingLastPathComponent() // …/Runner.app/Contents
-            .deletingLastPathComponent() // …/Runner.app
-            .deletingLastPathComponent() // Build/Products/Debug
-        return XCUIApplication(url: products.appending(path: "Jamf Deployer.app"))
-    }
-
-    // MARK: Elements
-
-    /// A text field in the open sheet, found by its placeholder (form
-    /// fields carry no accessibility label).
-    func field(_ placeholderPrefix: String) -> XCUIElement {
-        app.sheets.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH %@", placeholderPrefix)).firstMatch
-    }
-
-    /// Any element whose label, title, value or identifier matches.
-    func any(_ text: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(
-            format: "label == %@ OR title == %@ OR value == %@ OR identifier == %@", text, text, text, text
-        )).firstMatch
-    }
-
-    /// Any element whose label or value contains the text.
-    func anyContaining(_ text: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(
-            format: "label CONTAINS %@ OR value CONTAINS %@", text, text
-        )).firstMatch
-    }
-
-    func env(_ key: String) throws -> String {
-        guard let value = ProcessInfo.processInfo.environment[key], !value.isEmpty else {
-            throw XCTSkip("\(key) is not set for the test runner")
-        }
-        return value
-    }
-
-    // MARK: Actions
-
-    func tap(_ element: XCUIElement, timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) {
-        let element = element.firstMatch
-        XCTAssertTrue(element.waitForExistence(timeout: timeout), "Missing \(element)", file: file, line: line)
-        // Sidebar rows and labels report themselves disabled; only controls are checked.
-        if element.elementType != .staticText {
-            let enabled = NSPredicate(format: "isEnabled == true")
-            let expectation = XCTNSPredicateExpectation(predicate: enabled, object: element)
-            XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: timeout), .completed, "Disabled \(element)", file: file, line: line)
-        }
-        element.click()
-    }
-
-    /// Scrolls a long page until a control below (or above) its visible part
-    /// can be clicked.
-    func scrollIntoView(_ element: XCUIElement, timeout: TimeInterval = 15) {
-        let element = element.firstMatch
-        guard element.waitForExistence(timeout: timeout), !element.isHittable,
-              let scrollView = app.scrollViews.allElementsBoundByIndex.first(where: {
-                  $0.frame.minX <= element.frame.midX && element.frame.midX <= $0.frame.maxX
-              })
-        else { return }
-        var attempts = 0
-        while !element.isHittable, attempts < 30 {
-            scrollView.scroll(byDeltaX: 0, deltaY: element.frame.midY > scrollView.frame.maxY ? -120 : 120)
-            attempts += 1
-        }
-    }
-
-    func type(_ text: String, into element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(element.waitForExistence(timeout: 10), "Missing \(element)", file: file, line: line)
-        element.click()
-        element.typeText(text)
-    }
-
-    /// Pastes instead of typing so secrets never appear in the test log.
-    func paste(_ text: String, into field: XCUIElement) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        field.click()
-        field.typeKey("v", modifierFlags: .command)
-        NSPasteboard.general.clearContents()
-    }
-
-    func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 300) -> Bool {
-        element.waitForNonExistence(timeout: timeout)
-    }
-
     // MARK: Navigation
-
-    func openSidebar(_ label: String) {
-        tap(app.outlines.staticTexts[label], timeout: 15)
-    }
 
     func openTenant(_ name: String, tab: String = "Overview") {
         // A click while a text field is editing only ends editing, and right
@@ -243,15 +144,7 @@ class DeployerUITestCase: XCTestCase {
     /// Confirms an open save panel. The test scripts point the app's
     /// remembered save folder at ~/Documents before running.
     func saveInDocuments() {
-        tap(app.buttons["OKButton"].firstMatch, timeout: 15)
-        // The confirmation's own button, never its Touch Bar copy.
-        let inSheet = app.sheets.buttons["Replace"].firstMatch
-        let inDialog = app.dialogs.buttons["Replace"].firstMatch
-        if inSheet.waitForExistence(timeout: 2) {
-            inSheet.click()
-        } else if inDialog.exists {
-            inDialog.click()
-        }
+        saveInChosenFolder()
     }
 
     /// Saves the recovery sheet when asked (first deploy), then deploys.
@@ -302,13 +195,6 @@ class DeployerUITestCase: XCTestCase {
             }
         }
         tap(app.buttons["Start Rollout"])
-    }
-
-    /// A button in a sheet, alert or dialog (never a Touch Bar copy).
-    func dialogButton(_ label: String) -> XCUIElement {
-        let inSheet = app.sheets.buttons[label].firstMatch
-        if inSheet.waitForExistence(timeout: 3) { return inSheet }
-        return app.dialogs.buttons[label].firstMatch
     }
 
     /// Removes every catalog source with this name (Manage Sources rows are
@@ -394,10 +280,7 @@ class DeployerUITestCase: XCTestCase {
         tap(app.sheets.buttons["Choose…"])
         let panel = app.dialogs.firstMatch
         XCTAssertTrue(panel.waitForExistence(timeout: 10), "The folder panel did not open")
-        app.typeKey("g", modifierFlags: [.command, .shift])
-        sleep(1)
-        app.typeText(path + "\n")
-        sleep(1)
+        goToFolder(path)
         tap(app.dialogs.buttons["Choose"].firstMatch, timeout: 10)
         XCTAssertTrue(anyContaining((path as NSString).lastPathComponent).waitForExistence(timeout: 10), "The folder was not chosen")
     }

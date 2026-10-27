@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Custom objects beyond categories, through both connections to the same
 /// test instance: a script and a computer extension attribute are staged

@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Deploys the demo catalog's Fleet preset — the fleet blocks, PreStages
 /// included — to a tenant with an Automated Device Enrollment instance,

@@ -10,6 +10,8 @@
 		08680C89308324650027157B /* JamfDeployerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 08680C88308324650027157B /* JamfDeployerCore */; };
 		087B32A5308E418B00D0CB8A /* JTKit in Frameworks */ = {isa = PBXBuildFile; productRef = 087B32A4308E418B00D0CB8A /* JTKit */; };
 		087B412C308EA19C00D0CB8A /* JTKitTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 087B412B308EA19C00D0CB8A /* JTKitTestSupport */; };
+		088C8EFF30912DFB00A00A72 /* JTKitUITestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 088C8EFE30912DFB00A00A72 /* JTKitUITestSupport */; };
+		088C8F0130912E1E00A00A72 /* JTKitLiveCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 088C8F0030912E1E00A00A72 /* JTKitLiveCheck */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,11 +59,13 @@
 		082668923084A1CA00FF1E0D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				088C8EFF30912DFB00A00A72 /* JTKitUITestSupport in Frameworks */,
 			);
 		};
 		087B411E308EA19500D0CB8A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				088C8F0130912E1E00A00A72 /* JTKitLiveCheck in Frameworks */,
 				087B412C308EA19C00D0CB8A /* JTKitTestSupport in Frameworks */,
 			);
 		};
@@ -136,6 +140,9 @@
 				082668963084A1CA00FF1E0D /* Jamf DeployerUITests */,
 			);
 			name = "Jamf DeployerUITests";
+			packageProductDependencies = (
+				088C8EFE30912DFB00A00A72 /* JTKitUITestSupport */,
+			);
 			productName = "Jamf DeployerUITests";
 			productReference = 082668953084A1CA00FF1E0D /* Jamf DeployerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -159,6 +166,7 @@
 			name = "Jamf DeployerTests";
 			packageProductDependencies = (
 				087B412B308EA19C00D0CB8A /* JTKitTestSupport */,
+				088C8F0030912E1E00A00A72 /* JTKitLiveCheck */,
 			);
 			productName = "Jamf DeployerTests";
 			productReference = 087B4121308EA19500D0CB8A /* Jamf DeployerTests.xctest */;
@@ -628,7 +636,7 @@
 			repositoryURL = "https://github.com/JordyThery/JTKit.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.11.7;
+				minimumVersion = 0.12.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -647,6 +655,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */;
 			productName = JTKitTestSupport;
+		};
+		088C8EFE30912DFB00A00A72 /* JTKitUITestSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */;
+			productName = JTKitUITestSupport;
+		};
+		088C8F0030912E1E00A00A72 /* JTKitLiveCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 087B32A3308E418B00D0CB8A /* XCRemoteSwiftPackageReference "JTKit" */;
+			productName = JTKitLiveCheck;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

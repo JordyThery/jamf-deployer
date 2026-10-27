@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Deploys every block of the demo catalog, plus the App Catalog, to one
 /// tenant through either connection, then checks, drifts, restores and
