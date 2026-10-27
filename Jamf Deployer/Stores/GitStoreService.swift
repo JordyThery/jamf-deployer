@@ -40,8 +40,12 @@ actor GitStoreService {
     private let storeURL: URL
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "GitStore")
 
-    init(storeURL: URL = GitStoreService.storeURL) {
+    /// The doorway git is started through; demo mode's never starts it.
+    private let tools: ToolDoorway
+
+    init(storeURL: URL = GitStoreService.storeURL, tools: ToolDoorway) {
         self.storeURL = storeURL
+        self.tools = tools
     }
 
     nonisolated static var isGitAvailable: Bool {
@@ -331,8 +335,9 @@ actor GitStoreService {
     private func runData(_ arguments: String...) async throws -> Data {
         let storeURL = storeURL
         let logger = logger
+        let tools = tools
         return try await Task.detached {
-            try Self.executeSyncData(arguments, input: nil, storeURL: storeURL, logger: logger)
+            try Self.executeSyncData(arguments, input: nil, storeURL: storeURL, tools: tools, logger: logger)
         }.value
     }
 
@@ -341,30 +346,29 @@ actor GitStoreService {
     private func execute(_ arguments: [String], input: String?) async throws -> String {
         let storeURL = storeURL
         let logger = logger
+        let tools = tools
         return try await Task.detached {
-            try Self.executeSync(arguments, input: input, storeURL: storeURL, logger: logger)
+            try Self.executeSync(arguments, input: input, storeURL: storeURL, tools: tools, logger: logger)
         }.value
     }
 
     private nonisolated static func executeSync(
-        _ arguments: [String], input: String?, storeURL: URL, logger: Logger
+        _ arguments: [String], input: String?, storeURL: URL, tools: ToolDoorway, logger: Logger
     ) throws -> String {
-        String(decoding: try executeSyncData(arguments, input: input, storeURL: storeURL, logger: logger), as: UTF8.self)
+        String(decoding: try executeSyncData(arguments, input: input, storeURL: storeURL, tools: tools, logger: logger),
+               as: UTF8.self)
     }
 
     private nonisolated static func executeSyncData(
-        _ arguments: [String], input: String?, storeURL: URL, logger: Logger
+        _ arguments: [String], input: String?, storeURL: URL, tools: ToolDoorway, logger: Logger
     ) throws -> Data {
         guard Self.isGitAvailable else { throw GitError.gitUnavailable }
-        let process = Process()
-        let stdin = Pipe()
-        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
-        process.executableURL = URL(filePath: "/usr/bin/git")
-        process.arguments = Array(arguments)
-        process.currentDirectoryURL = storeURL
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0" // never hang on auth prompts
-        process.environment = environment
+        let process = try tools.process(.git, executable: URL(filePath: "/usr/bin/git"), arguments: Array(arguments),
+                                        directory: storeURL, environment: environment)
+        let stdin = Pipe()
+        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
 
         let output = Pipe()
         process.standardOutput = output

@@ -9,7 +9,7 @@ import JamfDeployerCore
 @Suite("Store secret check")
 struct StoreSecretCheckTests {
     static let fakeScriptSecret = "FAKE-NotARealSecret-123"
-    static let scriptPath = "tenants/00000000-0000-4000-8000-000000000001/adopted/support_files/scripts/ZZ Secret Scan Test.zsh"
+    static let scriptPath = "tenants/00000000-0000-4000-9000-000000000001/adopted/support_files/scripts/ZZ Secret Scan Test.zsh"
 
     /// jamformer's real output from the test run (terminal colours removed).
     static func jamformerLines() throws -> [String] {
@@ -22,7 +22,7 @@ struct StoreSecretCheckTests {
 
     static func makeStore() async throws -> (GitStoreService, URL) {
         let url = FileManager.default.temporaryDirectory.appending(path: "secret-store-\(UUID().uuidString)")
-        let store = GitStoreService(storeURL: url)
+        let store = GitStoreService(storeURL: url, tools: .app)
         try await store.ensureRepo()
         return (store, url)
     }
@@ -91,14 +91,14 @@ struct StoreSecretCheckTests {
         try Self.write("## Secret scan findings\n\n- Line 3    FAKE***************-123  (Password value in HCL attribute)\n",
                        to: "catalog/blocks/captured/README.md", in: url)
         try Self.write(#"{"message":"client_secret = \"FAKE-NotARealSecret-123\""}"# + "\n",
-                       to: "tenants/00000000-0000-4000-8000-000000000001/history/1/log.jsonl", in: url)
+                       to: "tenants/00000000-0000-4000-9000-000000000001/history/1/log.jsonl", in: url)
         // Ignored folders are not part of a commit and not checked.
         try Self.write("PASSWORD=\"\(Self.fakeScriptSecret)\"\n",
-                       to: "tenants/00000000-0000-4000-8000-000000000001/generated/x.sh", in: url)
+                       to: "tenants/00000000-0000-4000-9000-000000000001/generated/x.sh", in: url)
         let paths = Set(try await store.unacknowledgedFindings().map(\.path))
         #expect(paths == [
             "catalog/blocks/captured/README.md",
-            "tenants/00000000-0000-4000-8000-000000000001/history/1/log.jsonl",
+            "tenants/00000000-0000-4000-9000-000000000001/history/1/log.jsonl",
         ])
     }
 

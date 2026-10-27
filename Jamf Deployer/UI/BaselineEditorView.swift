@@ -52,6 +52,7 @@ struct BaselineEditorView: View {
                 Button("Baseline Updates…", systemImage: "square.and.arrow.down.badge.clock") {
                     isCheckingUpdates = true
                 }
+                .unavailableInDemoMode(deployService.isDemo)
                 .help("Checks the tenant's catalog sources for newer releases, block by block")
                 Spacer()
                 Text("\(availableSelectionCount) of \(supportedBlockCount) blocks selected")

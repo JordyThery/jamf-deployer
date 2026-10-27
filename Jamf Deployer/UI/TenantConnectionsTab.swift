@@ -103,19 +103,26 @@ struct TenantConnectionsTab: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         // passwords are kept exactly as typed; secrets are trimmed (pasted)
         let password = usesPassword ? secret : secret.trimmingCharacters(in: .whitespacesAndNewlines)
-        let configuration: JamfAPIConfiguration
-        if tenant.isJamfPro {
-            guard let url = JamfAPIConfiguration.instanceURL(tenant.jamfProURL ?? "") else { throw TestError.invalidURL }
-            configuration = JamfAPIConfiguration(jamfProURL: url, auth: tenant.jamfProAuth ?? .apiClient,
-                                                 clientID: signInName, clientSecret: password)
-        } else {
-            configuration = JamfAPIConfiguration(gatewayURL: tenant.region.gatewayURL, clientID: signInName,
-                                                 clientSecret: password, environmentID: tenant.environmentID,
-                                                 tenantID: tenant.tenantID)
-        }
-        let client = JamfPlatformClient(configuration: configuration, activityLog: activityLog)
+        let client = JamfPlatformClient(
+            configuration: try Self.testConfiguration(for: tenant, signInName: signInName, password: password),
+            activityLog: activityLog)
         let version = try await client.jamfProVersion()
         return "Connected · Jamf Pro \(PreflightService.displayVersion(version))"
+    }
+
+    /// Test Connection's sign-in: always the tenant's real address and the
+    /// real network, demo mode or not (Settings › Connections lists only
+    /// real tenants).
+    nonisolated static func testConfiguration(for tenant: Tenant, signInName: String,
+                                              password: String) throws -> JamfAPIConfiguration {
+        if tenant.isJamfPro {
+            guard let url = JamfAPIConfiguration.instanceURL(tenant.jamfProURL ?? "") else { throw TestError.invalidURL }
+            return JamfAPIConfiguration(jamfProURL: url, auth: tenant.jamfProAuth ?? .apiClient,
+                                        clientID: signInName, clientSecret: password)
+        }
+        return JamfAPIConfiguration(gatewayURL: tenant.region.gatewayURL, clientID: signInName,
+                                    clientSecret: password, environmentID: tenant.environmentID,
+                                    tenantID: tenant.tenantID)
     }
 
     private nonisolated struct RemovalError: LocalizedError {

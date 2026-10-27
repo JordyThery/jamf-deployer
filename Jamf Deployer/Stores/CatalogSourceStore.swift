@@ -71,9 +71,13 @@ final class CatalogSourceStore {
     /// shares it). Set by the deploy service.
     var onChange: ((String) -> Void)?
 
+    /// The doorway git is started through to fetch sources; demo mode's never starts it.
+    let tools: ToolDoorway
+
     /// The store's catalog-sources.json; injectable for tests.
-    init(fileURL: URL? = nil) {
+    init(fileURL: URL? = nil, tools: ToolDoorway) {
         self.fileURL = fileURL ?? GitStoreService.storeURL.appending(path: "catalog-sources.json")
+        self.tools = tools
         customSources = load()
     }
 
@@ -167,7 +171,7 @@ final class CatalogSourceStore {
         let resolved = tag ?? source.defaultTag ?? ""
         let checkout = URL(filePath: source.path).appending(path: resolved)
         guard !FileManager.default.fileExists(atPath: checkout.path) else { return }
-        try await GitCatalogManager.fetchTag(remote: gitURL, tag: resolved, into: checkout)
+        try await GitCatalogManager.fetchTag(remote: gitURL, tag: resolved, into: checkout, tools: tools)
     }
 
     /// Registers a Git catalog source pinned to a starting tag.
@@ -176,7 +180,7 @@ final class CatalogSourceStore {
         guard !RepositoryPublisher.hasCredentials(url) else { throw CatalogSourceError.urlHasCredentials }
         let id = UUID()
         let cacheRoot = CustomSource.cacheRoot(for: id)
-        try await GitCatalogManager.fetchTag(remote: url, tag: tag, into: cacheRoot.appending(path: tag))
+        try await GitCatalogManager.fetchTag(remote: url, tag: tag, into: cacheRoot.appending(path: tag), tools: tools)
         let source = CustomSource(
             id: id,
             name: name,

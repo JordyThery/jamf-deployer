@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(UpdateChecker.self) private var updates
     @Environment(TourState<TourAnchor>.self) private var tour
     @Environment(AppState.self) private var appState
+    @Environment(DemoMode.self) private var demo
 
     @State private var selection: SidebarSelection? = .fleet
     @State private var isConnectingTenant = false
@@ -48,6 +49,8 @@ struct ContentView: View {
         .task {
             await deployService.syncTeamState()
             await deployService.checkExistingStoreOnce()
+            // a sandbox run (UI tests) makes no update checks
+            guard !demo.isSandbox else { return }
             await updates.checkAutomatically()
             await componentUpdates.checkIfDue()
         }

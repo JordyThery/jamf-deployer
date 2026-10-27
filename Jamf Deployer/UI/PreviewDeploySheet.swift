@@ -352,6 +352,19 @@ struct PreviewDeploySheet: View {
     @ViewBuilder
     private var footer: some View {
         switch stage {
+        case .reviewing(let session) where deployService.isDemo:
+            // Demo mode stops at the plan: the engine would reach Jamf itself.
+            summaryText(session)
+            Spacer()
+            Label(DemoModeText.deployUnavailable, systemImage: "testtube.2")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Close") { close(.closedWithoutDeploying) }
+                .keyboardShortcut(.defaultAction)
+            Button("Deploy") {}
+                .disabled(true)
+                .help(DemoModeText.unavailable)
+
         case .reviewing(let session):
             summaryText(session)
             Spacer()

@@ -26,7 +26,12 @@ struct ConnectTenantWizard: View {
 
     @Environment(TenantStore.self) private var tenantStore
     @Environment(ActivityLog.self) private var activityLog
+    @Environment(TenantDeployService.self) private var deployService
     @Environment(\.dismiss) private var dismiss
+
+    /// In demo mode: the new tenant's ID in the fake range, so it only ever
+    /// reaches JTKit's demo servers and its secrets stay in memory.
+    @State private var demoTenantID: UUID?
 
     @State private var step: Step = .identity
 
@@ -87,6 +92,45 @@ struct ConnectTenantWizard: View {
             footer
         }
         .frame(width: 640, height: 560)
+        .onAppear {
+            if deployService.isDemo, demoTenantID == nil {
+                demoTenantID = DemoTenants.newTenantID()
+                fillInDemoConnection()
+            }
+        }
+        .onChange(of: connection) {
+            if deployService.isDemo { fillInDemoConnection() }
+        }
+    }
+
+    /// Demo mode: Contoso's demo connection for the chosen type, filled in.
+    private func fillInDemoConnection() {
+        let demo = DemoTenants.wizardConnection(for: connection)
+        region = demo.region
+        clientID = demo.clientID
+        clientSecret = DemoSecretStore().secret(for: demo.id.uuidString) ?? "demo-secret"
+        usesLegacyTenantScope = false
+        if connection == .jamfPro {
+            jamfProURL = demo.serverURL
+            jamfProAuth = .apiClient
+            scopeID = ""
+        } else {
+            jamfProURL = ""
+            scopeID = demo.environmentID
+        }
+    }
+
+    /// Demo mode's note on the credentials step.
+    @ViewBuilder
+    private var demoCredentialsNote: some View {
+        if deployService.isDemo {
+            Section {
+                Label("Demo Mode: Contoso's demo credentials are filled in. Nothing is sent to a tenant, and nothing is saved in the Keychain.",
+                      systemImage: "testtube.2")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var stepPicker: some View {
@@ -250,6 +294,7 @@ struct ConnectTenantWizard: View {
 
     private var jamfProCredentialsStep: some View {
         Form {
+            demoCredentialsNote
             Section {
                 TextField("Jamf Pro URL", text: $jamfProURL, prompt: Text("https://yourorg.jamfcloud.com"))
                     .font(.body.monospaced())
@@ -280,6 +325,7 @@ struct ConnectTenantWizard: View {
 
     private var platformCredentialsStep: some View {
         Form {
+            demoCredentialsNote
             Section("Platform API integration") {
                 TextField("Client ID", text: $clientID, prompt: Text("d5e385c3-738f-4169-ad07-…"))
                     .font(.body.monospaced())
@@ -329,12 +375,14 @@ struct ConnectTenantWizard: View {
         Task {
             defer { isFetchingEnvironments = false }
             do {
-                fetchedEnvironments = try await JamfPlatformClient.environments(
-                    region: region,
-                    clientID: trimmedClientID,
-                    clientSecret: trimmedSecret,
-                    activityLog: activityLog
-                )
+                fetchedEnvironments = deployService.isDemo
+                    ? try await DemoTenants.environments(activityLog: activityLog)
+                    : try await JamfPlatformClient.environments(
+                        region: region,
+                        clientID: trimmedClientID,
+                        clientSecret: trimmedSecret,
+                        activityLog: activityLog
+                    )
                 if fetchedEnvironments.isEmpty {
                     environmentFetchMessage = "No environments visible to this integration."
                 }
@@ -427,7 +475,10 @@ struct ConnectTenantWizard: View {
                 tenantID: usesLegacyTenantScope ? trimmedScopeID : nil
             )
         }
-        let client = JamfPlatformClient(configuration: configuration, activityLog: activityLog)
+        // demo mode's tenant only ever reaches JTKit's demo servers
+        let client = demoTenantID != nil
+            ? DemoTenants.client(for: newTenant(), activityLog: activityLog)
+            : JamfPlatformClient(configuration: configuration, activityLog: activityLog)
         let connection = connection
         let run = UUID()
         preflightRun = run
@@ -523,8 +574,10 @@ struct ConnectTenantWizard: View {
         return Step(rawValue: step.rawValue - 1) ?? .identity
     }
 
-    private func save() {
-        var tenant = Tenant(
+    /// The tenant as entered.
+    private func newTenant() -> Tenant {
+        Tenant(
+            id: demoTenantID ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
             region: region,
             clientID: trimmedClientID,
@@ -535,6 +588,10 @@ struct ConnectTenantWizard: View {
             jamfProURL: isJamfPro ? normalizedJamfProURL?.absoluteString : nil,
             jamfProAuth: isJamfPro ? jamfProAuth : nil
         )
+    }
+
+    private func save() {
+        var tenant = newTenant()
         tenant.preflight = report?.snapshot
         let protectURL = protectURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if !isJamfPro && !protectURL.isEmpty {

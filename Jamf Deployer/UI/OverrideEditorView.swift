@@ -9,7 +9,7 @@ actor SchemaProvider {
 
     private var cached: ProviderSchemaCatalog?
 
-    func catalog() async throws -> ProviderSchemaCatalog {
+    func catalog(tools: ToolDoorway) async throws -> ProviderSchemaCatalog {
         if let cached { return cached }
 
         // Named by plugin versions, so an app update with newer plugins
@@ -55,7 +55,8 @@ actor SchemaProvider {
             engineURL: EngineLocator.tofuURL,
             workingDirectory: workspace,
             cliConfigURL: try EngineLocator.ensureCLIConfig(),
-            environment: [:]
+            environment: [:],
+            tools: tools
         ))
         try await runner.run(arguments: ["init", "-input=false", "-backend=false"])
         let data = try await runner.rawCommandOutput(arguments: ["providers", "schema", "-json"])
@@ -112,7 +113,7 @@ struct OverrideEditorView: View {
         .frame(width: 680, height: 560)
         .task {
             do {
-                catalog = try await SchemaProvider.shared.catalog()
+                catalog = try await SchemaProvider.shared.catalog(tools: deployService.tools)
             } catch {
                 message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }

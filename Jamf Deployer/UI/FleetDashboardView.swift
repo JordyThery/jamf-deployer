@@ -147,6 +147,7 @@ struct FleetDashboardView: View {
             }
             .disabled(deployService.isBusy || tenantStore.tenants.filter(deployService.canRollOut).count < 2)
             .help("Deploy to several tenants one at a time, test tenants first, previewing each one")
+            .unavailableInDemoMode(deployService.isDemo)
             Button {
                 isExporting = true
             } label: {
@@ -154,6 +155,7 @@ struct FleetDashboardView: View {
             }
             .disabled(deployService.isBusy || !tenantStore.tenants.contains { !$0.isHandedOver })
             .help("Write tenants as a plain Terraform repository with GitHub workflows, to review or to move them there")
+            .unavailableInDemoMode(deployService.isDemo)
         }
         .sheet(isPresented: $isRollingOut) {
             RolloutView()

@@ -35,43 +35,41 @@ nonisolated enum RepositoryPublisher {
     /// Commits `directory` as the repository's first commit, checks that
     /// `remote` has no main or state branch yet, and creates the empty state branch there. Main is
     /// pushed by `publishMain` once the state is in place.
-    static func prepare(_ directory: URL, remote: String) async throws {
+    static func prepare(_ directory: URL, remote: String, tools: ToolDoorway) async throws {
         try await Task.detached {
-            try git(directory, "create the repository", "init", "--initial-branch", "main")
-            if ((try? git(directory, "read the identity", "config", "user.email")) ?? "").isEmpty {
-                try git(directory, "set an identity", "config", "user.name", "Jamf Deployer")
-                try git(directory, "set an identity", "config", "user.email", "jamf-deployer@localhost")
+            try git(tools, directory, "create the repository", "init", "--initial-branch", "main")
+            if ((try? git(tools, directory, "read the identity", "config", "user.email")) ?? "").isEmpty {
+                try git(tools, directory, "set an identity", "config", "user.name", "Jamf Deployer")
+                try git(tools, directory, "set an identity", "config", "user.email", "jamf-deployer@localhost")
             }
-            try git(directory, "stage the files", "add", "-A")
+            try git(tools, directory, "stage the files", "add", "-A")
             // The state is moved already; the first push has nothing to apply.
-            try git(directory, "commit", "commit", "-q", "-m", "Export from Jamf Deployer [skip ci]")
-            try git(directory, "add the remote", "remote", "add", "origin", remote)
+            try git(tools, directory, "commit", "commit", "-q", "-m", "Export from Jamf Deployer [skip ci]")
+            try git(tools, directory, "add the remote", "remote", "add", "origin", remote)
             // Other branches may exist; main and the state branch must not.
-            let branches = try git(directory, "reach the repository (it must exist and be yours to push to)",
+            let branches = try git(tools, directory, "reach the repository (it must exist and be yours to push to)",
                                    "ls-remote", "--heads", "origin", "main", stateBranch)
             guard branches.isEmpty else { throw PublishError.notEmpty }
-            let tree = try git(directory, "create the state branch", "mktree", input: "")
-            let commit = try git(directory, "create the state branch", "commit-tree", tree, "-m", "Create the state branch")
-            try git(directory, "push the state branch", "push", "-q", "origin", "\(commit):refs/heads/\(stateBranch)")
+            let tree = try git(tools, directory, "create the state branch", "mktree", input: "")
+            let commit = try git(tools, directory, "create the state branch", "commit-tree", tree, "-m", "Create the state branch")
+            try git(tools, directory, "push the state branch", "push", "-q", "origin", "\(commit):refs/heads/\(stateBranch)")
         }.value
     }
 
     /// Pushes the first commit as main.
-    static func publishMain(_ directory: URL) async throws {
+    static func publishMain(_ directory: URL, tools: ToolDoorway) async throws {
         try await Task.detached {
-            try git(directory, "push to the repository", "push", "-q", "-u", "origin", "main")
+            try git(tools, directory, "push to the repository", "push", "-q", "-u", "origin", "main")
         }.value
     }
 
     @discardableResult
-    private static func git(_ directory: URL, _ step: String, _ arguments: String..., input: String? = nil) throws -> String {
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = directory
+    private static func git(_ tools: ToolDoorway, _ directory: URL, _ step: String, _ arguments: String...,
+                            input: String? = nil) throws -> String {
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
-        process.environment = environment
+        let process = try tools.process(.git, executable: URL(filePath: "/usr/bin/git"), arguments: arguments,
+                                        directory: directory, environment: environment)
         let stdin = Pipe()
         let output = Pipe()
         process.standardInput = input == nil ? FileHandle.nullDevice : stdin

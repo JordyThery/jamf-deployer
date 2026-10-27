@@ -20,6 +20,7 @@ nonisolated enum TourAnchor: Hashable, Sendable {
 struct SidebarView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(TenantDeployService.self) private var deployService
+    @Environment(DemoMode.self) private var demo
     @Binding var selection: SidebarSelection?
     @Binding var isConnectingTenant: Bool
     @State private var tenantPendingRemoval: Tenant?
@@ -60,7 +61,16 @@ struct SidebarView: View {
                     Label("Connect a Tenant…", systemImage: "plus")
                 }
                 .buttonStyle(.borderless)
-                .help("Add a Jamf tenant to the fleet")
+                .help(demo.isOn ? "Add a Contoso demo tenant to the demo fleet" : "Add a Jamf tenant to the fleet")
+                if tenantStore.tenants.isEmpty && !demo.isOn {
+                    Button {
+                        _ = demo.requestSwitch(to: true)
+                    } label: {
+                        Label("Try Demo Mode", systemImage: "testtube.2")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(DemoMode.helpText)
+                }
             }
             .tourAnchor(TourAnchor.tenants)
 

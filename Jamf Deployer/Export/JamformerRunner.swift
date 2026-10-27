@@ -28,7 +28,11 @@ actor JamformerRunner {
 
     private let jamformerURL: URL
 
-    init() {
+    /// The doorway jamformer is started through; demo mode's never starts it.
+    private let tools: ToolDoorway
+
+    init(tools: ToolDoorway) {
+        self.tools = tools
         self.jamformerURL = EngineLocator.locateTool("Vendor/jamformer/jamformer")
     }
 
@@ -165,14 +169,11 @@ actor JamformerRunner {
         environment: [String: String],
         onLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> ExportResult {
-        let process = Process()
-        process.executableURL = jamformerURL
-        process.arguments = arguments
-
         var fullEnvironment = environment
         fullEnvironment["HOME"] = NSHomeDirectory()
         fullEnvironment["PATH"] = "/usr/bin:/bin"
-        process.environment = fullEnvironment
+        let process = try tools.process(.jamformer, executable: jamformerURL, arguments: arguments,
+                                        environment: fullEnvironment)
 
         let stdout = Pipe()
         let stderr = Pipe()

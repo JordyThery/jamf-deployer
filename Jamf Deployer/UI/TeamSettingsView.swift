@@ -268,7 +268,8 @@ struct TeamSettingsView: View {
                 try await Self.backUpStore()
                 let imported: Set<UUID>
                 do {
-                    imported = try await Task.detached { try Self.join(remote: remote) }.value
+                    let tools = deployService.tools
+                    imported = try await Task.detached { try Self.join(remote: remote, tools: tools) }.value
                 } catch {
                     // The swap can fail after the store moved aside.
                     try? await Task.detached { try Self.restoreReplacedStore() }.value
@@ -418,20 +419,19 @@ struct TeamSettingsView: View {
 
     /// Clone to a fresh folder, swap stores, import local tenants. Returns
     /// the imported tenants' IDs.
-    nonisolated static func join(remote: String) throws -> Set<UUID> {
+    nonisolated static func join(remote: String, tools: ToolDoorway) throws -> Set<UUID> {
         guard !RepositoryPublisher.hasCredentials(remote) else { throw GitStoreService.GitError.remoteHasCredentials }
         let fileManager = FileManager.default
         let store = GitStoreService.storeURL
         let fresh = store.deletingLastPathComponent().appending(path: "store-joining")
         try? fileManager.removeItem(at: fresh)
 
-        let clone = Process()
-        clone.standardInput = FileHandle.nullDevice
-        clone.executableURL = URL(filePath: "/usr/bin/git")
-        clone.arguments = ["clone", "--branch", "main", "--", remote, fresh.path]
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
-        clone.environment = environment
+        let clone = try tools.process(.git, executable: URL(filePath: "/usr/bin/git"),
+                                      arguments: ["clone", "--branch", "main", "--", remote, fresh.path],
+                                      environment: environment)
+        clone.standardInput = FileHandle.nullDevice
         let output = Pipe()
         clone.standardOutput = output
         clone.standardError = output

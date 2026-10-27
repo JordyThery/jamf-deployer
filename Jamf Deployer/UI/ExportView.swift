@@ -85,7 +85,7 @@ struct ExportView: View {
     // Clone step
     @State private var cloneTargetID: UUID?
 
-    private let runner = JamformerRunner()
+    private var runner: JamformerRunner { JamformerRunner(tools: catalogSources.tools) }
 
     /// Building blocks and clones are written for the Platform API.
     private var availableKinds: [ExportKind] {

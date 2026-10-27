@@ -69,10 +69,12 @@ struct CatalogView: View {
                 isManagingSources = true
             }
             .help("The folders and repositories your custom blocks come from")
+            .unavailableInDemoMode(deployService.isDemo)
             Button("Add Git Catalog…", systemImage: "arrow.triangle.branch") {
                 isAddingGitSource = true
             }
             .help("Follow a building-block catalog published as a Git repository, pinned by release tag")
+            .unavailableInDemoMode(deployService.isDemo)
         }
         .sheet(isPresented: $isAddingGitSource) {
             AddGitCatalogSheet { 
@@ -131,6 +133,7 @@ struct CatalogView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isAddingDemoCatalog)
+                .unavailableInDemoMode(deployService.isDemo)
             }
             .padding(6)
         }
@@ -142,7 +145,7 @@ struct CatalogView: View {
         Task {
             defer { isAddingDemoCatalog = false }
             do {
-                guard let latest = try await GitCatalogManager.availableTags(remote: Self.demoCatalogURL).last else {
+                guard let latest = try await GitCatalogManager.availableTags(remote: Self.demoCatalogURL, tools: catalogSources.tools).last else {
                     demoCatalogError = "The catalog repository has no releases yet."
                     return
                 }
@@ -385,6 +388,7 @@ struct BlockDetailSheet: View {
             if isBuiltIn {
                 Button("Duplicate to My Blocks…") { duplicateToMyBlocks() }
                     .help("Copies this block into one of your catalog sources, where it can be edited freely")
+                    .unavailableInDemoMode(catalogSources.tools.refusesEverything)
             } else if isEditable {
                 Button("Reveal in Finder") { revealInFinder() }
                 Button("Edit Details…") {
@@ -771,7 +775,7 @@ struct AddGitCatalogSheet: View {
         Task {
             defer { isWorking = false }
             do {
-                let found = try await GitCatalogManager.availableTags(remote: remote)
+                let found = try await GitCatalogManager.availableTags(remote: remote, tools: catalogSources.tools)
                 if found.isEmpty {
                     message = "The repository has no release tags yet — catalogs are pinned by tag."
                 } else {
