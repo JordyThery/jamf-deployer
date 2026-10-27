@@ -22,7 +22,7 @@ struct StoreSecretCheckTests {
 
     static func makeStore() async throws -> (GitStoreService, URL) {
         let url = FileManager.default.temporaryDirectory.appending(path: "secret-store-\(UUID().uuidString)")
-        let store = GitStoreService(storeURL: url, tools: .app)
+        let store = GitStoreService(storeURL: url, tools: .real(isDemoOn: { false }))
         try await store.ensureRepo()
         return (store, url)
     }

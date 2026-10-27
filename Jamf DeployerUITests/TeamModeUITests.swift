@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Team Mode end to end with one Mac and a stand-in teammate: create a team
 /// space (state moves into the state backend), check and restore through

@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Walks through a Jamf Pro API connection against two test instances:
 /// connect with a user account, custom objects, drift, adoption, export,

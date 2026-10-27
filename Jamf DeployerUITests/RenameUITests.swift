@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// A catalog release that renames a group another block scopes to. The
 /// engine deletes the old group before it updates the policy that still uses

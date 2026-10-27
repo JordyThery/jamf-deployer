@@ -14,10 +14,10 @@ struct CatalogSourceStoreTests {
             try? FileManager.default.removeItem(at: storeURL)
             try? FileManager.default.removeItem(at: folder)
         }
-        let store = GitStoreService(storeURL: storeURL, tools: .app)
+        let store = GitStoreService(storeURL: storeURL, tools: .real(isDemoOn: { false }))
         try await store.ensureRepo()
 
-        let sources = CatalogSourceStore(fileURL: storeURL.appending(path: "catalog-sources.json"), tools: .app)
+        let sources = CatalogSourceStore(fileURL: storeURL.appending(path: "catalog-sources.json"), tools: .real(isDemoOn: { false }))
         var messages: [String] = []
         sources.onChange = { messages.append($0) }
 

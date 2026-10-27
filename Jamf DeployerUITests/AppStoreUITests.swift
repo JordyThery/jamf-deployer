@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// The Mac App Store Apps block deployed through the Platform API: pick a
 /// licensed app, scope it to an empty test group, deploy, check, detect a

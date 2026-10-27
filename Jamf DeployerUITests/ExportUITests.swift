@@ -1,4 +1,5 @@
 import XCTest
+import JTKitUITestSupport
 
 /// Export as Terraform end to end: a tenant deployed with demo blocks and a
 /// custom object is exported for review, then moved to a test repository.
