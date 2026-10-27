@@ -18,6 +18,8 @@ actor EngineRunner {
         /// Secret and non-secret environment (JAMFPLATFORM_*, TF_ENCRYPTION,
         /// TF_VAR_*). Never logged.
         var environment: [String: String]
+        /// The doorway every run goes through; demo mode's refuses them all.
+        var tools: ToolDoorway
     }
 
     /// Everything one engine run produced, available after it finishes.
@@ -62,6 +64,12 @@ actor EngineRunner {
         self.configuration = configuration
     }
 
+    /// The engine's process for one command, through the doorway.
+    private func engineProcess(_ arguments: [String], environment: [String: String]) throws -> Process {
+        try configuration.tools.process(.openTofu, executable: configuration.engineURL, arguments: arguments,
+                                        directory: configuration.workingDirectory, environment: environment)
+    }
+
     /// Requests a graceful stop (a single SIGINT: OpenTofu finishes
     /// in-flight operations and releases its state lock).
     func cancel() {
@@ -78,16 +86,11 @@ actor EngineRunner {
     ) async throws -> RunResult {
         guard currentProcess == nil else { throw EngineError.alreadyRunning }
 
-        let process = Process()
-        process.executableURL = configuration.engineURL
-        process.arguments = arguments
-        process.currentDirectoryURL = configuration.workingDirectory
-
         var environment = configuration.environment
         environment["TF_CLI_CONFIG_FILE"] = configuration.cliConfigURL.path
         environment["HOME"] = NSHomeDirectory()
         environment["PATH"] = "/usr/bin:/bin"
-        process.environment = environment
+        let process = try engineProcess(arguments, environment: environment)
 
         let stdout = Pipe()
         let stderr = Pipe()
@@ -149,14 +152,10 @@ actor EngineRunner {
 
     /// Raw stdout of an engine command (schema dumps, `show -json` of the state).
     func rawCommandOutput(arguments: [String]) async throws -> Data {
-        let process = Process()
-        process.executableURL = configuration.engineURL
-        process.arguments = arguments
-        process.currentDirectoryURL = configuration.workingDirectory
         var environment = configuration.environment
         environment["TF_CLI_CONFIG_FILE"] = configuration.cliConfigURL.path
         environment["HOME"] = NSHomeDirectory()
-        process.environment = environment
+        let process = try engineProcess(arguments, environment: environment)
         let stdout = Pipe()
         // No stdin: a TTY here (dev runs from Xcode) switches child tools into
         // interactive mode and they block waiting for input.
@@ -173,15 +172,11 @@ actor EngineRunner {
     /// on stdin — used to move state between backends without writing it
     /// to disk (`state pull` / `state push -`).
     func checkedOutput(arguments: [String], input: Data? = nil) async throws -> Data {
-        let process = Process()
-        process.executableURL = configuration.engineURL
-        process.arguments = arguments
-        process.currentDirectoryURL = configuration.workingDirectory
         var environment = configuration.environment
         environment["TF_CLI_CONFIG_FILE"] = configuration.cliConfigURL.path
         environment["HOME"] = NSHomeDirectory()
         environment["PATH"] = "/usr/bin:/bin"
-        process.environment = environment
+        let process = try engineProcess(arguments, environment: environment)
         let stdin = Pipe()
         let stdout = Pipe()
         let stderr = Pipe()
@@ -219,15 +214,10 @@ actor EngineRunner {
 
     /// Raw `tofu show -json <planFile>` output.
     func showPlanData(planFileName: String) async throws -> Data {
-        let process = Process()
-        process.executableURL = configuration.engineURL
-        process.arguments = ["show", "-json", planFileName]
-        process.currentDirectoryURL = configuration.workingDirectory
-
         var environment = configuration.environment
         environment["TF_CLI_CONFIG_FILE"] = configuration.cliConfigURL.path
         environment["HOME"] = NSHomeDirectory()
-        process.environment = environment
+        let process = try engineProcess(["show", "-json", planFileName], environment: environment)
 
         let stdout = Pipe()
         // No stdin: a TTY here (dev runs from Xcode) switches child tools into

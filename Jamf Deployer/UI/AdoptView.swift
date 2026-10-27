@@ -49,7 +49,7 @@ struct AdoptView: View {
     /// adopted objects are saved in the store (and in Team Mode shared).
     @State private var secretAddresses: Set<String> = []
 
-    private let runner = JamformerRunner()
+    private var runner: JamformerRunner { JamformerRunner(tools: deployService.tools) }
 
     var body: some View {
         SheetFrame(

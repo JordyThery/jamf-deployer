@@ -59,8 +59,15 @@ final class TenantDeployService {
     private let tenantStore: TenantStore
     private let activityLog: ActivityLog
     private let catalogSources: CatalogSourceStore
-    let gitStore = GitStoreService()
-    let stateBackend = StateBackendService()
+    let gitStore: GitStoreService
+    let stateBackend: StateBackendService
+    /// The doorway OpenTofu, jamformer, the state backend and git start
+    /// through; demo mode's never starts them.
+    let tools: ToolDoorway
+    /// Demo mode's service: its own store in the temporary folder, no Git,
+    /// no Team Mode, no engine. Previews show a fixed plan and stop there;
+    /// checks for changes compare against the demo server.
+    let isDemo: Bool
     private var runners: [UUID: EngineRunner] = [:]
 
     /// Tenants with an open preview; a drift check would regenerate the
@@ -106,10 +113,24 @@ final class TenantDeployService {
     /// Set once every store on this Mac has had the one-time check.
     static let storeSecretCheckDefaultsKey = "storeSecretCheckDone"
 
-    init(tenantStore: TenantStore, activityLog: ActivityLog, catalogSources: CatalogSourceStore? = nil) {
+    /// - Parameters:
+    ///   - storeURL: the store's Git repository; demo mode's lives in its temporary folder.
+    ///   - tools: the doorway outside programs start through (`.demo` in demo mode).
+    init(
+        tenantStore: TenantStore,
+        activityLog: ActivityLog,
+        catalogSources: CatalogSourceStore,
+        storeURL: URL = GitStoreService.storeURL,
+        tools: ToolDoorway,
+        isDemo: Bool = false
+    ) {
         self.tenantStore = tenantStore
         self.activityLog = activityLog
-        self.catalogSources = catalogSources ?? CatalogSourceStore()
+        self.catalogSources = catalogSources
+        self.tools = tools
+        self.isDemo = isDemo
+        gitStore = GitStoreService(storeURL: storeURL, tools: tools)
+        stateBackend = StateBackendService(tools: tools)
         // A changed source list is recorded in the store like every other
         // change (and shared in Team Mode).
         self.catalogSources.onChange = { [weak self] message in
@@ -118,8 +139,9 @@ final class TenantDeployService {
                 await self.recordInStore("\(message) — \(self.engineerName)")
             }
         }
-        // A backend left behind by a crash or force-quit is stopped.
-        StateBackendService.stopLeftoverBackend()
+        // A backend left behind by a crash or force-quit is stopped (not
+        // by demo mode: it never started one).
+        if !isDemo { StateBackendService.stopLeftoverBackend() }
         // The state backend is a child process; it must not outlive the app.
         let backend = stateBackend
         NotificationCenter.default.addObserver(
@@ -138,6 +160,8 @@ final class TenantDeployService {
     /// Called at launch and from Sync Now: makes sure the repo exists, pulls
     /// when a team space is connected, and refreshes stores and locks.
     func syncTeamState() async {
+        // demo mode has no store repository and no team space
+        guard !isDemo else { return }
         do {
             try await gitStore.ensureRepo()
             isTeamMode = await gitStore.isTeamMode()
@@ -170,6 +194,7 @@ final class TenantDeployService {
     /// Releases a lock left behind by an interrupted run on another Mac,
     /// by deleting its lock branch (see GitStoreService.deleteStateLock).
     func forceUnlock(tenant: Tenant, lock: StateBackendService.StateLock) async throws {
+        guard !isDemo else { throw DeployError.notInDemoMode }
         guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
         busyTenants.insert(tenant.id)
         defer { busyTenants.remove(tenant.id) }
@@ -189,6 +214,7 @@ final class TenantDeployService {
     /// to disk decrypted. The local copies stay in place until
     /// `retireLocalState(of:)`, so a setup that fails later can be undone.
     func moveStateToTeam(tenants: [Tenant]) async throws {
+        guard !isDemo else { throw DeployError.notInDemoMode }
         try guardNoEngineWork()
         for tenant in tenants where isManaged(tenant) {
             let stateURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
@@ -229,6 +255,7 @@ final class TenantDeployService {
     /// workspace, encrypted with the tenant's own passphrase (a new one when
     /// the tenant was created in the team space). Runs before leaving.
     func moveStateToLocal() async throws {
+        guard !isDemo else { throw DeployError.notInDemoMode }
         try guardNoEngineWork()
         for tenant in tenantStore.tenants where isManaged(tenant) {
             let catalog = try loadCatalog(for: tenant)
@@ -265,6 +292,7 @@ final class TenantDeployService {
     /// tenant's state to the repository's state branch, and stops managing
     /// the tenants in this app: the repository manages them from then on.
     func exportRepository(_ chosen: [Tenant], to folder: URL, remote: String?) async throws -> RepositoryExportResult {
+        guard !isDemo else { throw DeployError.notInDemoMode }
         try guardNoEngineWork()
         if let remote, RepositoryPublisher.hasCredentials(remote) { throw DeployError.remoteHasCredentials }
         // In Team Mode the team space is the truth: pull it, and refuse
@@ -324,7 +352,7 @@ final class TenantDeployService {
         // Adopted files come from the exporter and the object editor in
         // their own layout; the repository's pipeline checks the canonical
         // one, so everything is formatted the way terraform fmt formats it.
-        try await Self.formatConfiguration(in: folder)
+        try await Self.formatConfiguration(in: folder, tools: tools)
 
         let result = RepositoryExportResult(
             folder: folder, tenantFolders: tenants.compactMap { folders[$0.id] }, moved: remote != nil)
@@ -351,14 +379,14 @@ final class TenantDeployService {
 
         // State lands before main, so the repository's first commit has
         // its state behind it; that commit skips the workflows.
-        try await RepositoryPublisher.prepare(folder, remote: remote)
+        try await RepositoryPublisher.prepare(folder, remote: remote, tools: tools)
         do {
             for (slug, state) in states {
                 try await stateBackend.pushState(
                     state, remote: remote, ref: RepositoryPublisher.stateBranch,
                     path: "tenants/\(slug)/terraform.tfstate")
             }
-            try await RepositoryPublisher.publishMain(folder)
+            try await RepositoryPublisher.publishMain(folder, tools: tools)
         } catch {
             throw DeployError.exportStateNotMoved(Self.describe(error))
         }
@@ -460,11 +488,10 @@ final class TenantDeployService {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private static func formatConfiguration(in folder: URL) async throws {
+    private static func formatConfiguration(in folder: URL, tools: ToolDoorway) async throws {
         try await Task.detached {
-            let process = Process()
-            process.executableURL = EngineLocator.tofuURL
-            process.arguments = ["fmt", "-recursive", "-list=false", folder.path]
+            let process = try tools.process(.openTofu, executable: EngineLocator.tofuURL,
+                                            arguments: ["fmt", "-recursive", "-list=false", folder.path])
             let errors = Pipe()
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = FileHandle.nullDevice
@@ -530,6 +557,8 @@ final class TenantDeployService {
     /// Commits the store and, in Team Mode, publishes it. Possible secrets
     /// stop both and open the review sheet; nothing leaves this Mac.
     private func recordInStore(_ message: String) async {
+        // demo mode's store is never committed, let alone shared
+        guard !isDemo else { return }
         do {
             _ = try await gitStore.commitAll(message: message)
         } catch GitStoreService.GitError.possibleSecrets(let findings) {
@@ -554,6 +583,7 @@ final class TenantDeployService {
     /// review sheet and the error goes on to the caller.
     @discardableResult
     func commitStore(message: String) async throws -> Bool {
+        guard !isDemo else { throw DeployError.notInDemoMode }
         do {
             return try await gitStore.commitAll(message: message)
         } catch GitStoreService.GitError.possibleSecrets(let findings) {
@@ -585,7 +615,7 @@ final class TenantDeployService {
     /// files and its history. Findings open the review sheet, which advises
     /// rotating those secrets; nothing in the history is rewritten.
     func checkExistingStoreOnce() async {
-        guard !UserDefaults.standard.bool(forKey: Self.storeSecretCheckDefaultsKey),
+        guard !isDemo, !UserDefaults.standard.bool(forKey: Self.storeSecretCheckDefaultsKey),
               GitStoreService.isGitAvailable,
               FileManager.default.fileExists(atPath: GitStoreService.storeURL.appending(path: ".git").path),
               let findings = try? await gitStore.fullCheck()
@@ -717,7 +747,7 @@ final class TenantDeployService {
         for source in catalogSources.customSources
         where source.kind == .gitRepository && usedSourceIDs.contains(source.id.uuidString) {
             guard let gitURL = source.gitURL,
-                  let latest = try await GitCatalogManager.availableTags(remote: gitURL).last else {
+                  let latest = try await GitCatalogManager.availableTags(remote: gitURL, tools: tools).last else {
                 Self.trace("\(source.name): no release tags found")
                 continue
             }
@@ -1103,10 +1133,12 @@ final class TenantDeployService {
     /// The user must save a recovery copy of the passphrase before the first
     /// deploy — losing it makes the tenant record unreadable.
     func needsRecoveryEscrow(for tenant: Tenant) -> Bool {
-        !UserDefaults.standard.bool(forKey: recoveryEscrowKey(tenant))
+        // nothing is deployed in demo mode, so there's no state to recover
+        !isDemo && !UserDefaults.standard.bool(forKey: recoveryEscrowKey(tenant))
     }
 
     func markRecoverySaved(for tenant: Tenant) {
+        guard !isDemo else { return }
         UserDefaults.standard.set(true, forKey: recoveryEscrowKey(tenant))
     }
 
@@ -1280,7 +1312,8 @@ final class TenantDeployService {
             engineURL: EngineLocator.tofuURL,
             workingDirectory: generatedURL(for: tenant),
             cliConfigURL: try EngineLocator.ensureCLIConfig(),
-            environment: environment
+            environment: environment,
+            tools: tools
         ))
         runners[tenant.id] = runner
         return runner
@@ -1303,6 +1336,13 @@ final class TenantDeployService {
         defer {
             phases[original.id] = nil
             busyTenants.remove(original.id)
+        }
+
+        if isDemo {
+            let session = try demoPreview(of: tenantStore.tenant(id: original.id) ?? original)
+            try Task.checkCancellation()
+            activePreviewTenants.insert(original.id)
+            return session
         }
 
         if isTeamMode {
@@ -1358,6 +1398,29 @@ final class TenantDeployService {
         )
     }
 
+    /// Demo mode's preview: the fixed demo plan, read as a real one is
+    /// (`PreviewBuilder`), with the block names from the catalog. Nothing is
+    /// generated or run.
+    private func demoPreview(of tenant: Tenant) throws -> PreviewSession {
+        let catalog = try loadCatalog(for: tenant)
+        var blockNames: [String: String] = ["tenant": "Adopted objects"]
+        var blockVersions: [String: String] = [:]
+        for selection in effectiveSelections(for: tenant, catalog: catalog) {
+            if let block = catalog.block(id: selection.blockID) {
+                blockNames[block.id] = block.name
+                blockVersions[block.id] = block.version
+            }
+        }
+        let (plan, diagnostics) = try DemoPlan.plan(for: tenant)
+        return PreviewSession(
+            planFileName: "demo",
+            summary: PreviewBuilder.build(plan: plan, diagnostics: diagnostics, blockNames: blockNames),
+            diagnostics: diagnostics,
+            blockVersions: blockVersions,
+            createdAt: .now
+        )
+    }
+
     // MARK: Deploy
 
     struct DeployOutcome: Sendable {
@@ -1370,6 +1433,8 @@ final class TenantDeployService {
     }
 
     func deploy(tenant: Tenant, session: PreviewSession) async throws -> DeployOutcome {
+        // the engine talks to Jamf itself, so demo mode stops at the plan
+        guard !isDemo else { throw DeployError.notInDemoMode }
         guard let runner = runners[tenant.id] else { throw DeployError.planExpired }
         guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
         busyTenants.insert(tenant.id)
@@ -1706,18 +1771,27 @@ final class TenantDeployService {
             Task { await self.recordInStore(message) }
         }
 
-        try await ensureCatalogCheckouts(for: tenant)
-        let catalog = try loadCatalog(for: tenant)
-        let output = try generateWorkspace(for: tenant, catalog: catalog)
-        let runner = try await makeRunner(
-            for: tenant,
-            extraEnvironment: try secretSettingEnvironment(for: tenant, output: output)
-        )
+        let catalog: LoadedCatalog
+        let plan: PlanFile
+        if isDemo {
+            // what a refresh-only plan would find, read from the demo server
+            catalog = try loadCatalog(for: tenant)
+            let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
+            plan = try await DemoDrift.refreshPlan(for: tenant, client: client)
+        } else {
+            try await ensureCatalogCheckouts(for: tenant)
+            catalog = try loadCatalog(for: tenant)
+            let output = try generateWorkspace(for: tenant, catalog: catalog)
+            let runner = try await makeRunner(
+                for: tenant,
+                extraEnvironment: try secretSettingEnvironment(for: tenant, output: output)
+            )
 
-        logEngine("check", tenant: tenant)
-        try await runEngine(runner, ["init", "-input=false"])
-        try await runEngine(runner, ["plan", "-refresh-only", "-input=false", "-out=drift.bin", "-json"] + Self.readParallelism(for: tenant))
-        let plan = try await runner.showPlan(planFileName: "drift.bin")
+            logEngine("check", tenant: tenant)
+            try await runEngine(runner, ["init", "-input=false"])
+            try await runEngine(runner, ["plan", "-refresh-only", "-input=false", "-out=drift.bin", "-json"] + Self.readParallelism(for: tenant))
+            plan = try await runner.showPlan(planFileName: "drift.bin")
+        }
 
         var blockNames: [String: String] = ["tenant": "Adopted objects"]
         for selection in effectiveSelections(for: tenant, catalog: catalog) {
@@ -1970,6 +2044,7 @@ final class TenantDeployService {
         case exportNotFormatted(String)
         case remoteHasCredentials
         case teamSyncFailed(String)
+        case notInDemoMode
 
         var errorDescription: String? {
             switch self {
@@ -2005,6 +2080,8 @@ final class TenantDeployService {
                 "The exported configuration could not be formatted: \(detail.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))"
             case .remoteHasCredentials:
                 "The repository URL contains a user name or password. Use the plain URL; Git signs in with your own credentials (gh, a credential helper or SSH)."
+            case .notInDemoMode:
+                "This isn't available in Demo Mode: it runs OpenTofu, jamformer or Git, which would reach Jamf or Git itself instead of the sample data. Turn off Demo Mode in the Tenant menu to use it with your own tenants."
             case .teamSyncFailed(let detail):
                 "The team space could not be synced, so the export would not have its latest state: \(detail)"
             case .engineWorkInProgress:

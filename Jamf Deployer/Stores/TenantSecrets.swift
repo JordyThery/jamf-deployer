@@ -9,6 +9,9 @@ import JTKit
 /// Saving an empty value deletes the item. Every save or delete of a
 /// tenant's item (account = tenant UUID) drops that tenant's API client, so
 /// the next request signs in with what is saved now.
+///
+/// A demo tenant's items (account in JTKit's fake range) never reach the
+/// Keychain: they live in `DemoSecretVault` for the launch.
 nonisolated struct KeychainItem: Sendable {
     let service: String
     let account: String
@@ -23,7 +26,8 @@ nonisolated struct KeychainItem: Sendable {
     }
 
     func load() -> String? {
-        store.secret(for: account)
+        if DemoSecretVault.keepsInMemory(account: account) { return DemoSecretVault.load(service: service, account: account) }
+        return store.secret(for: account)
     }
 
     /// Saves the value, replacing any existing one; an empty value deletes
@@ -34,18 +38,31 @@ nonisolated struct KeychainItem: Sendable {
             delete()
             return true
         }
+        if DemoSecretVault.keepsInMemory(account: account) {
+            DemoSecretVault.save(value, service: service, account: account)
+            TenantClients.shared.secretChanged(account: account)
+            return true
+        }
         let saved = store.setSecret(value, for: account)
         TenantClients.shared.secretChanged(account: account)
         return saved
     }
 
     func delete() {
-        store.setSecret(nil, for: account)
+        if DemoSecretVault.keepsInMemory(account: account) {
+            DemoSecretVault.save(nil, service: service, account: account)
+        } else {
+            store.setSecret(nil, for: account)
+        }
         TenantClients.shared.secretChanged(account: account)
     }
 
     /// Deletes every item of `service` whose account starts with `prefix`.
     static func deleteAll(service: String, accountPrefix prefix: String) {
+        if DemoSecretVault.keepsInMemory(account: prefix) {
+            DemoSecretVault.deleteAll(service: service, accountPrefix: prefix)
+            return
+        }
         KeychainSecretStore(service: service, accessibility: .whenUnlocked).deleteSecrets(withAccountPrefix: prefix)
     }
 }
@@ -115,7 +132,7 @@ nonisolated struct TenantSecrets: Sendable {
         )
     }
 
-    private static func service(purpose: String) -> String {
+    fileprivate static func service(purpose: String) -> String {
         "\(bundleID).\(purpose)"
     }
 
@@ -130,6 +147,33 @@ nonisolated struct TenantSecrets: Sendable {
             .protect: SecretLocation(store: ReportingSecretStore(base: KeychainSecretStore(
                 service: service(purpose: "protect-client-secret"), accessibility: .whenUnlocked))),
         ]
+    }
+}
+
+extension TenantSecrets {
+    /// Settings › Connections in a sandbox run: the same items, kept in
+    /// memory (`DemoSecretVault`) instead of the Keychain.
+    static var sandboxConnectionSecrets: [ConnectionSecretKind: SecretLocation] {
+        [
+            .main: SecretLocation(store: VaultSecretStore(service: service(purpose: "platform-client-secret"))),
+            .protect: SecretLocation(store: VaultSecretStore(service: service(purpose: "protect-client-secret"))),
+        ]
+    }
+}
+
+/// A secret store on the in-memory vault, for a sandbox run.
+nonisolated struct VaultSecretStore: SecretStore {
+    let service: String
+
+    func secret(for account: String) -> String? {
+        DemoSecretVault.load(service: service, account: account)
+    }
+
+    @discardableResult
+    func setSecret(_ secret: String?, for account: String) -> Bool {
+        DemoSecretVault.save(secret, service: service, account: account)
+        TenantClients.shared.secretChanged(account: account)
+        return true
     }
 }
 

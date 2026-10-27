@@ -65,7 +65,11 @@ struct TenantDetailView: View {
                     if tab == .setup {
                         Day0SetupView(tenant: tenant)
                     } else if tab == .export {
-                        ExportView(tenant: tenant)
+                        if deployService.isDemo {
+                            DemoModeUnavailableView(title: "Export and Capture")
+                        } else {
+                            ExportView(tenant: tenant)
+                        }
                     } else {
                     if let lock = deployService.lock(for: tenant.id) {
                         GroupBox {
@@ -300,6 +304,7 @@ struct TenantDetailView: View {
                                 Button("Hand Over Tenant…", role: .destructive) {
                                     isConfirmingHandOver = true
                                 }
+                                .unavailableInDemoMode(deployService.isDemo)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(4)
@@ -416,6 +421,7 @@ struct TenantDetailView: View {
                     }
                     .help("Create an object the catalog doesn't cover, using a form built from the engine plugin's schema")
                 }
+                .unavailableInDemoMode(deployService.isDemo)
                 .disabled(tenant.handOverPending)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

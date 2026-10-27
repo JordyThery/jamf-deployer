@@ -4,39 +4,32 @@ import os
 
 @main
 struct MyApp: App {
-    @State private var tenantStore: TenantStore
+    @State private var worlds: AppWorlds
     @State private var activityLog: ActivityLog
-    @State private var deployService: TenantDeployService
-    @State private var appState = AppState()
     @State private var terraform = TerraformManager()
-    @State private var exportSessions = ExportSessionStore()
     @State private var componentUpdates = ComponentUpdateChecker()
-    @State private var catalogSources: CatalogSourceStore
     @State private var connections: ConnectionStore<TenantConnection>
 
     init() {
-        let tenantStore = TenantStore()
         let activityLog = ActivityLog()
-        let catalogSources = CatalogSourceStore()
-        let deployService = TenantDeployService(
-            tenantStore: tenantStore,
-            activityLog: activityLog,
-            catalogSources: catalogSources
-        )
-        _tenantStore = State(initialValue: tenantStore)
+        // Demo Mode in the Tenant menu, saved under "demoMode"
+        let demo = DemoMode(key: "demoMode")
+        if demo.isSandbox { DemoSecretVault.keepEverythingInMemory() }
+        let worlds = AppWorlds(demo: demo, activityLog: activityLog)
+        _worlds = State(initialValue: worlds)
         _activityLog = State(initialValue: activityLog)
-        _catalogSources = State(initialValue: catalogSources)
-        _deployService = State(initialValue: deployService)
-        // Settings › Connections: the tenants' own tenant.json files and
-        // Keychain items, unchanged
+        // Settings › Connections: always the real tenants (their own
+        // tenant.json files and Keychain items, unchanged), also in demo mode
+        let real = worlds.real
         let storage = TenantConnectionStorage(
-            tenantStore: tenantStore,
-            backupURL: TenantConnectionStorage.defaultBackupURL,
-            signInID: { tenant in deployService.isTeamMode ? tenant.engineerClientID : nil }
+            tenantStore: real.tenantStore,
+            backupURL: demo.isSandbox ? demo.scratchDirectory.appending(path: "connection-backup")
+                : TenantConnectionStorage.defaultBackupURL,
+            signInID: { tenant in real.deployService.isTeamMode ? tenant.engineerClientID : nil }
         )
         _connections = State(initialValue: ConnectionStore(
             storage: storage,
-            secrets: TenantSecrets.connectionSecrets,
+            secrets: demo.isSandbox ? TenantSecrets.sandboxConnectionSecrets : TenantSecrets.connectionSecrets,
             log: { message in
                 Logger(subsystem: "be.jordythery.jamf-deployer", category: "Connections").error("\(message, privacy: .public)")
             }
@@ -57,17 +50,25 @@ struct MyApp: App {
                 Text("Running unit tests")
                     .frame(minWidth: 300, minHeight: 100)
             } else {
+                let world = worlds.active
+                // A fresh window content per world: no selection or sheet carries over.
                 ContentView()
-                    .environment(tenantStore)
+                    .id(world.id)
+                    .environment(world.tenantStore)
                     .environment(activityLog)
                     .environment(updates)
                     .environment(tour)
-                    .environment(deployService)
-                    .environment(appState)
+                    .environment(world.deployService)
+                    .environment(world.appState)
                     .environment(terraform)
-                    .environment(catalogSources)
+                    .environment(world.catalogSources)
                     .environment(componentUpdates)
-                    .environment(exportSessions)
+                    .environment(world.exportSessions)
+                    .environment(worlds.demo)
+                    .environment(worlds)
+                    .onChange(of: worlds.demo.isOn, initial: true) {
+                        ToolDoorway.setDemoMode(worlds.demo.isOn)
+                    }
             }
         }
 
@@ -84,7 +85,7 @@ struct MyApp: App {
         } tabs: {
             withStores(TenantConnectionsTab(store: connections))
             SettingsTab("Team", systemImage: "person.2") {
-                withStores(TeamSettingsView())
+                withStores(TeamSettingsView().realStoreOnly(worlds.demo))
             }
             SettingsTab("Advanced", systemImage: "wrench.and.screwdriver") {
                 withStores(AdvancedSettingsSections())
@@ -96,6 +97,10 @@ struct MyApp: App {
                 updates.checkManually()
             }
             CommandMenu("Tenant") {
+                // No connection picker in this app: the switch lives here.
+                DemoModeToggle(demo: worlds.demo)
+                    .disabled(worlds.isBusy)
+                Divider()
                 Button("Check for Changes", systemImage: "arrow.clockwise") {
                     if let id = appState.selectedTenantID,
                        let tenant = tenantStore.tenant(id: id) {
@@ -133,13 +138,18 @@ struct MyApp: App {
     /// Set by Xcode when the app hosts the unit tests (Jamf DeployerTests).
     private static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
-    /// The stores the Team and Advanced tabs read.
+    private var tenantStore: TenantStore { worlds.active.tenantStore }
+    private var deployService: TenantDeployService { worlds.active.deployService }
+    private var appState: AppState { worlds.active.appState }
+
+    /// The stores the Team and Advanced tabs read: always the real ones.
     private func withStores(_ content: some View) -> some View {
         content
-            .environment(tenantStore)
-            .environment(catalogSources)
-            .environment(deployService)
+            .environment(worlds.real.tenantStore)
+            .environment(worlds.real.catalogSources)
+            .environment(worlds.real.deployService)
             .environment(componentUpdates)
             .environment(activityLog)
+            .environment(worlds.demo)
     }
 }

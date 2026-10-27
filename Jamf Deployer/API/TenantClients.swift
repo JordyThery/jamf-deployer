@@ -80,7 +80,10 @@ nonisolated final class TenantClients: Sendable {
             if let entry = entries[tenant.id], entry.fingerprint == fingerprint {
                 return (entry.client, nil)
             }
-            let client = JamfPlatformClient(configuration: configure(tenant, id), activityLog: activityLog, session: session)
+            // a demo tenant only ever reaches JTKit's demo servers
+            let client = DemoTenants.isDemo(tenant)
+                ? DemoTenants.client(for: tenant, activityLog: activityLog)
+                : JamfPlatformClient(configuration: configure(tenant, id), activityLog: activityLog, session: session)
             let old = entries.updateValue(Entry(fingerprint: fingerprint, client: client), forKey: tenant.id)
             return (client, old?.client)
         }

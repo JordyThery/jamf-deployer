@@ -51,6 +51,12 @@ final class StateBackendService {
     }
 
     private var process: Process?
+    /// The doorway the backend and git are started through.
+    let tools: ToolDoorway
+
+    init(tools: ToolDoorway) {
+        self.tools = tools
+    }
     private var port: Int = 0
     private var password = ""
     private var runningRemote: String?
@@ -216,7 +222,8 @@ final class StateBackendService {
         Self.stopLeftoverBackend()
         try FileManager.default.createDirectory(at: Self.workFolderURL, withIntermediateDirectories: true)
         // A credential helper can take a while (gh may refresh its token).
-        var environment = try await Task.detached { try Self.gitCredentialEnvironment(remote: remote) }.value
+        let tools = tools
+        var environment = try await Task.detached { try Self.gitCredentialEnvironment(remote: remote, tools: tools) }.value
         port = try Self.freePort()
         password = UUID().uuidString + UUID().uuidString
         environment["TF_BACKEND_GIT_HTTP_USERNAME"] = "jamf-deployer"
@@ -225,10 +232,8 @@ final class StateBackendService {
         environment["PATH"] = "/usr/bin:/bin"
         environment["TMPDIR"] = Self.workFolderURL.path
 
-        let launched = Process()
-        launched.executableURL = binary
-        launched.arguments = ["--address=127.0.0.1:\(port)"]
-        launched.environment = environment
+        let launched = try tools.process(.stateBackend, executable: binary, arguments: ["--address=127.0.0.1:\(port)"],
+                                         environment: environment)
         launched.standardInput = FileHandle.nullDevice
         launched.standardOutput = FileHandle.nullDevice
         let errors = Pipe()
@@ -282,13 +287,13 @@ final class StateBackendService {
     /// The engineer's Git credentials for the repository, as the backend's
     /// environment: HTTPS through the user's credential helper (git or gh),
     /// SSH through their agent and key. Nothing is stored.
-    nonisolated static func gitCredentialEnvironment(remote: String) throws -> [String: String] {
+    nonisolated static func gitCredentialEnvironment(remote: String, tools: ToolDoorway) throws -> [String: String] {
         var environment: [String: String] = [:]
         if remote.hasPrefix("https://") || remote.hasPrefix("http://") {
             guard let url = URL(string: remote), let host = url.host() else {
                 throw BackendError.missingGitCredentials(remote)
             }
-            let filled = try credentialFill(protocol: url.scheme ?? "https", host: host)
+            let filled = try credentialFill(protocol: url.scheme ?? "https", host: host, tools: tools)
             guard let password = filled["password"], !password.isEmpty else {
                 throw BackendError.missingGitCredentials(host)
             }
@@ -308,13 +313,12 @@ final class StateBackendService {
     }
 
     /// `git credential fill`: the same lookup git itself does for a push.
-    nonisolated static func credentialFill(protocol scheme: String, host: String) throws -> [String: String] {
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/bin/git")
-        process.arguments = ["credential", "fill"]
+    nonisolated static func credentialFill(protocol scheme: String, host: String,
+                                           tools: ToolDoorway) throws -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
-        process.environment = environment
+        let process = try tools.process(.git, executable: URL(filePath: "/usr/bin/git"), arguments: ["credential", "fill"],
+                                        environment: environment)
         let input = Pipe()
         let output = Pipe()
         process.standardInput = input
