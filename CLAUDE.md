@@ -1,5 +1,7 @@
 # Jamf Deployer: instructions for Claude
 
+At the start of every conversation, run ../JTKit/Scripts/check-versions.sh (or fetch it from GitHub if ../JTKit isn’t there) and mention the result in one line if anything is out of date.
+
 Shared code and the standards for every app: see JTKit's CLAUDE.md and ROADMAP.md (github.com/JordyThery/JTKit, or ../JTKit in the workspace).
 
 ## What it is
@@ -49,19 +51,21 @@ Deliberate exceptions to the JTKit standards: no connection picker, no Connectio
 
 ## Engine and Jamf quirks (verified)
 
-- Applies always run `-parallelism=1`: concurrent configuration profile creates draw 500s from Jamf (which creates them anyway), and the jamfpro plugin requires it. Reads use the default on Platform, 1 on Jamf Pro API tenants. Exported workflows: 1 for apply/destroy, 10 for plan.
-- **Create 500/504 but created:** after a deploy, failed creates are looked up by planned name and become import blocks. The Classic lookups must ask for JSON (`Accept`), or JTKit gets XML and finds nothing. Not live-verified again since that fix.
+What this app waits for from Apple, Jamf or Microsoft, or must recheck: see WATCHLIST.md.
+
+- Applies always run `-parallelism=1`. Reads use the default on Platform, 1 on Jamf Pro API tenants. Exported workflows: 1 for apply/destroy, 10 for plan.
+- **Create 500/504 but created:** after a deploy, failed creates are looked up by planned name and become import blocks. The Classic lookups must ask for JSON (`Accept`), or JTKit gets XML and finds nothing.
 - Renaming an object another block uses can make OpenTofu delete it first; Jamf answers 422 HAS_DEPENDENCIES. `DeleteOrderRetry` finishes non-deletes first, then deletes, each from a fresh plan within the approved one. Delete errors carry no address; read them from `apply_errored` events.
 - `generateWorkspace` deletes `.terraform.lock.hcl` before every run: re-signed bundled providers change hashes per build.
-- terraform-backend-git 0.1.12: keeps a PID file in `$TMPDIR` (the app gives it its own TMPDIR and kills leftovers on launch); a stale lock branch stops a fresh backend from reading state, so Force Unlock deletes the `locks/…` branch directly.
-- jamformer 0.6.x: emits Terraform-style identity imports that fail under OpenTofu (the app normalizes them); a settings-only selection fails with "No resources to query" (retried with a helper type).
-- jamfplatform: captured macOS profiles set `self_service.display_notifications` explicitly and trim trailing description whitespace. PreStages with `scope_serial_numbers = []` get a 500 on PUT; capture drops the attribute.
+- terraform-backend-git: the app gives it its own TMPDIR and kills leftovers on launch; Force Unlock deletes the `locks/…` branch directly.
+- jamformer: the app normalizes its Terraform-style identity imports for OpenTofu and retries a settings-only selection with a helper type.
+- jamfplatform: captured macOS profiles set `self_service.display_notifications` explicitly and trim trailing description whitespace. Capture drops an empty `scope_serial_numbers` from PreStages.
 - Mac App Store apps without licences: Jamf returns 409 "not available for device assignment" (translated in `ErrorTranslation`).
 - Classic API through the Platform gateway: `/proclassic/<resource>/…` with the Bearer token and `X-Environment-Id`. Classic deletes answer in XML. Platform OAuth tokens live 900 s.
-- Jamf Pro API privileges: App Installers need Create/Read/Update/Delete **Mac Applications**; Check-in needs Read + Update Policies; enrollment blocks need Read Device Enrollment Program Instances. A missing read privilege makes the jamfpro plugin retry forever: time-box privilege probes (about 5 minutes per step). Verified lists: each block's `jamfProPermissions` and `docs/permissions.md`.
+- Jamf Pro API privileges: App Installers need Create/Read/Update/Delete **Mac Applications**; Check-in needs Read + Update Policies; enrollment blocks need Read Device Enrollment Program Instances. Time-box privilege probes (about 5 minutes per step). Verified lists: each block's `jamfProPermissions` and `docs/permissions.md`.
 - New smart mobile groups via `/api/v1/mobile-device-groups/smart-groups` need `"siteId": "-1"`. Jamf Protect's GraphQL endpoint is `/app`, not `/graphql`.
-- Security Cloud allows one UEM Connect per tenant; activation profiles can't be imported (to remove one, seed a state holding it and destroy).
-- `terraform query` (Terraform ≥ 1.14) drives the exported "Not in code" check; the jamfpro plugin cannot list objects.
+- Security Cloud allows one UEM Connect per tenant. To remove an activation profile, seed a state holding it and destroy.
+- `terraform query` (Terraform ≥ 1.14) drives the exported "Not in code" check.
 
 ## Testing
 
