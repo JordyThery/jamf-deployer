@@ -31,8 +31,6 @@ CREDENTIALS=(
     "jamf-test-b:jamfPlatform:client-id"
     "jamf-test-b:jamfPlatform:client-secret"
 )
-# Older UI-test objects, swept once on the first live run
-LEGACY_PREFIXES="UIT - |UIC - |UIF - |UIT EX - |UIT RN - "
 STORE="$HOME/Library/Application Support/Jamf Deployer/store"
 FINGERPRINT_PATHS=("$STORE/tenants" "$STORE/.git/HEAD" "$STORE/.git/refs")
 KEYCHAIN_PREFIXES=("be.jordythery.jamf-deployer.")

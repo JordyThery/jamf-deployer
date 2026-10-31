@@ -19,7 +19,7 @@ A macOS app (Apple silicon, macOS 15+) for engineers who set up and look after J
 
 ## Architecture
 
-- `Jamf Deployer/API/`: `JamfPlatformClient` is a thin layer over JTKit's Platform client and token provider (Jamf Pro path mapping; one variant returns an error status instead of throwing, which preflight needs). `TenantClients` shares one client per tenant; the Connect wizard and Test Connection stay one-off. Also `PreflightService`, `Day0Service`, `ExistingObjectService`.
+- `Jamf Deployer/API/`: `JamfPlatformClient` is a thin layer over JTKit's Platform client and token provider (Jamf Pro path mapping; `get` hands back an error status, read from JTKit's thrown error, which preflight needs). `TenantClients` shares one client per tenant; the Connect wizard and Test Connection stay one-off. Also `PreflightService`, `Day0Service`, `ExistingObjectService`.
 - `Jamf Deployer/Engine/`: `TenantDeployService` (workspace generation, plan/apply, recovery after failed creates, decisions trace), `EngineRunner`/`EngineLocator` (bundled `tofu`), `StateBackendService` (terraform-backend-git for Team Mode), `RepositoryPublisher` (Export as Terraform), `EngineOutputCleaner`.
 - `Jamf Deployer/Export/`: `JamformerRunner`; `TerraformManager` downloads HashiCorp Terraform on first use, with consent, for capture and adopt (BUSL, never bundled).
 - `Jamf Deployer/Stores/`: the store is a Git repo at `~/Library/Application Support/Jamf Deployer/store` (`tenants/<UUID>/tenant.json`, baselines, history, catalog sources). `GitStoreService` owns commits, the secret check and lock branches. `TenantStore`/`TenantConnection` (JTKit connections adapter), `TenantSecrets` (Keychain), `GitCatalogManager`, `CatalogSourceStore`, `ComponentUpdateChecker` (`ComponentVersion`).

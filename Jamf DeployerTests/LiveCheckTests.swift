@@ -50,9 +50,9 @@ struct LiveTenant: Sendable {
             let password = try run.credential(role, "jamfpro-password")
             secret = password
             let base = try #require(URL(string: "https://\(host)"))
-            let tokens = JamfTokenProvider(tokenURL: base.appending(path: "api/v1/auth/token"),
-                                           method: .usernamePassword(username: signInID),
-                                           secret: { password }, recorder: recorder)
+            let tokens = JamfPlatform.TokenProvider(tokenURL: base.appending(path: "api/v1/auth/token"),
+                                                    method: .usernamePassword(username: signInID),
+                                                    secret: { password }, recorder: recorder)
             api = try JamfPlatform.Client(baseURL: base, scope: .organization, server: .jamfPro,
                                           signIn: .usernamePassword, tokens: tokens, recorder: recorder)
         default:
@@ -62,9 +62,9 @@ struct LiveTenant: Sendable {
             let clientSecret = try run.credential(role, "client-secret")
             secret = clientSecret
             let base = try #require(URL(string: "https://\(region).api.jamfcloud.com"))
-            let tokens = JamfTokenProvider(tokenURL: base.appending(path: "auth/token"),
-                                           method: .apiClient(clientID: signInID),
-                                           secret: { clientSecret }, recorder: recorder)
+            let tokens = JamfPlatform.TokenProvider(tokenURL: base.appending(path: "auth/token"),
+                                                    method: .apiClient(clientID: signInID),
+                                                    secret: { clientSecret }, recorder: recorder)
             api = try JamfPlatform.Client(baseURL: base, scope: .environment(environment), server: .platformAPI,
                                           signIn: .apiClient, tokens: tokens, recorder: recorder)
         }
@@ -245,11 +245,9 @@ struct LiveDeployTests {
         let removed = try await service.deploy(tenant: current(tenant, tenantStore), session: removal)
         let categories = try await target.list("categories")
         let scripts = try await target.list("scripts")
+        // The ledger still lists both: the cleanup's delete reads each back
+        // and marks it removed once it's gone (OpenTofu's delete doesn't count).
         let gone = !categories.contains { $0.id == category.id } && !scripts.contains { $0.id == script.id }
-        if gone {
-            run.ledger.markRemoved(target: try run.target(role: role, service: target.service), resource: "categories", id: category.id)
-            run.ledger.markRemoved(target: try run.target(role: role, service: target.service), resource: "scripts", id: script.id)
-        }
         #expect(removed.errors.isEmpty && gone)
         run.record(step: step("OpenTofu removes both"), passed: removed.errors.isEmpty && gone)
         try await service.removeTenant(current(tenant, tenantStore))
@@ -292,9 +290,9 @@ struct LiveDeployTests {
 @MainActor
 @Suite("Live: cleanup", .enabled(if: live), .serialized)
 struct LiveCleanupTests {
-    /// Deletes what the run's ledger still lists, then sweeps the full
-    /// tenants for anything still named as a test object (and, on the first
-    /// run, the older UI-test prefixes). Fails if anything is left.
+    /// Deletes what the run's ledger still lists, after adding anything on
+    /// the full tenants still named as a test object. Fails if a read-back
+    /// still finds anything.
     @Test func removeTestObjects() async throws {
         let run = try LiveCheckRun.current()
         // Engine folders an interrupted run couldn't remove (no secrets in them).
@@ -316,12 +314,18 @@ struct LiveCleanupTests {
                 do {
                     try await target.delete(resource: resource, id: item.id)
                 } catch {
+                    // Already gone (OpenTofu removed it): Jamf answers 404,
+                    // and the delete's read-back has marked it removed.
+                    let removed = !run.ledger.outstanding.contains {
+                        $0.target == item.target && $0.resource == item.resource && $0.id == item.id
+                    }
+                    guard !removed else { continue }
                     run.record(step: "cleanup: \(target.role) \(item.resource) \(item.id)", passed: false, note: String(describing: error))
                 }
             }
         }
         let left = run.ledger.outstanding
         run.record(step: "cleanup", passed: left.isEmpty, note: left.isEmpty ? nil : "\(left.count) not removed")
-        #expect(left.isEmpty, "\(left.map { "\($0.resource) \($0.id) \($0.name)" })")
+        try run.requireNothingLeft()
     }
 }

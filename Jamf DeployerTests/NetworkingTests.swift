@@ -139,12 +139,24 @@ struct JamfPlatformClientTests {
         #expect(status == 403)
     }
 
+    /// What the preflight and Day 0 read from `get`: a 2xx with its answer,
+    /// a 404 and another error status as the status, none of them thrown.
+    @Test(arguments: [200, 204, 404, 403, 409])
+    func getHandsBackEveryAnswersStatus(_ answer: Int) async throws {
+        let server = MockServer { request in
+            request.path == "/auth/token" ? .json(200, tokenJSON("tok")) : .json(answer, #"{"ssoEnabled":true}"#)
+        }
+        let (data, status) = try await client(platform, server: server).get("/pro/v3/sso", privileges: [.readSSOSettings])
+        #expect(status == answer)
+        #expect(data == ((200..<300).contains(answer) ? Data(#"{"ssoEnabled":true}"#.utf8) : Data()))
+    }
+
     @Test func aRefusedSignInIsThrownInJTKitsFormat() async throws {
         let server = MockServer { _ in .json(401, #"{"error":"invalid_client"}"#) }
         await #expect {
             _ = try await client(platform, server: server).get("/pro/v1/scripts", privileges: [.readScripts])
         } throws: { error in
-            guard let error = error as? JamfPlatformError, case .signIn(401, _, _) = error.kind else { return false }
+            guard let error = error as? JamfPlatform.APIError, case .signIn(401, _, _) = error.kind else { return false }
             return error.message().hasPrefix("Sign-in failed: HTTP 401")
         }
     }
@@ -268,7 +280,7 @@ struct PlatformAdoptionTests {
         await #expect {
             _ = try await client(configuration, server: server).get("/pro/v1/categories", privileges: [.readCategories])
         } throws: { error in
-            guard let error = error as? JamfPlatformError, case .invalidEnvironmentID("env-1") = error.kind else { return false }
+            guard let error = error as? JamfPlatform.APIError, case .invalidEnvironmentID("env-1") = error.kind else { return false }
             return true
         }
         #expect(server.requests.isEmpty)
@@ -344,6 +356,37 @@ struct PlatformAdoptionTests {
                                                      "/pro/v1/device-enrollments", "/pro/v1/volume-purchasing-locations"])
     }
 
+    /// The preflight's Cloud Services Connection row reads `get`'s status:
+    /// 2xx, 404 and an error status each as before.
+    @Test(arguments: [
+        (200, PreflightCheck.Outcome.pass, "Established — the App Catalog is available."),
+        (404, .warn, "Not established (HTTP 404). Connect it in Jamf Pro under Settings → Jamf apps, or the App Catalog block won't be available."),
+        (403, .warn, "Not established (HTTP 403). Connect it in Jamf Pro under Settings → Jamf apps, or the App Catalog block won't be available."),
+    ])
+    func preflightReadsTheCloudServicesConnectionStatus(_ answer: Int, _ outcome: PreflightCheck.Outcome, _ detail: String) async throws {
+        let server = MockServer { request in
+            switch request.path {
+            case "/auth/token": .json(200, tokenJSON("tok"))
+            case "/pro/v1/jamf-pro-version": .json(200, #"{"version":"11.33.0"}"#)
+            case "/pro/v1/app-installers/titles": .json(answer, #"{"totalCount":0,"results":[]}"#)
+            default: .json(200, #"{"totalCount":0,"results":[]}"#)
+            }
+        }
+        let report = await PreflightService.run(client: client(server: server)) { _ in }
+        let row = try #require(report.checks.first { $0.id == "csc" })
+        #expect(row.outcome == outcome)
+        #expect(row.detail == detail)
+    }
+
+    /// A refused sign-in is still thrown, so the preflight stops at the
+    /// credentials and never reads a status.
+    @Test func preflightStopsAtARefusedSignIn() async throws {
+        let server = MockServer { _ in .json(401, #"{"error":"invalid_client"}"#) }
+        let report = await PreflightService.run(client: client(server: server)) { _ in }
+        #expect(report.checks.map(\.id) == ["auth"])
+        #expect(report.checks.first?.outcome == .fail)
+    }
+
     @Test func aJamfProTenantIsToldWhichPrivilegeToAdd() {
         let row = PreflightService.permissionRow(PreflightService.permissionChecks[1], .missingPermission, server: .jamfPro)
         #expect(row.detail == "Not allowed. Add the “Read Scripts” privilege to the API role in Jamf Pro under Settings › API Roles and Clients.")
@@ -393,7 +436,7 @@ struct PlatformAdoptionTests {
             _ = try await JamfPlatformClient.environments(
                 region: .us, clientID: "client-1", clientSecret: "secret", activityLog: nil, session: server.session)
         } throws: { error in
-            guard let error = error as? JamfPlatformError, case .cannotListEnvironments = error.kind else { return false }
+            guard let error = error as? JamfPlatform.APIError, case .cannotListEnvironments = error.kind else { return false }
             return error.message().contains("account.jamf.com")
         }
     }

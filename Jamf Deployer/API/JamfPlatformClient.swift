@@ -100,7 +100,7 @@ nonisolated struct JamfAPIConfiguration: Sendable {
 }
 
 /// The app's own errors, before anything is sent. Jamf's answers come as
-/// JTKit's `JamfPlatformError`.
+/// JTKit's `JamfPlatform.APIError`.
 nonisolated enum JamfAPIError: LocalizedError {
     /// No secret saved; worded for the connection, as JTKit's sign-in hints
     /// are: a direct Jamf Pro tenant has no region and no Jamf Account, and
@@ -134,13 +134,9 @@ nonisolated enum JamfAPIError: LocalizedError {
 /// Saved tenants share one client each (`TenantClients`).
 actor JamfPlatformClient {
     private let configuration: JamfAPIConfiguration
-    private let tokens: JamfTokenProvider
-    /// Hands an error status back, for callers that read it themselves
-    /// (`get`: the preflight's checks, Day 0's status reads).
-    private let statusReturning: Result<JamfPlatform.Client, JamfPlatformError>
-    /// Throws an error status as a `JamfPlatformError`. Shares the sign-in
-    /// and token with `statusReturning`.
-    private let statusThrowing: Result<JamfPlatform.Client, JamfPlatformError>
+    private let tokens: JamfPlatform.TokenProvider
+    /// JTKit's client; throws an error status as a `JamfPlatform.APIError`.
+    private let platform: Result<JamfPlatform.Client, JamfPlatform.APIError>
     /// Where the requests go, which decides where a missing permission is fixed.
     nonisolated let server: JamfPlatform.Server
 
@@ -158,29 +154,25 @@ actor JamfPlatformClient {
             connection: configuration.connectionName
         )
         let tokenPath: String
-        let method: JamfTokenProvider.Method
+        let method: JamfPlatform.TokenProvider.Method
         switch configuration.flavor {
         case .platform: (tokenPath, method) = ("auth/token", .apiClient(clientID: configuration.clientID))
         case .jamfProAPIClient: (tokenPath, method) = ("api/oauth/token", .apiClient(clientID: configuration.clientID))
         case .jamfProUser: (tokenPath, method) = ("api/v1/auth/token", .usernamePassword(username: configuration.clientID))
         }
-        let tokens = JamfTokenProvider(tokenURL: configuration.gatewayURL.appending(path: tokenPath), method: method,
-                                       secret: configuration.secret, recorder: recorder)
+        let tokens = JamfPlatform.TokenProvider(tokenURL: configuration.gatewayURL.appending(path: tokenPath), method: method,
+                                                secret: configuration.secret, recorder: recorder)
         self.tokens = tokens
         // JTKit refuses an Environment ID that isn't a UUID; the error is
         // kept and thrown at the first request, so nothing is sent.
-        func client(_ errorStatus: JamfPlatform.Client.ErrorStatus) -> Result<JamfPlatform.Client, JamfPlatformError> {
-            Result {
-                // the sign-in method decides where a hint points: the API
-                // role, or a user account's own privileges and password
-                try JamfPlatform.Client(baseURL: configuration.gatewayURL, scope: configuration.scope, server: server,
-                                        signIn: configuration.flavor == .jamfProUser ? .usernamePassword : .apiClient,
-                                        tokens: tokens, recorder: recorder, errorStatus: errorStatus)
-            }
-            .mapError { $0 as? JamfPlatformError ?? JamfPlatformError(.invalidResponse($0.localizedDescription)) }
+        platform = Result {
+            // the sign-in method decides where a hint points: the API
+            // role, or a user account's own privileges and password
+            try JamfPlatform.Client(baseURL: configuration.gatewayURL, scope: configuration.scope, server: server,
+                                    signIn: configuration.flavor == .jamfProUser ? .usernamePassword : .apiClient,
+                                    tokens: tokens, recorder: recorder)
         }
-        statusReturning = client(.returned)
-        statusThrowing = client(.thrown)
+        .mapError { $0 as? JamfPlatform.APIError ?? JamfPlatform.APIError(.invalidResponse($0.localizedDescription)) }
     }
 
     // MARK: Requests
@@ -188,20 +180,28 @@ actor JamfPlatformClient {
     // Every request names its Jamf Pro privileges from JTKit's table, so a
     // refusal (403) on a Jamf Pro connection names the missing one.
 
-    /// GET a path relative to the gateway root (e.g. "/pro/v1/categories").
-    /// An error status comes back as the status; a refused sign-in is thrown.
-    /// `accept` overrides JTKit's default (XML for Classic API paths).
+    /// GET a path relative to the gateway root (e.g. "/pro/v1/categories"),
+    /// for callers that read the status themselves (the preflight's checks,
+    /// Day 0's status reads). An error status comes back as the status, read
+    /// from JTKit's thrown error, with no data (no caller reads an error's
+    /// body); a refused sign-in and every other error is thrown. `accept`
+    /// overrides JTKit's default (XML for Classic API paths).
     func get(_ path: String, query: [URLQueryItem] = [], accept: String? = nil,
              privileges: [JamfPro.Privilege]) async throws -> (Data, Int) {
-        let response = try await send(HTTPRequest(method: "GET", path: path, query: query, accept: accept),
-                                      privileges: privileges, on: statusReturning)
-        return (response.data, response.status)
+        do {
+            let response = try await send(HTTPRequest(method: "GET", path: path, query: query, accept: accept),
+                                          privileges: privileges)
+            return (response.data, response.status)
+        } catch let error as JamfPlatform.APIError {
+            guard case .status(let status, _, _, _, _) = error.kind else { throw error }
+            return (Data(), status)
+        }
     }
 
     /// GET with a non-JSON Accept header (file downloads like the ADE
     /// public key).
     func getRaw(_ path: String, accept: String, privileges: [JamfPro.Privilege]) async throws -> Data {
-        try await send(HTTPRequest(method: "GET", path: path, accept: accept), privileges: privileges, on: statusThrowing).data
+        try await send(HTTPRequest(method: "GET", path: path, accept: accept), privileges: privileges).data
     }
 
     /// POST a JSON body. Never recorded in the log: Day 0 bodies carry
@@ -209,7 +209,7 @@ actor JamfPlatformClient {
     func post(_ path: String, json: [String: any Sendable], privileges: [JamfPro.Privilege]) async throws -> Data {
         let body = try JSONSerialization.data(withJSONObject: json)
         return try await send(HTTPRequest(method: "POST", path: path, body: body, contentType: "application/json"),
-                              privileges: privileges, on: statusThrowing).data
+                              privileges: privileges).data
     }
 
     func getDecoded<T: Decodable & Sendable>(
@@ -218,13 +218,12 @@ actor JamfPlatformClient {
         query: [URLQueryItem] = [],
         privileges: [JamfPro.Privilege]
     ) async throws -> T {
-        let response = try await send(HTTPRequest(method: "GET", path: path, query: query), privileges: privileges,
-                                      on: statusThrowing)
+        let response = try await send(HTTPRequest(method: "GET", path: path, query: query), privileges: privileges)
         do {
             return try JSONDecoder().decode(type, from: response.data)
         } catch {
-            throw try statusThrowing.get().failure(
-                JamfPlatformError(.invalidResponse("\(path) could not be read: \(error.localizedDescription)")))
+            throw try platform.get().failure(
+                JamfPlatform.APIError(.invalidResponse("\(path) could not be read: \(error.localizedDescription)")))
         }
     }
 
@@ -239,7 +238,7 @@ actor JamfPlatformClient {
         item: @escaping @Sendable (LosslessJSON) -> Item?
     ) async throws -> [Item] {
         try checkInstanceURL()
-        return try await statusThrowing.get().allPages(Self.encodedPath(path), query: query, pageSize: pageSize,
+        return try await platform.get().allPages(Self.encodedPath(path), query: query, pageSize: pageSize,
                                                        privileges: privileges, item: item)
     }
 
@@ -284,14 +283,14 @@ actor JamfPlatformClient {
         item: @escaping @Sendable (LosslessJSON) -> Item?
     ) async throws -> JamfPlatform.Page<Item> {
         try checkInstanceURL()
-        return try await statusThrowing.get().page(Self.encodedPath(path), page: page, pageSize: pageSize, query: query,
+        return try await platform.get().page(Self.encodedPath(path), page: page, pageSize: pageSize, query: query,
                                                    privileges: privileges, item: item)
     }
 
     /// The Jamf Pro version, with JTKit's call; also the credentials probe.
     func jamfProVersion() async throws -> String {
         try checkInstanceURL()
-        return try await statusThrowing.get().jamfProVersion().version
+        return try await platform.get().jamfProVersion().version
     }
 
     /// JTKit's read-only permission check: only a 403 is a missing permission.
@@ -304,7 +303,7 @@ actor JamfPlatformClient {
             check.path = Self.encodedPath(check.path)
             return check
         }
-        let results = try await statusThrowing.get().checkPermissions(encoded)
+        let results = try await platform.get().checkPermissions(encoded)
         // the callers' own checks, with their unencoded paths
         return zip(checks, results).map { ($0, $1.result) }
     }
@@ -328,18 +327,17 @@ actor JamfPlatformClient {
         guard !configuration.hasInvalidInstanceURL else { throw JamfAPIError.invalidInstanceURL }
     }
 
-    private func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege],
-                      on client: Result<JamfPlatform.Client, JamfPlatformError>) async throws -> HTTPResponse {
+    private func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
         try checkInstanceURL()
         var request = request
         request.path = Self.encodedPath(request.path)
-        return try await client.get().send(request, privileges: privileges)
+        return try await platform.get().send(request, privileges: privileges)
     }
 
     /// The environments an organization-scope integration sees, for the
     /// wizard's picker. JTKit's call, with no scope header.
     ///
-    /// - Throws: `JamfPlatformError` `.cannotListEnvironments` for an
+    /// - Throws: `JamfPlatform.APIError` `.cannotListEnvironments` for an
     ///   integration scoped to one environment.
     static func environments(
         region: JamfRegion,

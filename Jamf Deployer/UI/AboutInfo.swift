@@ -26,8 +26,8 @@ extension Acknowledgement {
             author: component.author,
             summary: component.summary,
             links: component.links.compactMap { AboutLink($0.title, address: $0.address) },
-            licence: component.licence,
-            licenceName: component.licenceName
+            license: component.licence,
+            licenseName: component.licenceName
         )
     }
 }

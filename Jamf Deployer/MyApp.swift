@@ -44,7 +44,7 @@ struct MyApp: App {
 
     var body: some Scene {
         Window("Jamf Deployer", id: "main") {
-            if Self.isUnitTestHost {
+            if TestRun.isUnitTestHost {
                 // unit tests run inside the app: no sync, no network, the
                 // store is never touched
                 Text("Running unit tests")
@@ -134,9 +134,6 @@ struct MyApp: App {
             }
         }
     }
-
-    /// Set by Xcode when the app hosts the unit tests (Jamf DeployerTests).
-    private static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     private var tenantStore: TenantStore { worlds.active.tenantStore }
     private var deployService: TenantDeployService { worlds.active.deployService }
