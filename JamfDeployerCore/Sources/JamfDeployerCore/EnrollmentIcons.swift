@@ -4,10 +4,33 @@ import Foundation
 /// tenant. Jamf cannot upload from those URLs directly, so after an export
 /// each icon is downloaded next to the configuration and referenced as a
 /// local file — captured blocks then carry their own copy.
+///
+/// The download itself is the app's (`fetch`: its logged networking), and
+/// only from the origin tenant: an exported URL pointing anywhere else is
+/// left alone, and the capture warns about it like any icon it couldn't get.
 public nonisolated enum EnrollmentIcons {
     static let folder = "enrollment_customization_icons"
 
-    public static func localize(directory: URL, session: URLSession = .shared) async {
+    /// Whether an icon URL may be downloaded: HTTPS on one of `allowedHosts`
+    /// (lowercased; an entry starting with "." also allows its subdomains,
+    /// e.g. ".jamfcloud.com").
+    public static func mayDownload(_ url: URL, allowedHosts: Set<String>) -> Bool {
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
+              let host = url.host()?.lowercased(), !host.isEmpty else { return false }
+        return allowedHosts.contains { allowed in
+            let allowed = allowed.lowercased()
+            return allowed.hasPrefix(".") ? host.hasSuffix(allowed) && host.count > allowed.count : host == allowed
+        }
+    }
+
+    /// Downloads each enrollment customization icon through `fetch` (which
+    /// returns the body of a 200 answer and throws otherwise) and points the
+    /// configuration at the local copy. Returns the icon URLs left in place.
+    @discardableResult
+    public static func localize(
+        directory: URL, allowedHosts: Set<String>, fetch: @Sendable (URL) async throws -> Data
+    ) async -> [URL] {
+        var leftInPlace: [URL] = []
         let fileManager = FileManager.default
         let files = (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf") {
@@ -19,16 +42,23 @@ public nonisolated enum EnrollmentIcons {
                 let block = blocks[index]
                 guard let header = block.firstMatch(of: /^resource\s+"jamfplatform_pro_enrollment_customization"\s+"([A-Za-z0-9_-]+)"/),
                       let icon = block.firstMatch(of: /\n\s*icon_url\s*=\s*"(https:\/\/[^"]+)"/),
-                      let url = URL(string: String(icon.1)),
-                      let (data, response) = try? await session.data(from: url),
-                      (response as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty
+                      let url = URL(string: String(icon.1))
                 else { continue }
+                guard mayDownload(url, allowedHosts: allowedHosts),
+                      let data = try? await fetch(url), !data.isEmpty
+                else {
+                    leftInPlace.append(url)
+                    continue
+                }
                 let relative = "\(folder)/\(header.1).png"
                 let target = directory.appending(path: "support_files/\(relative)")
                 do {
                     try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try data.write(to: target)
-                } catch { continue }
+                } catch {
+                    leftInPlace.append(url)
+                    continue
+                }
                 var updated = block
                 updated.removeSubrange(icon.range)
                 if let branding = updated.range(of: "\n  branding_settings = {") {
@@ -42,5 +72,6 @@ public nonisolated enum EnrollmentIcons {
                 try? Data(text.utf8).write(to: file)
             }
         }
+        return leftInPlace
     }
 }

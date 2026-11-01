@@ -29,6 +29,7 @@ struct BaselineUpdateSheet: View {
                 .keyboardShortcut(.cancelAction)
             Button("Stage Selected Updates") { apply() }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(chosen.isEmpty)
                 .help("Moves the chosen blocks to the newer tag; Preview Changes shows the effect")
         }

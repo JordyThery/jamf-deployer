@@ -124,7 +124,14 @@ class DeployerUITestCase: JTKitUITestCase {
         guard row.waitForExistence(timeout: 5) else { return }
         row.rightClick()
         tap(app.menuItems["Remove Tenant…"])
-        tap(app.sheets.buttons["Remove Tenant"], timeout: 10)
+        // A managed tenant asks for its name first.
+        let nameField = app.dialogs.textFields.firstMatch.exists ? app.dialogs.textFields.firstMatch : app.sheets.textFields.firstMatch
+        if nameField.waitForExistence(timeout: 3) {
+            type(name, into: nameField)
+            tap(dialogButton("Remove Tenant"), timeout: 10)
+        } else {
+            tap(app.sheets.buttons["Remove Tenant"], timeout: 10)
+        }
         // In Team Mode the tenant's state is deleted from the team space first.
         XCTAssertTrue(row.waitForNonExistence(timeout: 120))
     }
@@ -270,6 +277,7 @@ class DeployerUITestCase: JTKitUITestCase {
     func chooseTenantAndFolder(_ tenant: String, _ path: String) {
         for checkbox in app.sheets.checkBoxes.allElementsBoundByIndex
         where !checkbox.label.hasPrefix(tenant) && checkbox.label != "Stop managing these tenants in this app"
+            && checkbox.label != "I understand that the state on GitHub isn’t encrypted"
             && (checkbox.value as? Int) == 1 {
             checkbox.click()
         }

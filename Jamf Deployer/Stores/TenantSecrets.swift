@@ -1,9 +1,10 @@
 import Foundation
 import JTKit
+import os
 
 /// One of the app's Keychain items, read and written through JTKit's
 /// `KeychainSecretStore`. New items are created "when unlocked" without a
-/// label, as DeployerKit's `KeychainItem` did, so every existing item keeps
+/// label, as the app always created them, so every existing item keeps
 /// being found under the same service and account.
 ///
 /// Saving an empty value deletes the item. Every save or delete of a
@@ -26,8 +27,31 @@ nonisolated struct KeychainItem: Sendable {
     }
 
     func load() -> String? {
-        if DemoSecretVault.keepsInMemory(account: account) { return DemoSecretVault.load(service: service, account: account) }
-        return store.secret(for: account)
+        if isCached, let cached = Self.cache.withLock({ $0[cacheKey] }) { return cached }
+        let value: String?
+        if DemoSecretVault.keepsInMemory(account: account) {
+            value = DemoSecretVault.load(service: service, account: account)
+        } else {
+            value = store.secret(for: account)
+        }
+        if isCached { Self.cache.withLock { $0[cacheKey] = .some(value) } }
+        return value
+    }
+
+    // MARK: Read cache
+
+    /// Items read on every redraw and every API client lookup (the
+    /// engineer's own client ID): kept in memory after the first read, and
+    /// updated on every save or delete through this type.
+    static let cachedServices: Set<String> = [TenantSecrets.service(purpose: "engineer-client-id")]
+    private static let cache = OSAllocatedUnfairLock<[String: String?]>(initialState: [:])
+
+    private var isCached: Bool { Self.cachedServices.contains(service) }
+    private var cacheKey: String { "\(service)|\(account)" }
+
+    private func remember(_ value: String?) {
+        guard isCached else { return }
+        Self.cache.withLock { $0[cacheKey] = .some(value) }
     }
 
     /// Saves the value, replacing any existing one; an empty value deletes
@@ -40,10 +64,13 @@ nonisolated struct KeychainItem: Sendable {
         }
         if DemoSecretVault.keepsInMemory(account: account) {
             DemoSecretVault.save(value, service: service, account: account)
+            remember(value)
             TenantClients.shared.secretChanged(account: account)
             return true
         }
         let saved = store.setSecret(value, for: account)
+        // A failed write leaves whatever the Keychain holds: read it again next time.
+        if saved { remember(value) } else if isCached { Self.cache.withLock { $0[cacheKey] = nil } }
         TenantClients.shared.secretChanged(account: account)
         return saved
     }
@@ -54,6 +81,7 @@ nonisolated struct KeychainItem: Sendable {
         } else {
             store.setSecret(nil, for: account)
         }
+        remember(nil)
         TenantClients.shared.secretChanged(account: account)
     }
 

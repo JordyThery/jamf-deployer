@@ -360,8 +360,8 @@ struct PlatformAdoptionTests {
     /// 2xx, 404 and an error status each as before.
     @Test(arguments: [
         (200, PreflightCheck.Outcome.pass, "Established — the App Catalog is available."),
-        (404, .warn, "Not established (HTTP 404). Connect it in Jamf Pro under Settings → Jamf apps, or the App Catalog block won't be available."),
-        (403, .warn, "Not established (HTTP 403). Connect it in Jamf Pro under Settings → Jamf apps, or the App Catalog block won't be available."),
+        (404, .warn, "Not established (HTTP 404). Connect it in Jamf Pro under Settings › Jamf apps, or the App Catalog block won’t be available."),
+        (403, .warn, "Not established (HTTP 403). Connect it in Jamf Pro under Settings › Jamf apps, or the App Catalog block won’t be available."),
     ])
     func preflightReadsTheCloudServicesConnectionStatus(_ answer: Int, _ outcome: PreflightCheck.Outcome, _ detail: String) async throws {
         let server = MockServer { request in
@@ -505,8 +505,10 @@ struct ComponentVersionTests {
         ("2.0", "1.9.9", true),
         ("0.10", "0.9", true),
     ])
-    func comparesDotSeparatedVersions(candidate: String, installed: String, expected: Bool) {
-        #expect(ComponentVersion.isNewer(candidate, than: installed) == expected)
+    @MainActor func comparesDotSeparatedVersions(candidate: String, installed: String, expected: Bool) {
+        // The bundled components use JTKit's comparison, as the app's own update check does.
+        #expect(ComponentUpdateChecker.Component(name: "", repository: "", pinned: installed, latest: candidate).hasUpdate
+            == expected)
     }
 }
 

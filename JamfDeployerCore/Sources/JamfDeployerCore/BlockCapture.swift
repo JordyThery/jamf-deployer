@@ -98,7 +98,7 @@ public nonisolated enum BlockCapture {
         "jamfplatform_pro_cloud_distribution_point":
             "every Jamf cloud tenant already has its cloud distribution point configured",
         "jamfplatform_cbengine_benchmark":
-            "compliance benchmarks build on a source baseline Jamf does not export — recreate them from the benchmark catalog",
+            "compliance benchmarks build on a source baseline Jamf doesn’t export — recreate them from the benchmark catalog",
     ]
 
     /// ID→name knowledge from a full export: import files carry the Jamf
@@ -149,6 +149,10 @@ public nonisolated enum BlockCapture {
         /// Possible secrets that became secret settings. Their values are
         /// not kept: each tenant enters its own.
         public var secretSettings: [CapturedSecret] = []
+        /// What the origin tenant uses for settings the block ships empty
+        /// (`ade_instance_name`, `vpp_location_name`): shown in the capture
+        /// sheet, never written into the block, which may be shared.
+        public var originSettingValues: [String: String] = [:]
     }
 
     /// A possible secret replaced by a secret setting: where it was and
@@ -184,9 +188,9 @@ public nonisolated enum BlockCapture {
             case .blockExists(let id):
                 "A block with the ID “\(id)” already exists in this source. Choose another ID, or delete the existing block first."
             case .secretNotLocated(let object, let rule):
-                "The secret scan found a possible secret in \(object) (\(rule)), but it could not be replaced by a secret setting. Leave this object out, or remove the secret in Jamf and export again."
+                "The secret scan found a possible secret in \(object) (\(rule)), but it couldn’t be replaced by a secret setting. Leave this object out, or remove the secret in Jamf and export again."
             case .secretNotReplaceable(let object):
-                "\(object) holds a possible secret in a file it loads in a way the capture cannot turn into a secret setting. Leave this object out, or remove the secret in Jamf and export again."
+                "\(object) holds a possible secret in a file it loads in a way the capture can’t turn into a secret setting. Leave this object out, or remove the secret in Jamf and export again."
             }
         }
     }
@@ -204,7 +208,18 @@ public nonisolated enum BlockCapture {
             throw CaptureError.blockExists(request.blockID)
         }
         try fileManager.createDirectory(at: blockURL, withIntermediateDirectories: true)
+        // A capture that stops leaves no half-written block behind, so the
+        // same ID can be captured again.
+        do {
+            return try writeBlock(request, into: blockURL)
+        } catch {
+            try? fileManager.removeItem(at: blockURL)
+            throw error
+        }
+    }
 
+    private static func writeBlock(_ request: Request, into blockURL: URL) throws -> Result {
+        let fileManager = FileManager.default
         var warnings: [String] = []
         var objectCount = 0
         var usesJamfProScope = false
@@ -248,7 +263,8 @@ public nonisolated enum BlockCapture {
         // PreStages attach to the tenant's Automated Device Enrollment
         // instance; the origin's instance never exists elsewhere, so the
         // reference becomes a name-based lookup of the deploying tenant's
-        // instance (name captured as an editable block setting).
+        // instance (a required block setting; the origin's name is only
+        // reported, in `originSettingValues` and the warnings).
         var adeReferenced = false
         var adeAddresses: Set<String> = []
         // App Store apps license through the tenant's Apps and Books
@@ -278,6 +294,9 @@ public nonisolated enum BlockCapture {
             guard name.hasSuffix(".tf"), !skipped.contains(name), !name.hasSuffix("_import.tf") else { continue }
 
             var text = try String(contentsOf: file, encoding: .utf8)
+            // The rewrites below split the file into objects; one it can't
+            // split cleanly would lose lines, so the capture stops instead.
+            _ = try ExportedObjectInventory.checkedTopLevelBlocks(in: text)
 
             // The block never pins a provider alias of its own.
             text = text.replacingOccurrences(of: "  provider = jamfplatform\n\n", with: "")
@@ -326,7 +345,7 @@ public nonisolated enum BlockCapture {
                     }
                     if block.hasPrefix("resource \"jamfplatform_pro_login_page_settings\""),
                        !block.contains("disclaimer_heading") {
-                        warnings.append("Left out the login page settings: Jamf does not export the required disclaimer text. Configure the login page by hand after deploying.")
+                        warnings.append("Left out the login page settings: Jamf doesn’t export the required disclaimer text. Configure the login page by hand after deploying.")
                         dropAddress()
                         continue
                     }
@@ -373,11 +392,11 @@ public nonisolated enum BlockCapture {
                     guard block.hasPrefix("resource \"jamfplatform_pro_enrollment_customization\"") else { return block }
                     var block = block
                     if block.range(of: #"\n\s*icon_url\s*=\s*"https://"#, options: .regularExpression) != nil {
-                        warnings.append("An enrollment customization's icon stays hosted on the origin tenant: the export could not download it. Upload the icon on each tenant to make it independent.")
+                        warnings.append("An enrollment customization’s icon stays hosted on the origin tenant: the export couldn’t download it. Upload the icon on each tenant to make it independent.")
                     }
                     if block.contains("\n  ldap_panes = ") {
                         block = Self.removingAttribute("ldap_panes", from: block)
-                        warnings.append("Left out the LDAP pane of an enrollment customization: it names the origin tenant's directory server. Add it again on each tenant after deploying.")
+                        warnings.append("Left out the LDAP pane of an enrollment customization: it names the origin tenant’s directory server. Add it again on each tenant after deploying.")
                     }
                     if block.contains("\n  sso_panes = ") {
                         warnings.append("An enrollment customization includes a single sign-on pane: each tenant it deploys to needs single sign-on configured for enrollment.")
@@ -388,7 +407,7 @@ public nonisolated enum BlockCapture {
             }
 
             // PreStage device assignments name the origin tenant's devices in
-            // its Apple Business Manager. Each tenant assigns its own; an
+            // its Apple Business. Each tenant assigns its own; an
             // explicit (even empty) list also makes the plugin replace the
             // scope after creating the PreStage, which Jamf Pro answers with
             // a server error.
@@ -403,7 +422,7 @@ public nonisolated enum BlockCapture {
                 }
                 text = blocks.joined(separator: "\n\n") + "\n"
                 if assigned > 0 {
-                    warnings.append("Left out the device assignments of \(assigned) PreStage\(assigned == 1 ? "" : "s") in \(name): they name the origin tenant's devices. Assign devices to the PreStages in each tenant.")
+                    warnings.append("Left out the device assignments of \(assigned) PreStage\(assigned == 1 ? "" : "s") in \(name): they name the origin tenant’s devices. Assign devices to the PreStages in each tenant.")
                 }
             }
 
@@ -421,7 +440,7 @@ public nonisolated enum BlockCapture {
                 }
                 if turnedOff > 0 {
                     text = blocks.joined(separator: "\n\n") + "\n"
-                    warnings.append("Recovery Lock was turned off in \(name): Jamf does not export Recovery Lock passwords. Re-enable it with a password after deploying.")
+                    warnings.append("Recovery Lock was turned off in \(name): Jamf doesn’t export Recovery Lock passwords. Re-enable it with a password after deploying.")
                 }
             }
 
@@ -435,14 +454,7 @@ public nonisolated enum BlockCapture {
             }
 
             if request.prefixAllNames {
-                // Prefix every object name that is not already parameterized.
-                // Names can sit at any nesting depth (policies name inside
-                // general, packages use display_name).
-                text = text.replacingOccurrences(
-                    of: #"(\n\s+(?:display_)?name\s+= ")(?!\$\{var\.name_prefix\})"#,
-                    with: "$1${var.name_prefix}",
-                    options: .regularExpression
-                )
+                text = prefixingObjectNames(in: text)
             }
 
             // Icon IDs never match across tenants and the icon files are not
@@ -454,7 +466,7 @@ public nonisolated enum BlockCapture {
                     with: "",
                     options: .regularExpression
                 )
-                warnings.append("Left out Self Service icon references in \(name): icons do not transfer between tenants. Set icons by hand after deploying.")
+                warnings.append("Left out Self Service icon references in \(name): icons don’t transfer between tenants. Set icons by hand after deploying.")
             }
 
             // Jamf trims trailing whitespace on descriptions; keeping it makes
@@ -575,7 +587,7 @@ public nonisolated enum BlockCapture {
             }
             let unresolved = text.components(separatedBy: "# TODO: unresolved reference").count - 1
             if unresolved > 0 {
-                warnings.append("\(name) keeps \(unresolved) numeric ID\(unresolved == 1 ? "" : "s") that could not be resolved to names — they point at objects in the origin tenant and need review before deploying elsewhere.")
+                warnings.append("\(name) keeps \(unresolved) numeric ID\(unresolved == 1 ? "" : "s") that couldn’t be resolved to names — they point at objects in the origin tenant and need review before deploying elsewhere.")
             }
 
             fileTexts.append((name, text))
@@ -588,7 +600,7 @@ public nonisolated enum BlockCapture {
         let exportedDeclarations = parseVariableDeclarations(
             at: request.sourceDirectory.appending(path: "variables.tf")
         )
-        let exportedValues = parseTfvars(
+        let exportedValues = parseTfvarsValues(
             at: request.sourceDirectory.appending(path: "terraform.tfvars")
         )
         let generatedVariables: Set<String> = [
@@ -626,7 +638,7 @@ public nonisolated enum BlockCapture {
                 (entry.name, Self.strippingReferences(to: droppedAddresses, in: entry.text))
             }
             if !droppedAddresses.isEmpty {
-                warnings.append("Left out \(droppedAddresses.count) object\(droppedAddresses.count == 1 ? "" : "s") whose values Jamf does not export (icons, tokens, and similar): \(droppedAddresses.joined(separator: ", ")). Set them by hand after deploying.")
+                warnings.append("Left out \(droppedAddresses.count) object\(droppedAddresses.count == 1 ? "" : "s") whose values Jamf doesn’t export (icons, tokens, and similar): \(droppedAddresses.joined(separator: ", ")). Set them by hand after deploying.")
             }
         }
 
@@ -652,7 +664,7 @@ public nonisolated enum BlockCapture {
             fileTexts = fileTexts.map { entry in
                 (entry.name, Self.strippingReferences(to: Array(danglingAddresses), in: entry.text))
             }
-            warnings.append("Left out references to objects that are not part of this capture: \(danglingAddresses.sorted().joined(separator: ", ")). Review the block before deploying.")
+            warnings.append("Left out references to objects that aren’t part of this capture: \(danglingAddresses.sorted().joined(separator: ", ")). Review the block before deploying.")
         }
 
         // 1b3. Possible secrets become secret settings: each value is
@@ -676,7 +688,6 @@ public nonisolated enum BlockCapture {
         }
 
         guard objectCount > 0 else {
-            try? fileManager.removeItem(at: blockURL)
             throw CaptureError.nothingToCapture(reasons: warnings)
         }
 
@@ -774,6 +785,12 @@ public nonisolated enum BlockCapture {
             """
         }
         let secretKeys = Set(secretSettings.map(\.key))
+        // tfvars values the scans flag would otherwise become defaults.
+        let reportDirectory = request.resolutionDirectory ?? request.sourceDirectory
+        var flaggedVariables = SecretScan.flaggedTfvarsVariables(
+            request.secretFindings.map(\.location), in: reportDirectory)
+        flaggedVariables.merge(SecretScan.flaggedTfvarsVariables(
+            SecretScan.exportMatches(request.sourceDirectory).map(\.finding), in: request.sourceDirectory)) { first, _ in first }
         for name in referenced.subtracting(generatedVariables).subtracting(secretKeys).sorted() where !name.hasPrefix("dep_") {
             if let declaration = exportedDeclarations[name], ExportedObjectInventory.isSensitive(declaration) {
                 // A sensitive value never becomes a default: it is a secret
@@ -783,16 +800,27 @@ public nonisolated enum BlockCapture {
                 secretSettings.append(CapturedSecret(
                     key: name, title: "Sensitive value “\(name)”",
                     objectDescription: "The variable “\(name)”", rule: "Marked sensitive in the export"))
+            } else if let rule = flaggedVariables[name], let declaration = exportedDeclarations[name] {
+                // A possible secret the export left unmarked: sensitive from
+                // now on, entered per tenant, never a default.
+                var declaration = ExportedObjectInventory.withoutDefault(declaration)
+                if let brace = declaration.range(of: "}", options: .backwards) {
+                    declaration.replaceSubrange(brace.lowerBound..<brace.lowerBound, with: "  sensitive = true\n")
+                }
+                variables += "\n\n" + declaration.replacingOccurrences(of: "support_files/", with: "files/")
+                secretSettings.append(CapturedSecret(
+                    key: name, title: "Secret value “\(name)”",
+                    objectDescription: "The variable “\(name)”", rule: rule))
             } else if var declaration = exportedDeclarations[name] {
                 let hasDefault = declaration.range(
                     of: #"(?m)^\s*default\s*="#, options: .regularExpression) != nil
-                // exportedValues holds the raw escaped text between the
-                // tfvars quotes — valid HCL as-is, so no re-escaping.
+                // The tfvars expression is valid HCL as-is (strings keep
+                // their escapes), so no re-escaping.
                 if !hasDefault, let value = exportedValues[name],
                    let brace = declaration.range(of: "}", options: .backwards) {
                     declaration.replaceSubrange(
                         brace.lowerBound..<brace.lowerBound,
-                        with: "  default = \"\(value)\"\n"
+                        with: "  default = \(value.expression)\n"
                     )
                 }
                 variables += "\n\n" + declaration.replacingOccurrences(of: "support_files/", with: "files/")
@@ -805,7 +833,7 @@ public nonisolated enum BlockCapture {
                   default = ""
                 }
                 """
-                warnings.append("The variable \(name) is referenced but was not declared in the export; it was added with an empty default — review it.")
+                warnings.append("The variable \(name) is referenced but wasn’t declared in the export; it was added with an empty default — review it.")
             }
         }
 
@@ -888,15 +916,17 @@ public nonisolated enum BlockCapture {
 
         if adeReferenced {
             if adeAddresses.count > 1 {
-                warnings.append("PreStages in this block used \(adeAddresses.count) Automated Device Enrollment instances; all now attach to the one named in the block's setting. Capture them as separate blocks to keep them apart.")
+                warnings.append("PreStages in this block used \(adeAddresses.count) Automated Device Enrollment instances; all now attach to the one named in the block’s setting. Capture them as separate blocks to keep them apart.")
             }
             // PreStages wire to the deploying tenant's Automated Device
             // Enrollment instance, found by the name in the block setting.
+            // No default: the origin's instance name often names the
+            // organization, and the block may be shared. Each tenant enters
+            // its own (a required setting).
             let instance = """
             variable "ade_instance_name" {
               description = "Name of the tenant's Automated Device Enrollment instance that PreStage enrollments attach to."
               type        = string
-              default     = \(hclStringLiteral(adeInstanceName ?? ""))
             }
 
             data "jamfplatform_pro_automated_device_enrollment" "instance" {
@@ -904,15 +934,17 @@ public nonisolated enum BlockCapture {
             }
             """
             try Data(instance.utf8).write(to: blockURL.appending(path: "enrollment_instance.tf"))
-            warnings.append("PreStage enrollments attach to the deploying tenant's Automated Device Enrollment instance — the tenant needs its ADE token uploaded, and the block's \"Automated Device Enrollment instance\" setting must match that instance's name.")
+            warnings.append("PreStage enrollments attach to the deploying tenant’s Automated Device Enrollment instance — the tenant needs its ADE token uploaded, and the block’s “Automated Device Enrollment instance” setting must match that instance’s name."
+                + (adeInstanceName.map { " Enter it on each tenant; on this tenant it’s “\($0)”." } ?? ""))
         }
 
         if vppReferenced {
+            // No default, like the ADE instance: location names are often
+            // the organization's name or an Apple Account.
             let location = """
             variable "vpp_location_name" {
               description = "Name of the tenant's Apps and Books (volume purchasing) location that holds the app licenses."
               type        = string
-              default     = \(hclStringLiteral(vppLocationName ?? ""))
             }
 
             data "jamfplatform_pro_volume_purchasing_location" "apps_and_books" {
@@ -920,7 +952,8 @@ public nonisolated enum BlockCapture {
             }
             """
             try Data(location.utf8).write(to: blockURL.appending(path: "apps_and_books_location.tf"))
-            warnings.append("App Store apps license through the deploying tenant's Apps and Books location — each tenant needs licenses for these apps, and the block's \"Apps and Books location\" setting must match its location name.")
+            warnings.append("App Store apps license through the deploying tenant’s Apps and Books location — each tenant needs licenses for these apps, and the block’s “Apps and Books location” setting must match its location name."
+                + (vppLocationName.map { " Enter it on each tenant; on this tenant it’s “\($0)”." } ?? ""))
         }
 
         // Name→ID and name→deployed-name output maps, so other blocks can
@@ -1078,7 +1111,7 @@ public nonisolated enum BlockCapture {
                 "key": "ade_instance_name",
                 "title": "Automated Device Enrollment instance",
                 "type": "string",
-                "default": adeInstanceName ?? "",
+                "default": "",
                 "required": true,
                 "description": "Name of this tenant's Automated Device Enrollment instance. PreStage enrollments attach to it, so the tenant needs its ADE token uploaded first.",
                 "section": "Enrollment",
@@ -1086,7 +1119,7 @@ public nonisolated enum BlockCapture {
                 "key": "vpp_location_name",
                 "title": "Apps and Books location",
                 "type": "string",
-                "default": vppLocationName ?? "",
+                "default": "",
                 "required": true,
                 "description": "Name of this tenant's Apps and Books (volume purchasing) location. It needs licenses for every app in this block.",
                 "section": "Apps and Books",
@@ -1101,8 +1134,8 @@ public nonisolated enum BlockCapture {
             ] },
             "objectsCreated": typeCounts.sorted { $0.key < $1.key }.map { "\(objectLabel(for: $0.key)) (\($0.value))" },
         ]
-        if let origin = request.originTenantScopeID {
-            metadata["capturedFromTenant"] = origin
+        if let origin = request.originTenantScopeID, !origin.isEmpty {
+            metadata["capturedFromTenant"] = BlockMetadata.originMarker(forTenantScopeID: origin)
         }
 
         let json = try JSONSerialization.data(
@@ -1139,8 +1172,48 @@ public nonisolated enum BlockCapture {
             usesJamfProMobileScope: usesJamfProMobileScope,
             usesCategory: usesCategory,
             warnings: warnings,
-            secretSettings: secretSettings
+            secretSettings: secretSettings,
+            originSettingValues: (adeReferenced ? adeInstanceName.map { ["ade_instance_name": $0] } ?? [:] : [:])
+                .merging(vppReferenced ? vppLocationName.map { ["vpp_location_name": $0] } ?? [:] : [:]) { first, _ in first }
         )
+    }
+
+    /// Prefixes every object name that isn't parameterized yet: a resource's
+    /// own `name`/`display_name`, or the `name` inside its `general` object
+    /// (policies, profiles, apps). Names nested anywhere else (search
+    /// criteria, display fields, payload entries) and data lookups stay as
+    /// they are: they name what Jamf calls a field, or objects found by name.
+    static func prefixingObjectNames(in text: String) -> String {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var scanner = HCLScanner()
+        var inResource = false
+        // The top-level attribute object the line is inside, e.g. "general".
+        var topAttribute: String?
+        for index in lines.indices {
+            let line = lines[index]
+            let depth = scanner.braces + scanner.brackets
+            let inHeredoc = !scanner.isAtTopLevel && depth == 0
+            defer {
+                scanner.scan(line)
+                if scanner.braces + scanner.brackets <= 1 { topAttribute = nil }
+                if scanner.braces + scanner.brackets == 0, scanner.isAtTopLevel { inResource = false }
+            }
+            if depth == 0, !inHeredoc {
+                inResource = line.hasPrefix("resource ")
+                continue
+            }
+            guard inResource else { continue }
+            if depth == 1, let open = line.firstMatch(of: /^  ([a-z_]+)\s*=\s*\{\s*$/) {
+                topAttribute = String(open.1)
+                continue
+            }
+            let isObjectName = (depth == 1 && line.firstMatch(of: /^  (?:display_)?name\s*= "/) != nil)
+                || (depth == 2 && topAttribute == "general" && line.firstMatch(of: /^    name\s*= "/) != nil)
+            guard isObjectName, !line.contains("= \"${var.name_prefix}") else { continue }
+            lines[index] = line.replacingOccurrences(
+                of: #"^(\s+(?:display_)?name\s*= ")"#, with: "$1${var.name_prefix}", options: .regularExpression)
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Removes one named attribute object (`name = { … }`) from a block.
@@ -1151,10 +1224,11 @@ public nonisolated enum BlockCapture {
         while index < lines.count {
             let line = lines[index]
             if line.range(of: "^\\s*" + attribute + "\\s*=\\s*\\{\\s*$", options: .regularExpression) != nil {
-                var depth = 1
-                while depth > 0, index + 1 < lines.count {
+                var scanner = HCLScanner()
+                scanner.scan(line)
+                while scanner.braces > 0, index + 1 < lines.count {
                     index += 1
-                    depth += lines[index].filter { $0 == "{" }.count - lines[index].filter { $0 == "}" }.count
+                    scanner.scan(lines[index])
                 }
                 index += 1
                 continue
@@ -1176,14 +1250,15 @@ public nonisolated enum BlockCapture {
             let line = lines[index]
             if line.range(of: #"^\s*[a-zA-Z0-9_]+\s*=\s*\{\s*$"#, options: .regularExpression) != nil {
                 // Collect the balanced attribute object.
-                var depth = 1
+                var scanner = HCLScanner()
+                scanner.scan(line)
                 var chunk = [line]
                 var cursor = index
-                while depth > 0, cursor + 1 < lines.count {
+                while scanner.braces > 0, cursor + 1 < lines.count {
                     cursor += 1
                     let next = lines[cursor]
                     chunk.append(next)
-                    depth += next.filter { $0 == "{" }.count - next.filter { $0 == "}" }.count
+                    scanner.scan(next)
                 }
                 let body = chunk.joined(separator: "\n")
                 if addresses.contains(where: { Self.mentions(body, address: $0) }) {
@@ -1285,7 +1360,7 @@ public nonisolated enum BlockCapture {
             guard let address = table.address(type: "jamfplatform_pro_enrollment_customization", id: match[1]),
                   let reference = record("enrollment_customization", address: address)
             else {
-                warnings.append("A PreStage used an enrollment customization that is not part of the export; it deploys without one. Export the customization with it to keep the link.")
+                warnings.append("A PreStage used an enrollment customization that isn’t part of the export; it deploys without one. Export the customization with it to keep the link.")
                 return "enrollment_customization_id = \"0\""
             }
             return "enrollment_customization_id = \(reference)"
@@ -1294,6 +1369,7 @@ public nonisolated enum BlockCapture {
         // id = "12" # TODO: … inside scripts/packages containers.
         var container: [String] = []
         var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var scanner = HCLScanner()
         for index in lines.indices {
             let line = lines[index]
             if let open = line.firstMatch(of: /^\s*([a-zA-Z0-9_]+)\s*= [\[{]+\s*$/) {
@@ -1301,10 +1377,9 @@ public nonisolated enum BlockCapture {
             } else if line.range(of: #"^\s*[\[{]+\s*$"#, options: .regularExpression) != nil {
                 container.append("")
             }
-            let closers = line.filter { $0 == "}" || $0 == "]" }.count
-            let openers = line.filter { $0 == "{" || $0 == "[" }.count
-            if closers > openers {
-                for _ in 0..<(closers - openers) where !container.isEmpty { container.removeLast() }
+            let delta = scanner.scan(line)
+            if delta.braces + delta.brackets < 0 {
+                for _ in 0..<(-(delta.braces + delta.brackets)) where !container.isEmpty { container.removeLast() }
             }
             guard let match = line.firstMatch(of: /^(\s*)id\s+= "(\d+)" # TODO: unresolved reference/) else { continue }
             let depKey: String? = container.contains("scripts") ? "script"
@@ -1314,7 +1389,7 @@ public nonisolated enum BlockCapture {
                   let address = table.address(type: type, id: String(match.2)),
                   let reference = record(key, address: address)
             else {
-                warnings.append("A reference to \(container.last ?? "an object") with ID \(match.2) could not be resolved to a name — review it before deploying.")
+                warnings.append("A reference to \(container.last ?? "an object") with ID \(match.2) couldn’t be resolved to a name — review it before deploying.")
                 continue
             }
             lines[index] = "\(match.1)id = \(reference)"
@@ -1574,12 +1649,11 @@ public nonisolated enum BlockCapture {
         var lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         guard let start = lines.firstIndex(where: { $0.hasPrefix("  \(name) ") || $0.hasPrefix("  \(name)=") }) else { return block }
         var end = start
-        var depth = 0
+        var scanner = HCLScanner()
         for index in start..<lines.count {
-            depth += lines[index].filter { $0 == "[" || $0 == "{" }.count
-            depth -= lines[index].filter { $0 == "]" || $0 == "}" }.count
+            scanner.scan(lines[index])
             end = index
-            if depth <= 0 { break }
+            if scanner.braces + scanner.brackets <= 0, scanner.isAtTopLevel { break }
         }
         lines.removeSubrange(start...end)
         return lines.joined(separator: "\n")
@@ -1606,13 +1680,72 @@ public nonisolated enum BlockCapture {
         return result
     }
 
-    /// Simple `name = "value"` assignments from a tfvars file.
+    /// A value assigned in a tfvars file.
+    struct TfvarsValue: Equatable {
+        /// The value as an HCL expression: a quoted string (heredocs become
+        /// one), a number or bool, or a list or map, possibly multi-line.
+        var expression: String
+        /// For strings, the escaped text between the quotes — valid inside
+        /// `"…"` as-is; nil for other values.
+        var stringContent: String?
+    }
+
+    /// The string values of a tfvars file (heredocs included), as the
+    /// escaped text between the quotes.
     static func parseTfvars(at url: URL) -> [String: String] {
+        parseTfvarsValues(at: url).compactMapValues(\.stringContent)
+    }
+
+    /// Every assignment in a tfvars file: strings, heredocs, numbers, bools,
+    /// lists and maps. A value this reader can't follow still counts as
+    /// assigned, so the variable is never mistaken for one Jamf left empty.
+    static func parseTfvarsValues(at url: URL) -> [String: TfvarsValue] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
-        var values: [String: String] = [:]
-        for line in text.split(separator: "\n") {
-            if let match = line.firstMatch(of: /^\s*([a-zA-Z0-9_]+)\s*=\s*"(.*)"\s*$/) {
-                values[String(match.1)] = String(match.2)
+        return parseTfvarsValues(text)
+    }
+
+    static func parseTfvarsValues(_ text: String) -> [String: TfvarsValue] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var values: [String: TfvarsValue] = [:]
+        var index = 0
+        while index < lines.count {
+            defer { index += 1 }
+            guard let match = lines[index].firstMatch(of: /^\s*([a-zA-Z0-9_]+)\s*=\s*(.*?)\s*$/) else { continue }
+            let name = String(match.1)
+            let rest = String(match.2)
+            if let heredoc = rest.firstMatch(of: /^<<(-?)([A-Za-z_][A-Za-z0-9_]*)$/) {
+                var body: [String] = []
+                while index + 1 < lines.count {
+                    index += 1
+                    if lines[index].trimmingCharacters(in: .whitespaces) == String(heredoc.2) { break }
+                    body.append(lines[index])
+                }
+                if !heredoc.1.isEmpty {
+                    // <<- strips the indentation the lines share.
+                    let indent = body.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                        .map { $0.prefix { $0 == " " || $0 == "\t" }.count }.min() ?? 0
+                    body = body.map { String($0.dropFirst(min(indent, $0.prefix { $0 == " " || $0 == "\t" }.count))) }
+                }
+                let content = (body.joined(separator: "\n") + "\n")
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                    .replacingOccurrences(of: "\n", with: "\\n")
+                    .replacingOccurrences(of: "\r", with: "\\r")
+                    .replacingOccurrences(of: "\t", with: "\\t")
+                values[name] = TfvarsValue(expression: "\"\(content)\"", stringContent: content)
+            } else if let string = rest.wholeMatch(of: /"((?:[^"\\]|\\.)*)"(?:\s*(?:#|\/\/).*)?/) {
+                values[name] = TfvarsValue(expression: "\"\(string.1)\"", stringContent: String(string.1))
+            } else {
+                // Numbers, bools, lists and maps: up to the line that closes them.
+                var scanner = HCLScanner()
+                scanner.scan(rest)
+                var expression = [rest]
+                while scanner.braces + scanner.brackets > 0, index + 1 < lines.count {
+                    index += 1
+                    expression.append(lines[index])
+                    scanner.scan(lines[index])
+                }
+                values[name] = TfvarsValue(expression: expression.joined(separator: "\n"), stringContent: nil)
             }
         }
         return values
@@ -1641,13 +1774,14 @@ public nonisolated enum BlockCapture {
         while index < lines.count {
             let line = String(lines[index])
             if let match = line.firstMatch(of: /^\s*variable\s+"([a-zA-Z0-9_]+)"\s*\{/) {
-                var depth = line.filter { $0 == "{" }.count - line.filter { $0 == "}" }.count
+                var scanner = HCLScanner()
+                scanner.scan(line)
                 var block = [line]
-                while depth > 0, index + 1 < lines.count {
+                while !scanner.isAtTopLevel, index + 1 < lines.count {
                     index += 1
                     let next = String(lines[index])
                     block.append(next)
-                    depth += next.filter { $0 == "{" }.count - next.filter { $0 == "}" }.count
+                    scanner.scan(next)
                 }
                 declarations[String(match.1)] = block.joined(separator: "\n")
             }

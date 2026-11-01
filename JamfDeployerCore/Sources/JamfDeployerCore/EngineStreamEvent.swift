@@ -59,24 +59,12 @@ public nonisolated struct EngineStreamEvent: Decodable, Sendable {
     public struct Hook: Decodable, Sendable {
         public var resource: ResourceAddress
         public var action: String?
-        public var idKey: String?
-        public var idValue: String?
-        public var elapsedSeconds: Double?
-
-        public enum CodingKeys: String, CodingKey {
-            case resource
-            case action
-            case idKey = "id_key"
-            case idValue = "id_value"
-            case elapsedSeconds = "elapsed_seconds"
-        }
     }
 
     /// Payload of `change_summary`.
     public struct ChangeCounts: Decodable, Sendable {
         public var add: Int
         public var change: Int
-        public var importCount: Int
         public var remove: Int
         /// Objects that leave the tenant record without being destroyed
         /// ("Stop managing").
@@ -84,10 +72,6 @@ public nonisolated struct EngineStreamEvent: Decodable, Sendable {
         /// "plan", "apply" or "destroy".
         public var operation: String
 
-        public enum CodingKeys: String, CodingKey {
-            case add, change, remove, forget, operation
-            case importCount = "import"
-        }
     }
 
     /// Payload of `diagnostic` — errors, warnings, and the provider's
@@ -101,23 +85,17 @@ public nonisolated struct EngineStreamEvent: Decodable, Sendable {
 
     public var type: Kind
     public var message: String
-    public var level: String
-    public var timestamp: String
     public var change: Change?
     public var hook: Hook?
     public var changes: ChangeCounts?
     public var diagnostic: Diagnostic?
-    public var outputs: [String: JSONValue]?
 
     public enum CodingKeys: String, CodingKey {
         case type
         case message = "@message"
-        case level = "@level"
-        case timestamp = "@timestamp"
         case change
         case hook
         case changes
         case diagnostic
-        case outputs
     }
 }

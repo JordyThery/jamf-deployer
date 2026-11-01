@@ -95,6 +95,10 @@ nonisolated struct Tenant: Codable, Identifiable, Sendable, Equatable {
         return jamfProAuth == .userAccount ? .jamfProUser : .jamfProAPIClient
     }
 
+    /// Whether the tenant signs in with a password (a Jamf Pro user
+    /// account) rather than a client secret.
+    var usesPassword: Bool { errorConnection == .jamfProUser }
+
     /// What identifies the connection in lists: the environment ID for
     /// Platform tenants, the instance host for Jamf Pro tenants.
     var connectionLabel: String {

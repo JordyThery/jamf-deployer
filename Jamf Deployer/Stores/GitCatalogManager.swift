@@ -13,11 +13,11 @@ nonisolated enum GitCatalogManager {
         var errorDescription: String? {
             switch self {
             case .fetchFailed(let output):
-                "The catalog source could not be fetched: \(output.prefix(200))"
+                "The catalog source couldn’t be fetched: \(output.prefix(200))"
             case .notACatalog:
-                "The repository is not a building-block catalog (catalog.json missing at its root)."
+                "The repository isn’t a building-block catalog (catalog.json missing at its root)."
             case .checkoutMissing(let tag):
-                "Catalog tag \(tag) has not been downloaded yet. Check the network connection and try again."
+                "Catalog tag \(tag) hasn’t been downloaded yet. Check the network connection and try again."
             }
         }
     }
@@ -65,21 +65,10 @@ nonisolated enum GitCatalogManager {
 
     @discardableResult
     private static func git(_ arguments: [String], in directory: URL?, tools: ToolDoorway) throws -> String {
-        var environment = ProcessInfo.processInfo.environment
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        let process = try tools.process(.git, executable: URL(filePath: "/usr/bin/git"), arguments: arguments,
-                                        directory: directory, environment: environment)
-        process.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try process.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let output = String(decoding: data, as: UTF8.self)
-        guard process.terminationStatus == 0 else {
-            throw CatalogError.fetchFailed(output)
+        let output = try GitCommand.run(arguments, in: directory, tools: tools)
+        guard output.status == 0 else {
+            throw CatalogError.fetchFailed(output.text)
         }
-        return output
+        return output.text
     }
 }

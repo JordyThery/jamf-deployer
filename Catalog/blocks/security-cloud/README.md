@@ -5,7 +5,7 @@ The complete Security Cloud ↔ Jamf Pro chain:
 1. **UEM Connect** — binds Jamf Security Cloud to this Jamf Pro tenant via
    the platform (no manual API client): devices sync on a schedule, risk
    levels flow back into Jamf Pro, and failing credentials pause syncs
-   instead of hammering the API.
+   instead of retrying.
 2. **Activation profile** (macOS) — the enrollment entry point deciding
    which capabilities (content controls, network security) enrolling
    devices get. With UEM Connect established, Security Cloud can push the
@@ -17,13 +17,13 @@ existing connection*: the block then reads that integration, creates only
 the activation profile, and never changes or removes the connection.
 
 **Entitlement required**: the Platform environment must include Jamf
-Security Cloud. Without it, deploying stops with a clear message and
-nothing else in the baseline is affected.
+Security Cloud. Without it, deploying stops and says why, and nothing
+else in the baseline is affected.
 
 ## What the deploy gives you
 
 The activation code (`activation_profile_id` output) is what devices enroll
-with, verified against a real tenant's enrollment profile:
+with, verified against a real tenant’s enrollment profile:
 
 - Enrollment link: `https://e.wandera.com/<activation-code>` (also output
   as `enrollment_url`).

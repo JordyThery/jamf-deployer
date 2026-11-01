@@ -170,13 +170,13 @@ struct JamfProAdoptionTests {
 
     @Test func theSignInMessageFitsTheConnection() {
         let gateway = JamfAPIError.notAuthenticated("no client secret saved", flavor: .platform).errorDescription ?? ""
-        #expect(gateway == "Jamf did not accept the credentials. Check the client ID, client secret and region. (no client secret saved)")
+        #expect(gateway == "The client secret is missing from the Keychain. Enter it with Update Client Secret… in the tenant’s Connection section.")
 
         let client = JamfAPIError.notAuthenticated("no client secret saved", flavor: .jamfProAPIClient).errorDescription ?? ""
-        #expect(client == "Jamf Pro did not accept the credentials. Check the client ID and client secret, and that the API client is enabled in Jamf Pro under Settings › API Roles and Clients. (no client secret saved)")
+        #expect(client == "The client secret is missing from the Keychain. Enter it with Update Client Secret… in the tenant’s Connection section.")
 
         let user = JamfAPIError.notAuthenticated("no password saved", flavor: .jamfProUser).errorDescription ?? ""
-        #expect(user == "Jamf Pro did not accept the credentials. Check the username and password. (no password saved)")
+        #expect(user == "The password is missing from the Keychain. Enter it with Update Password… in the tenant’s Connection section.")
 
         for text in [client, user, JamfAPIError.invalidInstanceURL.errorDescription ?? ""] {
             #expect(!text.contains("region") && !text.contains("Jamf Account"))

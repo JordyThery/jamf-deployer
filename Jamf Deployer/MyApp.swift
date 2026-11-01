@@ -21,20 +21,25 @@ struct MyApp: App {
         // Settings › Connections: always the real tenants (their own
         // tenant.json files and Keychain items, unchanged), also in demo mode
         let real = worlds.real
+        // A sandbox launch and the unit tests' host keep everything apart
+        // from the installed app's store, backups and Keychain items.
+        let sandboxFolder = AppWorlds.sandboxFolder(demo: demo)
         let storage = TenantConnectionStorage(
             tenantStore: real.tenantStore,
-            backupURL: demo.isSandbox ? demo.scratchDirectory.appending(path: "connection-backup")
-                : TenantConnectionStorage.defaultBackupURL,
+            backupURL: sandboxFolder?.appending(path: "connection-backup") ?? TenantConnectionStorage.defaultBackupURL,
             signInID: { tenant in real.deployService.isTeamMode ? tenant.engineerClientID : nil }
         )
         _connections = State(initialValue: ConnectionStore(
             storage: storage,
-            secrets: demo.isSandbox ? TenantSecrets.sandboxConnectionSecrets : TenantSecrets.connectionSecrets,
+            secrets: sandboxFolder != nil ? TenantSecrets.sandboxConnectionSecrets : TenantSecrets.connectionSecrets,
             log: { message in
                 Logger(subsystem: "be.jordythery.jamf-deployer", category: "Connections").error("\(message, privacy: .public)")
             }
         ))
-        Task.detached(priority: .background) { JamformerRunner.removeStaleExports() }
+        // Not in the unit tests' host: the installed app may be exporting.
+        if !TestRun.isUnitTestHost {
+            Task.detached(priority: .background) { JamformerRunner.removeStaleExports() }
+        }
     }
 
     @State private var updates = UpdateChecker(
@@ -112,7 +117,7 @@ struct MyApp: App {
                 .keyboardShortcut("r")
                 .disabled(deployService.isBusy || deployService.fleetCheckProgress != nil)
 
-                Button("Preview Changes", systemImage: "list.bullet.clipboard") {
+                Button("Preview Changes…", systemImage: "list.bullet.clipboard") {
                     appState.previewRequestCount += 1
                 }
                 .keyboardShortcut("p")

@@ -49,9 +49,9 @@ struct StoreSecretsSheet: View {
     private var explanation: String {
         switch review.kind {
         case .existingStore:
-            "These places in your store look like secrets. Git keeps every earlier version, so treat them as exposed: change each secret where it's used, such as the Wi-Fi password or API client secret. Before the store can be saved again, fix each current file or mark it as not a secret."
+            "These places in your store look like secrets. Git keeps every earlier version, so treat them as exposed: change each secret where it’s used, such as the Wi-Fi password or API client secret. Before the store can be saved again, fix each current file or mark it as not a secret."
         case .commitBlocked, .commitStopped:
-            "Nothing was saved or shared: these places in the store look like secrets. Remove each secret where it comes from (in Jamf, then adopt or capture again), or mark a finding as not a secret if it's harmless. Only its location and rule are saved, never the value."
+            "Nothing was saved or shared: these places in the store look like secrets. Remove each secret where it comes from (in Jamf, then adopt or capture again), or mark a finding as not a secret if it’s harmless. Only its location and rule are saved, never the value."
         }
     }
 
@@ -70,7 +70,7 @@ struct StoreSecretsSheet: View {
             Spacer()
             if finding.inEarlierVersion {
                 StatusBadge("Earlier version", style: .warning)
-                    .help("Only in an earlier version of the store. Git keeps it, so change this secret where it's used.")
+                    .help("Only in an earlier version of the store. Git keeps it, so change this secret where it’s used.")
             } else if current.acknowledged.contains(finding.finding) {
                 Label("Not a secret", systemImage: "checkmark.circle.fill")
                     .symbolRenderingMode(.multicolor)
@@ -81,7 +81,7 @@ struct StoreSecretsSheet: View {
                         do {
                             try await deployService.acknowledgeStoreFinding(finding.finding)
                         } catch {
-                            errorMessage = "The choice could not be saved: \(error.localizedDescription)"
+                            errorMessage = "The choice couldn’t be saved: \(error.localizedDescription)"
                         }
                     }
                 }

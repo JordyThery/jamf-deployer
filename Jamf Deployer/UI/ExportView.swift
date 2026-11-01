@@ -94,7 +94,7 @@ struct ExportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Exports read the tenant and never change it. Discovery runs on Terraform, which is downloaded from HashiCorp on first use — deploys always use the built-in engine.")
+            Text("Exports read the tenant and never change it.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -193,12 +193,16 @@ struct ExportView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isRunning || selectedTypes.isEmpty || terraform.binaryURL == nil)
+                .help(terraform.binaryURL == nil
+                    ? "Download Terraform first"
+                    : selectedTypes.isEmpty ? "Choose at least one object type" : "Read the chosen object types from the tenant")
                 if isRunning {
                     ProgressView().controlSize(.small)
+                        .accessibilityLabel("In progress")
                 }
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
+                        .labelStyle(.tintedIcon(.yellow))
                         .font(.callout)
                 }
             }
@@ -257,7 +261,7 @@ struct ExportView: View {
                 switch terraform.status {
                 case .installed:
                     StatusIndicator.success.icon
-                    Text("Discovery engine ready (Terraform \(TerraformManager.pinnedVersion), licensed under the BUSL — used only to read tenants, never shipped inside the app).")
+                    Text("Discovery engine ready (Terraform \(TerraformManager.pinnedVersion)).")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 case .downloading:
@@ -270,7 +274,7 @@ struct ExportView: View {
                     Button("Try Again") { download() }
                 case .notInstalled:
                     StatusIndicator.warning.icon
-                    Text("Exports need Terraform \(TerraformManager.pinnedVersion) (HashiCorp, BUSL-licensed). It is downloaded once, checksum-verified, kept outside the app, and only ever reads tenants.")
+                    Text("Exports need Terraform \(TerraformManager.pinnedVersion) from HashiCorp. Its license (BUSL) doesn’t allow bundling it, so it’s downloaded once, outside the app, and only reads tenants.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     Button("Download Terraform") { download() }
@@ -296,7 +300,7 @@ struct ExportView: View {
         guard let secret = credential, let terraformURL = terraform.binaryURL else {
             errorMessage = exportProvider == "jamfprotect"
                 ? "The Protect API client secret is missing — reconnect Protect in Day 0 Setup."
-                : "The tenant's stored credentials are missing."
+                : JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
             return
         }
         isRunning = true
@@ -306,8 +310,13 @@ struct ExportView: View {
         logTail = ["Starting export…"]
         let types = Array(selectedTypes)
         let session = session
+        // the Demo Mode switch waits for it (`ScreenWork`)
+        let work = ScreenWork.shared.begin("export")
         Task {
-            defer { isRunning = false }
+            defer {
+                isRunning = false
+                ScreenWork.shared.end(work)
+            }
             do {
                 let result = try await runner.export(
                     tenant: tenant,
@@ -330,8 +339,22 @@ struct ExportView: View {
                     }
                     return
                 }
-                // Captured blocks carry their own copy of enrollment icons.
-                await EnrollmentIcons.localize(directory: result.outputURL)
+                // Captured blocks carry their own copy of enrollment icons,
+                // downloaded only from the tenant's Jamf Cloud host, and logged.
+                let iconHosts: Set<String> = tenant.jamfProURL
+                    .flatMap { URL(string: $0)?.host()?.lowercased() }.map { [$0] } ?? [".jamfcloud.com"]
+                let log = activityLog
+                await EnrollmentIcons.localize(directory: result.outputURL, allowedHosts: iconHosts) { url in
+                    let started = Date()
+                    let (data, response) = try await URLSession.shared.data(from: url)
+                    let status = (response as? HTTPURLResponse)?.statusCode
+                    await log.append(ActivityLogEntry(
+                        category: "Export", operation: "download icon", detail: url.host() ?? "",
+                        status: status, duration: Date().timeIntervalSince(started), note: nil
+                    ))
+                    guard status == 200 else { throw URLError(.badServerResponse) }
+                    return data
+                }
                 exportResult = result
                 session.exportedTypes = types
                 adoptResult(result, types: types)
@@ -387,14 +410,14 @@ struct ExportView: View {
                             ))
                             isExportingDocumentation = true
                         } catch {
-                            errorMessage = "The documentation could not be generated: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                            errorMessage = "The documentation couldn’t be generated: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
                         }
                     }
                 }
 
                 if let captureOutcome {
                     Label(captureOutcome, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .labelStyle(.tintedIcon(.green))
                         .font(.callout)
                 }
             }
@@ -472,7 +495,7 @@ struct ExportView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(cloneTargetID == nil || selectedObjects.isEmpty)
-                Text("Names and tenant-specific IDs are remapped for the destination; tokens, certificates and secrets are never cloned — set those up in the destination's Day 0 steps. Deploying still goes through the destination tenant's own preview.")
+                Text("Names and tenant-specific IDs are remapped for the destination; tokens, certificates and secrets are never cloned — set those up in the destination’s Day 0 steps. Deploying still goes through the destination tenant’s own preview.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -513,7 +536,7 @@ struct ExportView: View {
             target.blockSelections.append(selection)
             tenantStore.update(target)
             captureOutcome = "Staged \(captured.objectCount) object\(captured.objectCount == 1 ? "" : "s") on “\(target.name)”. Open that tenant and Preview Changes to deploy the clone."
-                + (captured.secretSettings.isEmpty ? "" : " First enter the clone's \(captured.secretSettings.count == 1 ? "secret setting" : "\(captured.secretSettings.count) secret settings") on “\(target.name)”: secrets are never cloned.")
+                + (captured.secretSettings.isEmpty ? "" : " First enter the clone’s \(captured.secretSettings.count == 1 ? "secret setting" : "\(captured.secretSettings.count) secret settings") on “\(target.name)”: secrets are never cloned.")
             activityLog.append(ActivityLogEntry(
                 category: "Export", operation: "clone", detail: "\(tenant.name) → \(target.name)",
                 status: 200, duration: nil, note: "\(captured.objectCount) objects"
@@ -577,7 +600,7 @@ struct ExportView: View {
         Toggle("Apply the tenant prefix to all object names", isOn: $prefixAllNames)
             .toggleStyle(.checkbox)
             .font(.callout)
-            .help("Prefixes every captured name; otherwise only names that already carry this tenant's prefix are parameterized")
+            .help("Prefixes every captured name; otherwise only names that already carry this tenant’s prefix are parameterized")
         Toggle("Choose scope and category per tenant (portable block)", isOn: $choosesScopePerTenant)
             .toggleStyle(.checkbox)
             .font(.callout)
@@ -824,29 +847,50 @@ struct ExportView: View {
         panel.nameFieldStringValue = "Snapshot-\(tenant.name)-\(Date.now.formatted(.iso8601.year().month().day())).zip"
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
-        // zip adds to an existing archive, so a replaced file starts empty.
-        try? FileManager.default.removeItem(at: destination)
         let source = result.outputURL
         Task {
             // Off the main actor: a full snapshot can be hundreds of megabytes.
-            let status: Int32? = await Task.detached {
-                let zip = Process()
-                zip.standardInput = FileHandle.nullDevice
-                zip.executableURL = URL(filePath: "/usr/bin/zip")
-                zip.currentDirectoryURL = source
-                // The provider download under .terraform is tens of megabytes
-                // and is fetched again by `terraform init`.
-                zip.arguments = ["-r", "-q", "-y", destination.path, ".", "-x", ".terraform/*"]
-                guard (try? zip.run()) != nil else { return nil }
-                zip.waitUntilExit()
-                return zip.terminationStatus
-            }.value
-            guard status == 0 else {
-                errorMessage = "The snapshot could not be written."
+            let saved = await ScreenWork.shared.tracking("snapshot") {
+                await Task.detached { Self.zipSnapshot(source, to: destination) }.value
+            }
+            guard saved else {
+                errorMessage = "The snapshot couldn’t be written."
                 return
             }
             captureOutcome = "Snapshot saved to \(destination.lastPathComponent)."
             NSWorkspace.shared.activateFileViewerSelecting([destination])
+        }
+    }
+
+    /// Zips `source` into a temporary archive, then moves it to
+    /// `destination`: a failed zip leaves a file it would replace as it was.
+    /// (zip adds to an existing archive, so it never writes there directly.)
+    nonisolated static func zipSnapshot(_ source: URL, to destination: URL,
+                                        zipTool: URL = URL(filePath: "/usr/bin/zip")) -> Bool {
+        let fileManager = FileManager.default
+        let staging = fileManager.temporaryDirectory.appending(path: "jd-snapshot-\(UUID().uuidString)")
+        guard (try? fileManager.createDirectory(at: staging, withIntermediateDirectories: true)) != nil else { return false }
+        defer { try? fileManager.removeItem(at: staging) }
+        let archive = staging.appending(path: destination.lastPathComponent)
+        let zip = Process()
+        zip.standardInput = FileHandle.nullDevice
+        zip.executableURL = zipTool
+        zip.currentDirectoryURL = source
+        // The provider download under .terraform is tens of megabytes
+        // and is fetched again by `terraform init`.
+        zip.arguments = ["-r", "-q", "-y", archive.path, ".", "-x", ".terraform/*"]
+        guard (try? zip.run()) != nil else { return false }
+        zip.waitUntilExit()
+        guard zip.terminationStatus == 0, fileManager.fileExists(atPath: archive.path) else { return false }
+        do {
+            if fileManager.fileExists(atPath: destination.path) {
+                _ = try fileManager.replaceItemAt(destination, withItemAt: archive)
+            } else {
+                try fileManager.moveItem(at: archive, to: destination)
+            }
+            return true
+        } catch {
+            return false
         }
     }
 }

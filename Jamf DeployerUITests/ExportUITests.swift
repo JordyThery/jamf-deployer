@@ -111,6 +111,9 @@ final class ExportUITests: DeployerUITestCase {
             NSPredicate(format: "placeholderValue == 'https://github.com/org/jamf-tenants.git'")).firstMatch
         scrollIntoView(url)
         type(try env("EXPORT_REPOSITORY"), into: url)
+        let unencrypted = app.sheets.checkBoxes["I understand that the state on GitHub isn’t encrypted"]
+        scrollIntoView(unencrypted)
+        unencrypted.click()
         let accept = app.sheets.checkBoxes["Stop managing these tenants in this app"]
         scrollIntoView(accept)
         accept.click()

@@ -18,11 +18,7 @@ struct RolloutView: View {
         case catalogRelease(UUID)
     }
 
-    struct Entry: Identifiable {
-        var id: UUID
-        var include: Bool
-        var ring: Int
-    }
+    typealias Entry = RolloutQueue.Entry
 
     enum Outcome {
         case deployed(succeeded: Int)
@@ -51,17 +47,31 @@ struct RolloutView: View {
     @State private var prepareError: String?
     /// Baseline before a staged release, restored when it is not deployed.
     @State private var stagedBaseline: (tenantID: UUID, selections: [BlockSelection], pins: [String: String])?
+    /// The order frozen at Start Rollout; nil during setup.
+    @State private var frozenQueue: RolloutQueue?
 
     private var gitSources: [CatalogSourceStore.CustomSource] {
         catalogSources.customSources.filter { $0.kind == .gitRepository }
     }
 
-    /// Included tenants in rollout order: ring, then name.
-    private var queue: [Entry] {
-        entries.filter(\.include).sorted { lhs, rhs in
-            if lhs.ring != rhs.ring { return lhs.ring < rhs.ring }
-            return name(lhs.id).localizedStandardCompare(name(rhs.id)) == .orderedAscending
+    /// Included tenants in rollout order: ring, then name. Live during
+    /// setup, frozen from Start Rollout on.
+    private var queue: RolloutQueue {
+        frozenQueue ?? RolloutQueue(entries, name: name)
+    }
+
+    /// Started and not finished: closing now could leave a staged release
+    /// on a tenant, and switching demo mode would tear the rollout down.
+    private var isUnderWay: Bool {
+        switch stage {
+        case .setup, .finished: false
+        default: true
         }
+    }
+
+    private var isRunningStep: Bool {
+        if case .running = stage { return true }
+        return false
     }
 
     var body: some View {
@@ -80,6 +90,10 @@ struct RolloutView: View {
             }
         }
         .onAppear(perform: prepareEntries)
+        // Esc mid-step would skip restoring a staged release; Stop Rollout
+        // and the preview's own buttons are the way out
+        .interactiveDismissDisabled(isRunningStep)
+        .tracksScreenWork("rollout", while: isUnderWay)
     }
 
     // MARK: Frame (everything but the per-tenant preview)
@@ -108,7 +122,7 @@ struct RolloutView: View {
         Form {
             Section("What to roll out") {
                 Picker("What to roll out", selection: $change) {
-                    Text("Each tenant's current baseline").tag(Change.currentBaselines)
+                    Text("Each tenant’s current baseline").tag(Change.currentBaselines)
                     ForEach(gitSources) { source in
                         Text("The latest release of \(source.name)").tag(Change.catalogRelease(source.id))
                     }
@@ -116,8 +130,8 @@ struct RolloutView: View {
                 .pickerStyle(.radioGroup)
                 .labelsHidden()
                 Text(change == .currentBaselines
-                    ? "Deploys what each tenant's baseline already contains — edit baselines first, then roll the changes out."
-                    : "Moves each tenant's blocks from this catalog to its latest release, one tenant at a time. A tenant you skip keeps its current release.")
+                    ? "Deploys what each tenant’s baseline already contains — edit baselines first, then roll the changes out."
+                    : "Moves each tenant’s blocks from this catalog to its latest release, one tenant at a time. A tenant you skip keeps its current release.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -138,6 +152,7 @@ struct RolloutView: View {
                             ForEach(1...3, id: \.self) { Text("Ring \($0)").tag($0) }
                         }
                         .labelsHidden()
+                        .accessibilityLabel("Ring for \(name(entry.id))")
                         .fixedSize()
                         .disabled(!entry.include)
                     }
@@ -201,7 +216,7 @@ struct RolloutView: View {
     }
 
     private var outcomeList: some View {
-        List(queue) { entry in
+        List(queue.steps) { entry in
             HStack {
                 Text(name(entry.id))
                 Text("Ring \(entry.ring)").font(.caption).foregroundStyle(.secondary)
@@ -216,10 +231,10 @@ struct RolloutView: View {
     private func outcomeLabel(_ outcome: Outcome?) -> some View {
         switch outcome {
         case .deployed(let succeeded):
-            Label("Deployed (\(succeeded))", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            Label("Deployed (\(succeeded))", systemImage: "checkmark.circle.fill").labelStyle(.tintedIcon(.green))
         case .failed(let message):
             Label("Deployed with problems", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
                 .help(message)
         case .noChanges:
             Label("Nothing to deploy", systemImage: "equal.circle").foregroundStyle(.secondary)
@@ -236,13 +251,16 @@ struct RolloutView: View {
     private var footer: some View {
         switch stage {
         case .setup:
-            Text("\(queue.count) tenant\(queue.count == 1 ? "" : "s") in \(Set(queue.map(\.ring)).count) ring\(Set(queue.map(\.ring)).count == 1 ? "" : "s")")
+            Text("\(queue.count) tenant\(queue.count == 1 ? "" : "s") in \(queue.ringCount) ring\(queue.ringCount == 1 ? "" : "s")")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
-            Button("Start Rollout") { start(0) }
+            Button("Start Rollout") {
+                frozenQueue = RolloutQueue(entries, name: name)
+                start(0)
+            }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(queue.isEmpty || deployService.isBusy)
@@ -296,12 +314,13 @@ struct RolloutView: View {
     /// already on the latest release has nothing to deploy.
     private func prepare(_ index: Int) async {
         let entry = queue[index]
-        guard case .catalogRelease(let sourceID) = change else {
-            readyIndex = index
-            return
-        }
+        // removed by a teammate since the rollout started
         guard let tenant = tenantStore.tenant(id: entry.id) else {
             prepareError = "This tenant is no longer connected."
+            return
+        }
+        guard case .catalogRelease(let sourceID) = change else {
+            readyIndex = index
             return
         }
         do {
@@ -353,15 +372,10 @@ struct RolloutView: View {
     }
 
     private func advance(from index: Int) {
-        let next = index + 1
-        guard next < queue.count else {
-            stage = .finished
-            return
-        }
-        if pauseBetweenRings && queue[next].ring != queue[index].ring {
-            stage = .ringPause(next: next)
-        } else {
-            start(next)
+        switch queue.next(after: index, pauseBetweenRings: pauseBetweenRings) {
+        case .finished: stage = .finished
+        case .pause(let next): stage = .ringPause(next: next)
+        case .start(let next): start(next)
         }
     }
 

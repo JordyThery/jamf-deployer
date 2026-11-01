@@ -28,6 +28,8 @@ struct TenantDetailView: View {
     @State private var handOverTypedName = ""
     @State private var keepOutcomes: [String: String] = [:]
     @State private var isUpdatingSecret = false
+    /// This Mac's client ID or username for the tenant (Team Mode), cached.
+    @State private var engineerClientID: (tenantID: UUID, value: String)?
     @State private var isConfirmingForceUnlock = false
     @State private var unlockError: String?
     @State private var catalog: LoadedCatalog?
@@ -35,6 +37,10 @@ struct TenantDetailView: View {
 
     private var tenant: Tenant? {
         tenantStore.tenant(id: tenantID)
+    }
+
+    private func shownClientID(_ tenant: Tenant) -> String {
+        engineerClientID?.tenantID == tenant.id ? engineerClientID?.value ?? tenant.clientID : tenant.clientID
     }
 
     var body: some View {
@@ -85,8 +91,12 @@ struct TenantDetailView: View {
                                     isConfirmingForceUnlock = true
                                 }
                                 .controlSize(.small)
-                                .help("Only for a lock left behind by an interrupted run")
-                                .confirmationDialog("Force unlock “\(tenant.name)”?", isPresented: $isConfirmingForceUnlock, titleVisibility: .visible) {
+                                // restarting the state backend would cut off running engine work
+                                .disabled(deployService.isEngineWorkRunning)
+                                .help(deployService.isEngineWorkRunning
+                                    ? "Wait for the running deploy, preview or check to finish"
+                                    : "Only for a lock left behind by an interrupted run")
+                                .confirmationDialog("Force Unlock “\(tenant.name)”?", isPresented: $isConfirmingForceUnlock, titleVisibility: .visible) {
                                     Button("Force Unlock", role: .destructive) {
                                         unlockError = nil
                                         Task {
@@ -99,13 +109,13 @@ struct TenantDetailView: View {
                                     }
                                     Button("Cancel", role: .cancel) {}
                                 } message: {
-                                    Text("Only force-unlock when \(lock.engineer)'s run was interrupted. Unlocking a live run lets two engineers change this tenant at once.")
+                                    Text("Only force-unlock when \(lock.engineer)’s run was interrupted. Unlocking a live run lets two engineers change this tenant at once.")
                                 }
                             }
                             if let unlockError {
                                 Label(unlockError, systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption)
-                                    .foregroundStyle(.orange)
+                                    .labelStyle(.tintedIcon(.orange))
                             }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,7 +144,7 @@ struct TenantDetailView: View {
                     if let failure = deployService.fleetCheckFailure(for: tenant.id) {
                         Label("The last check for changes failed: \(failure)", systemImage: "exclamationmark.triangle.fill")
                             .font(.callout)
-                            .foregroundStyle(.orange)
+                            .labelStyle(.tintedIcon(.orange))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     driftSection(tenant)
@@ -148,7 +158,7 @@ struct TenantDetailView: View {
                                 LabeledContent("Connected through", value: "Jamf Pro API")
                                 LabeledContent("Jamf Pro URL", value: tenant.jamfProURL ?? "")
                                 LabeledContent(tenant.jamfProAuth == .userAccount ? "Username" : "Client ID") {
-                                    Text(tenant.engineerClientID)
+                                    Text(shownClientID(tenant))
                                         .font(.callout.monospaced())
                                         .textSelection(.enabled)
                                 }
@@ -158,7 +168,7 @@ struct TenantDetailView: View {
                                     Text(tenant.apiScope == .environment ? "Platform environment" : "Tenant (legacy)")
                                 }
                                 LabeledContent("Client ID") {
-                                    Text(tenant.engineerClientID)
+                                    Text(shownClientID(tenant))
                                         .font(.callout.monospaced())
                                         .textSelection(.enabled)
                                 }
@@ -236,6 +246,7 @@ struct TenantDetailView: View {
                             Text("Preflight")
                             if isRunningPreflight {
                                 ProgressView().controlSize(.small)
+                                    .accessibilityLabel("In progress")
                             }
                         }
                     }
@@ -246,7 +257,7 @@ struct TenantDetailView: View {
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Building blocks add new objects and settings to this tenant. Objects that already exist don't need a block — adopt them instead.")
+                            Text("Building blocks add new objects and settings to this tenant. Objects that already exist don’t need a block — adopt them instead.")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                             if let catalog {
@@ -281,7 +292,7 @@ struct TenantDetailView: View {
                         }
                     }
                     if tenant.handOverPending && !tenant.isHandedOver {
-                        GroupBox("Hand over") {
+                        GroupBox("Hand-Over") {
                             VStack(alignment: .leading, spacing: 8) {
                                 Label("Hand-over prepared: the next deploy stops managing everything in this tenant and archives its record. Every object stays in Jamf.", systemImage: "hand.raised")
                                     .font(.callout)
@@ -296,7 +307,7 @@ struct TenantDetailView: View {
                             .padding(4)
                         }
                     } else if deployService.isManaged(tenant) && !tenant.isHandedOver {
-                        GroupBox("Hand over") {
+                        GroupBox("Hand-Over") {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Stops managing everything: every object stays exactly as it is in Jamf, and this app archives its record. For when another team or tool takes over.")
                                     .font(.callout)
@@ -310,7 +321,7 @@ struct TenantDetailView: View {
                             .padding(4)
                         }
                     }
-                    } // end overview tab
+                    }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -350,12 +361,17 @@ struct TenantDetailView: View {
             .sheet(isPresented: $isUpdatingSecret) {
                 UpdateClientSecretSheet(tenant: tenant)
             }
+            // read from the Keychain once, not on every redraw; again after
+            // Update Client Secret… or a synced change of the record's ID
+            .task(id: "\(tenant.id)|\(tenant.clientID)|\(isUpdatingSecret)") {
+                engineerClientID = (tenant.id, tenant.engineerClientID)
+            }
             .onChange(of: appState.previewRequestCount) {
                 if !tenant.isHandedOver, hasAnythingToPreview(tenant) {
                     isPreviewing = true
                 }
             }
-            .alert("Hand over “\(tenant.name)”?", isPresented: $isConfirmingHandOver) {
+            .alert("Hand Over “\(tenant.name)”?", isPresented: $isConfirmingHandOver) {
                 TextField("Type the tenant name to confirm", text: $handOverTypedName)
                 Button("Cancel", role: .cancel) { handOverTypedName = "" }
                 Button("Prepare Hand-Over", role: .destructive) {
@@ -394,7 +410,7 @@ struct TenantDetailView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 if adoptedCount == 0 && blockCount == 0 {
-                    Text("Nothing in this tenant is managed yet. Already configured by hand? Adopt the existing objects — nothing is recreated. For what isn't there yet, add building blocks below.")
+                    Text("Nothing in this tenant is managed yet. Already configured by hand? Adopt the existing objects — nothing is recreated. For what isn’t there yet, add building blocks below.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -419,7 +435,7 @@ struct TenantDetailView: View {
                     Button("Add a Custom Object…", systemImage: "plus.rectangle.on.rectangle") {
                         isAddingCustomObject = true
                     }
-                    .help("Create an object the catalog doesn't cover, using a form built from the engine plugin's schema")
+                    .help("Create an object the catalog doesn’t cover, using a form built from the engine plugin’s schema")
                 }
                 .unavailableInDemoMode(deployService.isDemo)
                 .disabled(tenant.handOverPending)
@@ -494,12 +510,8 @@ struct TenantDetailView: View {
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(field.path)
                                         .font(.caption.bold().monospaced())
-                                    Text("− \(field.before)  (baseline)")
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.red)
-                                    Text("+ \(field.after)  (now in Jamf)")
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.green)
+                                    DiffLine(.before, "\(field.before)  (baseline)")
+                                    DiffLine(.after, "\(field.after)  (now in Jamf)")
                                     HStack(spacing: 8) {
                                         Button("Keep This Change") {
                                             let outcome = deployService.keepDrift(tenant: tenant, object: object, field: field)
@@ -556,6 +568,7 @@ struct TenantDetailView: View {
                     }
                     if isCheckingDrift {
                         ProgressView().controlSize(.small)
+                            .accessibilityLabel("In progress")
                     }
                 }
             }
@@ -568,6 +581,7 @@ struct TenantDetailView: View {
                         .foregroundStyle(.secondary)
                     if isCheckingDrift {
                         ProgressView().controlSize(.small)
+                            .accessibilityLabel("In progress")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -595,9 +609,7 @@ struct TenantDetailView: View {
             checks = [PreflightCheck(
                 id: "secret", title: "Stored credentials",
                 outcome: .fail,
-                detail: tenant.isJamfPro && tenant.jamfProAuth == .userAccount
-                    ? "The password is missing from the Keychain. Enter it with Update Password… in the Connection section."
-                    : "The client secret is missing from the Keychain. Enter it with Update Client Secret… in the Connection section."
+                detail: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
             )]
             return
         }
@@ -632,9 +644,13 @@ struct UpdateClientSecretSheet: View {
     @State private var secret = ""
     @State private var passphrase = ""
     @State private var message: String?
+    /// This Mac's client ID or username when the sheet opened, read from
+    /// the Keychain once rather than on every redraw.
+    @State private var savedClientID = ""
+    @State private var hasStatePassphrase = true
 
     private var secrets: TenantSecrets { TenantSecrets(tenantID: tenant.id) }
-    private var needsPassphrase: Bool { !deployService.isTeamMode && secrets.statePassphrase.load() == nil }
+    private var needsPassphrase: Bool { !deployService.isTeamMode && !hasStatePassphrase }
     private var usesPassword: Bool { tenant.isJamfPro && tenant.jamfProAuth == .userAccount }
 
     var body: some View {
@@ -642,9 +658,16 @@ struct UpdateClientSecretSheet: View {
             Form {
                 if deployService.isTeamMode {
                     TextField(usesPassword ? "Username" : "Client ID", text: $clientID)
+                    if ClientSecretUpdate.idChanged(isTeamMode: true, savedID: savedClientID, typedID: clientID), secret.isEmpty {
+                        // the old secret belongs to the old client
+                        Label(usesPassword ? "A new username needs its password." : "A new client ID needs its client secret.",
+                              systemImage: "exclamationmark.circle.fill")
+                            .font(.caption)
+                            .labelStyle(.tintedIcon(.orange))
+                    }
                     Text(usesPassword
-                        ? "Sign in with your own Jamf Pro account; it is kept in this Mac's Keychain."
-                        : "Use your own API client for this tenant; it is kept in this Mac's Keychain.")
+                        ? "Sign in with your own Jamf Pro account; it is kept in this Mac’s Keychain."
+                        : "Use your own API client for this tenant; it is kept in this Mac’s Keychain.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -653,7 +676,7 @@ struct UpdateClientSecretSheet: View {
                 SecureField(usesPassword ? "Password" : "Client secret", text: $secret)
                 if needsPassphrase {
                     SecureField("Recovery passphrase", text: $passphrase)
-                    Text("This Mac has no passphrase for the tenant's deployment state. Enter the one from its recovery sheet, or leave it empty for a tenant that was never deployed.")
+                    Text("This Mac has no passphrase for the tenant’s deployment state. Enter the one from its recovery sheet, or leave it empty for a tenant that was never deployed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -671,16 +694,26 @@ struct UpdateClientSecretSheet: View {
             Button("Save") { save() }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(secret.isEmpty && passphrase.isEmpty
-                    && (clientID == tenant.engineerClientID || clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                .disabled(!ClientSecretUpdate.canSave(
+                    isTeamMode: deployService.isTeamMode, savedID: savedClientID, typedID: clientID,
+                    secret: usesPassword ? secret : secret.trimmingCharacters(in: .whitespacesAndNewlines),
+                    passphrase: passphrase.trimmingCharacters(in: .whitespacesAndNewlines)))
         }
         .frame(width: 480, height: needsPassphrase || deployService.isTeamMode ? 340 : 260)
-        .onAppear { clientID = tenant.engineerClientID }
+        .onAppear {
+            savedClientID = tenant.engineerClientID
+            clientID = savedClientID
+            hasStatePassphrase = secrets.statePassphrase.load() != nil
+        }
     }
 
     private func save() {
         let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Passwords are kept exactly as typed; secrets are trimmed (pasted).
+        let value = usesPassword ? secret : secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ClientSecretUpdate.canSave(isTeamMode: deployService.isTeamMode, savedID: savedClientID,
+                                         typedID: clientID, secret: value, passphrase: trimmed) else { return }
         var savedID = true
         if deployService.isTeamMode, !trimmedID.isEmpty {
             // The record's own ID needs no copy on this Mac.
@@ -690,14 +723,30 @@ struct UpdateClientSecretSheet: View {
                 savedID = secrets.engineerClientID.save(trimmedID)
             }
         }
-        // Passwords are kept exactly as typed; secrets are trimmed (pasted).
-        let value = usesPassword ? secret : secret.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedSecret = value.isEmpty || secrets.platformClientSecret.save(value)
         let savedPassphrase = trimmed.isEmpty || secrets.statePassphrase.save(trimmed)
         if savedID && savedSecret && savedPassphrase {
             dismiss()
         } else {
-            message = "The Keychain did not accept the change."
+            message = "The Keychain refused to save the secret, so the change wasn’t saved."
         }
+    }
+}
+
+/// When Update Client Secret… can save. In Team Mode a changed client ID
+/// or username needs its own secret: the stored one belongs to the old one.
+nonisolated enum ClientSecretUpdate {
+    static func idChanged(isTeamMode: Bool, savedID: String, typedID: String) -> Bool {
+        let typed = typedID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isTeamMode && !typed.isEmpty && typed != savedID
+    }
+
+    /// - Parameters: `secret` and `passphrase` as they would be saved.
+    static func canSave(isTeamMode: Bool, savedID: String, typedID: String,
+                        secret: String, passphrase: String) -> Bool {
+        if idChanged(isTeamMode: isTeamMode, savedID: savedID, typedID: typedID) {
+            return !secret.isEmpty
+        }
+        return !secret.isEmpty || !passphrase.isEmpty
     }
 }

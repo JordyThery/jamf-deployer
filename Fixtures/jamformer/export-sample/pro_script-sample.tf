@@ -19,42 +19,42 @@ resource "jamfplatform_pro_script" "elevation_promote_current_user_to_admin" {
   script_contents = file("${path.module}/support_files/scripts/[elevation] Promote current user to admin.sh")
 }
 
-resource "jamfplatform_pro_script" "compliance_benchmark_6ac1eb687d59fd2f1238db72_golden_gate_sh" {
+resource "jamfplatform_pro_script" "compliance_benchmark_000000000000000000000a02_golden_gate_sh" {
   provider = jamfplatform
 
   category_id     = jamfplatform_pro_category.cis_level_1.id
-  name            = "compliance_benchmark_6ac1eb687d59fd2f1238db72_golden_gate.sh"
+  name            = "compliance_benchmark_000000000000000000000a02_golden_gate.sh"
   os_requirements = "27.x"
   priority        = "AFTER"
-  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_6ac1eb687d59fd2f1238db72_golden_gate.sh.zsh")
+  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_000000000000000000000a02_golden_gate.sh.zsh")
 }
 
-resource "jamfplatform_pro_script" "compliance_benchmark_6ac1eb687d59fd2f1238db72_sequoia_sh" {
+resource "jamfplatform_pro_script" "compliance_benchmark_000000000000000000000a02_sequoia_sh" {
   provider = jamfplatform
 
   category_id     = jamfplatform_pro_category.cis_level_1.id
-  name            = "compliance_benchmark_6ac1eb687d59fd2f1238db72_sequoia.sh"
+  name            = "compliance_benchmark_000000000000000000000a02_sequoia.sh"
   os_requirements = "15.x"
   priority        = "AFTER"
-  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_6ac1eb687d59fd2f1238db72_sequoia.sh.zsh")
+  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_000000000000000000000a02_sequoia.sh.zsh")
 }
 
-resource "jamfplatform_pro_script" "compliance_benchmark_6ac1eb687d59fd2f1238db72_tahoe_sh" {
+resource "jamfplatform_pro_script" "compliance_benchmark_000000000000000000000a02_tahoe_sh" {
   provider = jamfplatform
 
   category_id     = jamfplatform_pro_category.cis_level_1.id
-  name            = "compliance_benchmark_6ac1eb687d59fd2f1238db72_tahoe.sh"
+  name            = "compliance_benchmark_000000000000000000000a02_tahoe.sh"
   os_requirements = "26.x"
   priority        = "AFTER"
-  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_6ac1eb687d59fd2f1238db72_tahoe.sh.zsh")
+  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_000000000000000000000a02_tahoe.sh.zsh")
 }
 
-resource "jamfplatform_pro_script" "compliance_benchmark_6ad2dac512daba130f642175_tahoe_sh" {
+resource "jamfplatform_pro_script" "compliance_benchmark_000000000000000000000a01_tahoe_sh" {
   provider = jamfplatform
 
   category_id     = jamfplatform_pro_category.jd_spike_cis_l1_monitor.id
-  name            = "compliance_benchmark_6ad2dac512daba130f642175_tahoe.sh"
+  name            = "compliance_benchmark_000000000000000000000a01_tahoe.sh"
   os_requirements = "26.x"
   priority        = "AFTER"
-  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_6ad2dac512daba130f642175_tahoe.sh.zsh")
+  script_contents = file("${path.module}/support_files/scripts/compliance_benchmark_000000000000000000000a01_tahoe.sh.zsh")
 }

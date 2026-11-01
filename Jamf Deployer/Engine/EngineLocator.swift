@@ -4,21 +4,29 @@ import Foundation
 /// the app bundle; during development everything resolves from the repo the
 /// source was built from.
 nonisolated enum EngineLocator {
+    #if DEBUG
     /// The repo root, derived from this source file's compile-time path.
-    /// Development fallback only.
-    private static var repoRootURL: URL {
+    /// Development fallback only: release builds don't carry the path.
+    private static var repoRootURL: URL? {
         URL(filePath: #filePath)                 // …/Jamf Deployer/Engine/EngineLocator.swift
             .deletingLastPathComponent()         // …/Jamf Deployer/Engine
             .deletingLastPathComponent()         // …/Jamf Deployer (app folder)
             .deletingLastPathComponent()         // repo root
     }
+    #else
+    private static var repoRootURL: URL? { nil }
+    #endif
 
     private static func locate(_ relativePath: String) -> URL {
-        if let bundled = Bundle.main.resourceURL?.appending(path: relativePath),
-           FileManager.default.fileExists(atPath: bundled.path) {
+        let bundled = Bundle.main.resourceURL?.appending(path: relativePath)
+        if let bundled, FileManager.default.fileExists(atPath: bundled.path) {
             return bundled
         }
-        return repoRootURL.appending(path: relativePath)
+        // A release build always has its resources; a missing one stays
+        // missing (callers report it) instead of pointing elsewhere.
+        return repoRootURL?.appending(path: relativePath)
+            ?? bundled
+            ?? URL(filePath: "/nonexistent").appending(path: relativePath)
     }
 
     static var tofuURL: URL {

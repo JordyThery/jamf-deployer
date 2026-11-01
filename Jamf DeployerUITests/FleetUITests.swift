@@ -74,10 +74,10 @@ final class FleetUITests: DeployerUITestCase {
         let fileVault = blockCheckbox("FileVault")
         XCTAssertTrue(fileVault.waitForExistence(timeout: 10))
         fileVault.click()
-        XCTAssertTrue(anyContaining("Cannot be used together with").waitForExistence(timeout: 10), "The conflict is not shown")
+        XCTAssertTrue(anyContaining("Can’t be used together with").waitForExistence(timeout: 10), "The conflict is not shown")
         fileVault.click()
         if dialogButton("Remove from Tenant").waitForExistence(timeout: 3) { dialogButton("Remove from Tenant").click() }
-        XCTAssertFalse(anyContaining("Cannot be used together with").waitForExistence(timeout: 3))
+        XCTAssertFalse(anyContaining("Can’t be used together with").waitForExistence(timeout: 3))
     }
 
     func test6RemoveEverything() throws {

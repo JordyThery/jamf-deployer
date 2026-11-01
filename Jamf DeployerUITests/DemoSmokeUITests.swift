@@ -38,7 +38,7 @@ final class DemoSmokeUITests: DeployerUITestCase {
         checkForChangesOnContoso()
 
         tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
-        let unavailable = anyContaining("Deploying isn't available in Demo Mode.")
+        let unavailable = anyContaining("Deploying isn’t available in Demo Mode.")
         XCTAssertTrue(unavailable.waitForExistence(timeout: 60), "The preview didn't reach its review step")
         XCTAssertTrue(anyContaining("Reverts the change found in Jamf").exists, "The Teams update isn't in the plan")
         let deploy = app.sheets.buttons["Deploy"].firstMatch

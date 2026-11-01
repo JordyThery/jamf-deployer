@@ -110,11 +110,11 @@ final class TerraformManager {
         var errorDescription: String? {
             switch self {
             case .downloadFailed:
-                "Terraform could not be downloaded from HashiCorp. Check your connection and try again."
+                "Terraform couldn’t be downloaded from HashiCorp. Check your connection and try again."
             case .checksumMismatch:
-                "The downloaded Terraform did not match its published checksum, so it was discarded."
+                "The downloaded Terraform didn’t match its published checksum, so it was discarded."
             case .unpackFailed:
-                "The Terraform download could not be unpacked."
+                "The Terraform download couldn’t be unpacked."
             }
         }
     }

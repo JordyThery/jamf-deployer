@@ -15,6 +15,9 @@ struct RepositoryExportSheet: View {
     @State private var movesTenants = false
     @State private var remoteURL = ""
     @State private var acceptsMove = false
+    /// Moving pushes each tenant's state to GitHub, where Terraform keeps it
+    /// unencrypted, secret settings included: the user says so first.
+    @State private var acceptsUnencryptedState = false
     @State private var isWorking = false
     @State private var errorMessage: String?
     @State private var result: TenantDeployService.RepositoryExportResult?
@@ -38,8 +41,16 @@ struct RepositoryExportSheet: View {
     }
 
     private var canExport: Bool {
-        !chosen.isEmpty && folder != nil && !isWorking
-            && (!movesTenants || (!remoteURL.trimmingCharacters(in: .whitespaces).isEmpty && acceptsMove))
+        Self.canExport(hasTenants: !chosen.isEmpty, hasFolder: folder != nil, isWorking: isWorking,
+                       movesTenants: movesTenants, remoteURL: remoteURL, acceptsMove: acceptsMove,
+                       acceptsUnencryptedState: acceptsUnencryptedState)
+    }
+
+    nonisolated static func canExport(hasTenants: Bool, hasFolder: Bool, isWorking: Bool, movesTenants: Bool,
+                                      remoteURL: String, acceptsMove: Bool, acceptsUnencryptedState: Bool) -> Bool {
+        hasTenants && hasFolder && !isWorking
+            && (!movesTenants || (!remoteURL.trimmingCharacters(in: .whitespaces).isEmpty
+                                  && acceptsMove && acceptsUnencryptedState))
     }
 
     var body: some View {
@@ -77,7 +88,7 @@ struct RepositoryExportSheet: View {
     private var form: some View {
         Form {
             Section {
-                Text("Writes the chosen tenants as an ordinary Terraform repository: one module per building block, one folder per tenant with its settings, and GitHub workflows that plan pull requests, apply merges and check for changes made in Jamf. Nothing is recreated: each tenant's objects carry over as they are.")
+                Text("Writes the chosen tenants as an ordinary Terraform repository: one module per building block, one folder per tenant with its settings, and GitHub workflows that plan pull requests, apply merges and check for changes made in Jamf. Nothing is recreated: each tenant’s objects carry over as they are.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -93,7 +104,7 @@ struct RepositoryExportSheet: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(tenant.name)
                             Text(reason ?? (hasUndeployedBlocks(tenant)
-                                    ? "\(tenant.connectionLabel) · has blocks that are not deployed"
+                                    ? "\(tenant.connectionLabel) · has blocks that aren’t deployed"
                                     : tenant.connectionLabel))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -129,7 +140,13 @@ struct RepositoryExportSheet: View {
                 if movesTenants {
                     TextField("Repository URL", text: $remoteURL, prompt: Text("https://github.com/org/jamf-tenants.git"))
                         .font(.callout.monospaced())
-                    Text("An empty private repository you can push to. Each tenant's state moves to its terraform-state branch, and the export becomes its first commit. Tenants must have nothing left to deploy. Terraform stores state unencrypted, so keep the repository private.")
+                    Text("An empty repository you can push to. Each tenant’s state moves to its terraform-state branch unencrypted, so keep the repository private.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Toggle("I understand that the state on GitHub isn’t encrypted", isOn: $acceptsUnencryptedState)
+                        .toggleStyle(.checkbox)
+                    Text("It holds the tenants’ secret settings in plain text: anyone who can read the repository can read them.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -149,7 +166,7 @@ struct RepositoryExportSheet: View {
 
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .labelStyle(.tintedIcon(.orange))
                     .textSelection(.enabled)
                     .accessibilityIdentifier("exportError")
             }
@@ -170,11 +187,11 @@ struct RepositoryExportSheet: View {
             }
             Section("Next steps") {
                 if result.moved {
-                    Text("1. Create each tenant's GitHub Environments: in the folder, run ./create-environments.sh with the repository's OWNER/NAME. It asks for each secret with typing hidden and sends it straight to GitHub; plans can use a read-only client.")
+                    Text("1. Create each tenant’s GitHub Environments: in the folder, run ./create-environments.sh with the repository’s OWNER/NAME. It asks for each secret with typing hidden and sends it straight to GitHub; plans can use a read-only client.")
                     Text("2. Protect main: require a pull request, an approving review and the Plan result check (README.md, Setting up).")
                     Text("3. Make the next change with a pull request. Its plan should show only that change.")
                 } else {
-                    Text("Read README.md for how the repository works. Each tenant's folder under tenants/ holds its settings in tenant.auto.tfvars.")
+                    Text("Read README.md for how the repository works. Each tenant’s folder under tenants/ holds its settings in tenant.auto.tfvars.")
                 }
                 Link("Continue with Graduating to Terraform", destination: DocsLinks.stage(3))
             }

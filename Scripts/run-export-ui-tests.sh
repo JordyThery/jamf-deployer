@@ -25,6 +25,8 @@ set -e
 [[ -n "$1" ]] || { echo "usage: $0 <owner/repository>" >&2; exit 64 }
 cd "$(dirname "$0")/.."
 REPO="$1"
+source Scripts/test-repository-guard.sh
+require_test_repository "$REPO" || exit 1
 A="${EXPORT_SERVICE:-JamfDeployer-Spike}"
 kc() { security find-generic-password -s "$1" -a "$2" -w }
 WORK="$(mktemp -d /tmp/jamf-deployer-exporttest.XXXXXX)"

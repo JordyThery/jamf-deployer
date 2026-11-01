@@ -24,6 +24,10 @@ struct BaselineEditorView: View {
     @State private var presetSkippedNames: [String] = []
     /// Why the last unchecking was refused, shown until the next change.
     @State private var dependencyNotice: String?
+    /// "blockID/key" of the selected blocks' required secret settings that
+    /// have a value in the Keychain: read when the selection changes or a
+    /// secret is saved, not on every redraw. Nil until read.
+    @State private var filledSecrets: Set<String>?
 
     private var selectionIndex: [String: BlockSelection] {
         Dictionary(uniqueKeysWithValues: tenant.blockSelections.map { ($0.blockID, $0) })
@@ -53,7 +57,7 @@ struct BaselineEditorView: View {
                     isCheckingUpdates = true
                 }
                 .unavailableInDemoMode(deployService.isDemo)
-                .help("Checks the tenant's catalog sources for newer releases, block by block")
+                .help("Checks the tenant’s catalog sources for newer releases, block by block")
                 Spacer()
                 Text("\(availableSelectionCount) of \(supportedBlockCount) blocks selected")
                     .font(.callout)
@@ -98,13 +102,7 @@ struct BaselineEditorView: View {
                     // catalog, so it can only be released, never deleted.
                     let isDeployed = tenant.deployedBlockVersions[selection.blockID] != nil
                     Button(isDeployed ? "Stop Managing" : "Remove from Baseline", role: isDeployed ? nil : .destructive) {
-                        var updated = tenant
-                        updated.blockSelections.removeAll { $0.blockID == selection.blockID }
-                        if isDeployed {
-                            updated.pendingRemovals.removeAll { $0.blockID == selection.blockID }
-                            updated.pendingRemovals.append(BlockRemoval(blockID: selection.blockID, keepInJamf: true))
-                        }
-                        tenantStore.update(updated)
+                        updateBaseline { BaselineRules.droppingMissing(selection.blockID, in: $0) }
                     }
                     .controlSize(.small)
                     .help(isDeployed
@@ -117,6 +115,9 @@ struct BaselineEditorView: View {
         }
         .sheet(isPresented: $isCheckingUpdates) {
             BaselineUpdateSheet(tenant: tenant)
+        }
+        .task(id: "\(tenant.id)|\(tenant.blockSelections.map(\.blockID).joined(separator: ","))") {
+            readFilledSecrets()
         }
         .confirmationDialog(
             "Apply “\(presetPendingApply?.name ?? "")”?",
@@ -134,7 +135,7 @@ struct BaselineEditorView: View {
             Text("The preset replaces the current block selection. Deployed blocks it leaves out stop being managed; their objects stay in Jamf.")
         }
         .confirmationDialog(
-            "Remove “\(blockPendingRemoval?.name ?? "")” from the baseline?",
+            "Remove “\(blockPendingRemoval?.name ?? "")” from the Baseline?",
             isPresented: Binding(
                 get: { blockPendingRemoval != nil },
                 set: { if !$0 { blockPendingRemoval = nil } }
@@ -149,7 +150,7 @@ struct BaselineEditorView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Remove from Tenant deletes the block's objects from Jamf on the next deploy; tenant-wide settings keep their current values. Stop Managing leaves everything in Jamf untouched — the app just stops tracking it. The preview shows exactly what happens either way.")
+            Text("Remove from Tenant deletes the block’s objects from Jamf on the next deploy; tenant-wide settings keep their current values. Stop Managing leaves everything in Jamf untouched — the app just stops tracking it. The preview shows exactly what happens either way.")
         }
     }
 
@@ -159,10 +160,9 @@ struct BaselineEditorView: View {
         block.settings.first { setting in
             guard setting.required, setting.type != .bool else { return false }
             if setting.type == .secret {
-                let stored = TenantSecrets(tenantID: tenant.id)
-                    .blockSetting(blockID: block.id, key: setting.key)
-                    .load()
-                return (stored ?? "").isEmpty
+                // not read yet: no warning rather than a flash of one
+                guard let filledSecrets else { return false }
+                return !filledSecrets.contains("\(block.id)/\(setting.key)")
             }
             let value = selection?.settings[setting.key] ?? setting.default
             return value.isEmpty
@@ -276,7 +276,8 @@ struct BaselineEditorView: View {
                     systemImage: isSelected ? "exclamationmark.circle.fill" : "info.circle"
                 )
                 .font(.caption)
-                .foregroundStyle(isSelected ? .orange : .secondary)
+                .labelStyle(.tintedIcon(isSelected ? .orange : .secondary))
+                .foregroundStyle(isSelected ? .primary : .secondary)
             }
 
             if let removal = tenant.pendingRemovals.first(where: { $0.blockID == block.id }) {
@@ -287,7 +288,7 @@ struct BaselineEditorView: View {
                     systemImage: removal.keepInJamf ? "hand.raised" : "trash"
                 )
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
             }
 
             if isSelected, let missing = prerequisitesMissing.first {
@@ -302,13 +303,13 @@ struct BaselineEditorView: View {
                     systemImage: "exclamationmark.circle.fill"
                 )
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
             }
 
             if isSelected, let selection, let message = scopeProblem(block, selection: selection) {
                 Label(message, systemImage: "exclamationmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .labelStyle(.tintedIcon(.orange))
             }
 
             if isSelected, let missing = firstMissingRequiredSetting(block, selection: selection) {
@@ -317,33 +318,33 @@ struct BaselineEditorView: View {
                     systemImage: "exclamationmark.circle.fill"
                 )
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
             }
 
             if isSelected, let other = conflictingSelection(for: block) {
                 Label(
-                    "Cannot be used together with “\(other.name)”: both do the same job in different ways. Deselect one of them.",
+                    "Can’t be used together with “\(other.name)”: both do the same job in different ways. Deselect one of them.",
                     systemImage: "exclamationmark.circle.fill"
                 )
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
             }
 
             if isSelected {
                 ForEach(unmetDependencies(for: block), id: \.self) { message in
                     Label(message, systemImage: "link.badge.plus")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .labelStyle(.tintedIcon(.orange))
                 }
             }
 
-            if isSelected, block.capturedFromTenant == tenant.scopeID {
+            if isSelected, block.wasCaptured(fromTenantScopeID: tenant.scopeID) {
                 Label(
                     "Captured from this tenant — its objects already exist here and deploying would create duplicates. Use Adopt Existing Configuration to manage the originals instead.",
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
             }
 
             if expandedBlockID == block.id, isSelected {
@@ -351,7 +352,8 @@ struct BaselineEditorView: View {
                     tenant: tenant,
                     block: block,
                     selection: selection ?? defaultSelection(for: block, selectedIDs: selectedIDs),
-                    providers: providerChoices(excluding: block.id)
+                    providers: providerChoices(excluding: block.id),
+                    onSecretSaved: readFilledSecrets
                 )
                 .padding(.leading, 22)
             }
@@ -360,56 +362,57 @@ struct BaselineEditorView: View {
         .background(.quaternary.opacity(isSelected ? 0.5 : 0.25), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func toggle(_ block: BlockMetadata, on: Bool) {
-        dependencyNotice = nil
-        var updated = tenant
-        if on {
-            guard selectionIndex[block.id] == nil else { return }
-            // Re-selecting a block that was pending removal just cancels it.
-            updated.pendingRemovals.removeAll { $0.blockID == block.id }
-            // Pull in prerequisites first.
-            for requirement in block.requires where selectionIndex[requirement] == nil {
-                if let required = catalog.block(id: requirement) {
-                    updated.blockSelections.append(defaultSelection(for: required, selectedIDs: selectedIDs))
+    /// The tenant as the store has it now: a drift check, preflight or team
+    /// sync may have changed it since this screen was drawn.
+    private var currentTenant: Tenant {
+        tenantStore.tenant(id: tenant.id) ?? tenant
+    }
+
+    /// Changes the baseline of the stored record, leaving the rest of it as
+    /// the store has it.
+    private func updateBaseline(_ change: (Tenant) -> Tenant?) {
+        guard let updated = change(currentTenant) else { return }
+        tenantStore.update(updated)
+    }
+
+    private func readFilledSecrets() {
+        let secrets = TenantSecrets(tenantID: tenant.id)
+        var filled = Set<String>()
+        for selection in tenant.blockSelections {
+            guard let block = catalog.block(id: selection.blockID) else { continue }
+            for setting in block.settings where setting.type == .secret && setting.required {
+                if !(secrets.blockSetting(blockID: block.id, key: setting.key).load() ?? "").isEmpty {
+                    filled.insert("\(block.id)/\(setting.key)")
                 }
             }
-            let selectedAfter = selectedIDs.union([block.id] + block.requires)
-            let selection = defaultSelection(for: block, selectedIDs: selectedAfter)
-            updated.blockSelections.append(selection)
-            // Blocks waiting for a group or category this block creates pick
-            // up their declared default now.
-            for index in updated.blockSelections.indices {
-                guard let other = catalog.block(id: updated.blockSelections[index].blockID) else { continue }
-                Self.adoptDefaults(of: other, into: &updated.blockSelections[index], from: block)
-            }
+        }
+        filledSecrets = filled
+    }
+
+    private func toggle(_ block: BlockMetadata, on: Bool) {
+        dependencyNotice = nil
+        if on {
+            guard let updated = BaselineRules.selecting(block, in: currentTenant, catalog: catalog) else { return }
             tenantStore.update(updated)
-            if scopeProblem(block, selection: selection) != nil {
+            if let selection = updated.blockSelections.last(where: { $0.blockID == block.id }),
+               scopeProblem(block, selection: selection) != nil {
                 expandedBlockID = block.id
             }
         } else {
-            // Refuse removal while another selected block requires this one.
-            let dependents = updated.blockSelections.compactMap { catalog.block(id: $0.blockID) }
-                .filter { $0.requires.contains(block.id) }
-            guard dependents.isEmpty else {
-                dependencyNotice = "\(dependents.map(\.name).formatted(.list(type: .and))) need\(dependents.count == 1 ? "s" : "") \(block.name) — remove \(dependents.count == 1 ? "it" : "them") first."
-                return
-            }
-            if tenant.deployedBlockVersions[block.id] != nil {
+            switch BaselineRules.unselecting(block, in: currentTenant, catalog: catalog) {
+            case .refused(let notice):
+                dependencyNotice = notice
+            case .asksHowToRemove:
                 // Deployed blocks get the Remove / Stop managing choice.
                 blockPendingRemoval = block
-            } else {
-                updated.blockSelections.removeAll { $0.blockID == block.id }
+            case .removed(let updated):
                 tenantStore.update(updated)
             }
         }
     }
 
     private func confirmRemoval(_ block: BlockMetadata, keepInJamf: Bool) {
-        var updated = tenant
-        updated.blockSelections.removeAll { $0.blockID == block.id }
-        updated.pendingRemovals.removeAll { $0.blockID == block.id }
-        updated.pendingRemovals.append(BlockRemoval(blockID: block.id, keepInJamf: keepInJamf))
-        tenantStore.update(updated)
+        updateBaseline { BaselineRules.removing(block.id, keepInJamf: keepInJamf, in: $0) }
     }
 
     private var selectedIDs: Set<String> {
@@ -421,22 +424,6 @@ struct BaselineEditorView: View {
     /// otherwise the user picks (an existing group, no category).
     private func defaultSelection(for block: BlockMetadata, selectedIDs: Set<String>) -> BlockSelection {
         BlockSelection.defaults(for: block, catalog: catalog, selectedIDs: selectedIDs)
-    }
-
-    /// Fills an unchosen scope, or the "no category" placeholder, with the
-    /// block's default when `provider` is the block that creates it.
-    static func adoptDefaults(of block: BlockMetadata, into selection: inout BlockSelection, from provider: BlockMetadata) {
-        if block.scope.kind != .none, selection.existingScope == nil, selection.providedScope == nil,
-           let provided = block.scope.default.flatMap(ProvidedObject.init(reference:)),
-           provided.blockID == provider.id {
-            selection.providedScope = provided
-        }
-        if block.acceptsCategory, selection.existingCategory == .noCategory,
-           let provided = block.defaultCategory.flatMap(ProvidedObject.init(reference:)),
-           provided.blockID == provider.id {
-            selection.existingCategory = nil
-            selection.providedCategory = provided
-        }
     }
 
     /// Selected blocks that create groups or categories other blocks can use.
@@ -462,42 +449,16 @@ struct BaselineEditorView: View {
             guard let provided else { continue }
             if selectionIndex[provided.blockID] == nil {
                 let providerName = catalog.block(id: provided.blockID)?.name ?? provided.blockID
-                return "Uses the \(kind) “\(provided.name)” from \(providerName), which is not selected. Select it, or pick another \(kind) in Settings."
+                return "Uses the \(kind) “\(provided.name)” from \(providerName), which isn’t selected. Select it, or pick another \(kind) in Settings."
             }
         }
         return nil
     }
 
     private func apply(_ preset: Preset) {
-        var updated = tenant
-        presetSkippedNames = preset.blocks.filter { catalog.block(id: $0) != nil && !supports($0) }
-            .map { catalog.block(id: $0)?.name ?? $0 }
-        let presetBlocks = preset.blocks.filter(supports)
-        let presetIDs = Set(presetBlocks)
-        updated.blockSelections = presetBlocks.compactMap { blockID in
-            guard let block = catalog.block(id: blockID) else { return nil }
-            var selection = defaultSelection(for: block, selectedIDs: presetIDs)
-            for (key, value) in preset.defaults[blockID] ?? [:] {
-                selection.settings[key] = value
-            }
-            if let scope = preset.scopes[blockID], block.scope.kind != .none,
-               let provided = ProvidedObject(reference: scope) {
-                selection.providedScope = provided
-            }
-            if let category = preset.categories[blockID], block.acceptsCategory,
-               let provided = ProvidedObject(reference: category) {
-                selection.existingCategory = nil
-                selection.providedCategory = provided
-            }
-            return selection
-        }
-        // Deployed blocks the preset leaves out are released, never deleted.
-        for blockID in tenant.deployedBlockVersions.keys where !presetIDs.contains(blockID)
-            && !updated.pendingRemovals.contains(where: { $0.blockID == blockID }) {
-            updated.pendingRemovals.append(BlockRemoval(blockID: blockID, keepInJamf: true))
-        }
-        updated.pendingRemovals.removeAll { presetIDs.contains($0.blockID) }
-        tenantStore.update(updated)
+        let result = BaselineRules.applying(preset, to: currentTenant, catalog: catalog, supports: supports)
+        presetSkippedNames = result.skipped
+        tenantStore.update(result.tenant)
     }
 }
 
@@ -511,6 +472,8 @@ struct BlockSettingsForm: View {
     let selection: BlockSelection
     /// Other selected blocks that create groups or categories.
     var providers: [Provider] = []
+    /// Called after a secret setting reached the Keychain.
+    var onSecretSaved: () -> Void = {}
 
     struct Provider: Hashable {
         var blockID: String
@@ -536,7 +499,7 @@ struct BlockSettingsForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TerraformTerm("input variables of the block's module; values in tenant.auto.tfvars")
+            TerraformTerm("input variables of the block’s module; values in tenant.auto.tfvars")
             if block.scope.kind != .none {
                 scopePicker
             }
@@ -544,9 +507,9 @@ struct BlockSettingsForm: View {
                 categoryPicker
             }
             if let lookupError {
-                Label("Existing groups and categories could not be loaded: \(lookupError)", systemImage: "exclamationmark.triangle")
+                Label("Existing groups and categories couldn’t be loaded: \(lookupError)", systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .labelStyle(.tintedIcon(.orange))
             }
 
             let sections = Dictionary(grouping: block.settings, by: \.section)
@@ -671,7 +634,7 @@ struct BlockSettingsForm: View {
             }
         }
         .frame(maxWidth: 420)
-        .help("The Jamf Pro category this block's objects are filed under")
+        .help("The Jamf Pro category this block’s objects are filed under")
     }
 
     private var categoryBinding: Binding<String> {
@@ -735,34 +698,27 @@ struct BlockSettingsForm: View {
         case .secret:
             // Secret settings live in the Keychain only; tenant.json (which
             // syncs through team spaces) never sees the value.
-            SecureField(setting.title, text: Binding(
-                get: {
-                    TenantSecrets(tenantID: tenant.id)
-                        .blockSetting(blockID: block.id, key: setting.key)
-                        .load() ?? ""
-                },
-                set: { newValue in
-                    TenantSecrets(tenantID: tenant.id)
-                        .blockSetting(blockID: block.id, key: setting.key)
-                        .save(newValue)
-                }
-            ))
-            .frame(maxWidth: 360)
-            .help(setting.description)
+            SecretSettingField(tenantID: tenant.id, blockID: block.id, setting: setting, onSave: onSecretSaved)
+                .frame(maxWidth: 360)
+                .help(setting.description)
         case .appPicker:
             HStack(spacing: 8) {
                 Button("Choose Apps…", systemImage: "app.badge") {
                     isPickingApps = true
                 }
-                let count = AppCatalogApp.decode(settingValue: binding.wrappedValue).count
-                Text(count == 0 ? "No apps selected yet" : "\(count) app\(count == 1 ? "" : "s") selected")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                appCount(AppCatalogApp.decodeIfReadable(settingValue: binding.wrappedValue)?.count)
             }
             .sheet(isPresented: $isPickingApps) {
                 AppCatalogPickerView(tenant: tenant, apps: Binding(
                     get: { AppCatalogApp.decode(settingValue: binding.wrappedValue) },
-                    set: { binding.wrappedValue = AppCatalogApp.encode($0) }
+                    set: { apps in
+                        let stored = binding.wrappedValue
+                        if let value = AppListSetting.value(
+                            saving: AppCatalogApp.encode(apps), isEmpty: apps.isEmpty,
+                            over: AppCatalogApp.decodeIfReadable(settingValue: stored) != nil) {
+                            binding.wrappedValue = value
+                        }
+                    }
                 ))
             }
         case .macAppStorePicker, .mobileAppStorePicker:
@@ -770,10 +726,7 @@ struct BlockSettingsForm: View {
                 Button("Choose Apps…", systemImage: setting.type == .macAppStorePicker ? "app.badge" : "ipad.and.iphone") {
                     isPickingStoreApps = true
                 }
-                let count = AppStoreApp.decode(settingValue: binding.wrappedValue).count
-                Text(count == 0 ? "No apps selected yet" : "\(count) app\(count == 1 ? "" : "s") selected")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                appCount(AppStoreApp.decodeIfReadable(settingValue: binding.wrappedValue)?.count)
             }
             .sheet(isPresented: $isPickingStoreApps) {
                 AppStorePickerView(
@@ -781,7 +734,14 @@ struct BlockSettingsForm: View {
                     platform: setting.type == .macAppStorePicker ? .mac : .mobile,
                     apps: Binding(
                         get: { AppStoreApp.decode(settingValue: binding.wrappedValue) },
-                        set: { binding.wrappedValue = AppStoreApp.encode($0) }
+                        set: { apps in
+                            let stored = binding.wrappedValue
+                            if let value = AppListSetting.value(
+                                saving: AppStoreApp.encode(apps), isEmpty: apps.isEmpty,
+                                over: AppStoreApp.decodeIfReadable(settingValue: stored) != nil) {
+                                binding.wrappedValue = value
+                            }
+                        }
                     ),
                     locationName: Binding(
                         get: { selection.settings["vpp_location_name"] ?? "" },
@@ -807,6 +767,20 @@ struct BlockSettingsForm: View {
         }
     }
 
+    /// How many apps the block lists; nil when its stored list can't be read.
+    @ViewBuilder
+    private func appCount(_ count: Int?) -> some View {
+        if let count {
+            Text(count == 0 ? "No apps selected yet" : "\(count) app\(count == 1 ? "" : "s") selected")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        } else {
+            Label(AppListSetting.unreadableText, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .labelStyle(.tintedIcon(.orange))
+        }
+    }
+
     private func settingBinding(_ setting: BlockSetting) -> Binding<String> {
         Binding(
             get: { selection.settings[setting.key] ?? setting.default },
@@ -815,7 +789,8 @@ struct BlockSettingsForm: View {
     }
 
     private func mutateSelection(_ mutate: (inout BlockSelection) -> Void) {
-        var tenantCopy = tenant
+        // the record as stored now, so a finished check or preflight is kept
+        var tenantCopy = tenantStore.tenant(id: tenant.id) ?? tenant
         // An always-on block shows a form before any selection exists;
         // its first edit materializes one so nothing typed is lost.
         let index: Int
@@ -827,6 +802,76 @@ struct BlockSettingsForm: View {
         }
         mutate(&tenantCopy.blockSelections[index])
         tenantStore.update(tenantCopy)
+    }
+}
+
+/// A secret setting's field. What's typed stays here until Return, leaving
+/// the field, closing the settings or a second's pause: the Keychain gets
+/// the value once, not every keystroke, and is read once, not on every redraw.
+struct SecretSettingField: View {
+    let tenantID: UUID
+    let blockID: String
+    let setting: BlockSetting
+    var onSave: () -> Void = {}
+
+    @State private var value = ""
+    /// What the Keychain holds, as last read or saved.
+    @State private var stored: String?
+    @State private var hasLoaded = false
+    @FocusState private var isFocused: Bool
+
+    private var item: KeychainItem {
+        TenantSecrets(tenantID: tenantID).blockSetting(blockID: blockID, key: setting.key)
+    }
+
+    var body: some View {
+        SecureField(setting.title, text: $value)
+            .focused($isFocused)
+            .onSubmit(save)
+            .onChange(of: isFocused) { _, focused in
+                if !focused { save() }
+            }
+            .onAppear {
+                guard !hasLoaded else { return }
+                stored = item.load()
+                value = stored ?? ""
+                hasLoaded = true
+            }
+            .onDisappear(perform: save)
+            // and once typing pauses, so a preview started straight from
+            // the field still finds the value
+            .task(id: value) {
+                guard (try? await Task.sleep(for: .seconds(1))) != nil else { return }
+                save()
+            }
+    }
+
+    private func save() {
+        guard hasLoaded, SecretSettingBuffer.needsSave(typed: value, stored: stored) else { return }
+        if item.save(value) {
+            stored = value
+            onSave()
+        }
+    }
+}
+
+/// An app picker's result over the stored list. An unreadable list shows
+/// as empty in the picker; saving that empty list would delete it, so
+/// only apps the user actually picks replace it.
+nonisolated enum AppListSetting {
+    static let unreadableText = "This block’s app list can’t be read. Choose the apps again."
+
+    /// The value to store, or nil to keep the stored one.
+    static func value(saving encoded: String, isEmpty: Bool, over storedIsReadable: Bool) -> String? {
+        guard storedIsReadable || !isEmpty else { return nil }
+        return encoded
+    }
+}
+
+/// When a buffered secret setting goes to the Keychain.
+nonisolated enum SecretSettingBuffer {
+    static func needsSave(typed: String, stored: String?) -> Bool {
+        typed != (stored ?? "")
     }
 }
 
@@ -872,7 +917,7 @@ struct SavePresetSheet: View {
                 TextField("Summary", text: $summary, prompt: Text("What this baseline is for"), axis: .vertical)
                     .lineLimit(2...4)
                 if folderSources.isEmpty {
-                    Text("Presets are saved in a folder catalog source. Add one in Building Blocks → Manage Sources → Add Folder…")
+                    Text("Presets are saved in a folder catalog source. Add one in Building Blocks › Manage Sources › Add Folder…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -883,13 +928,13 @@ struct SavePresetSheet: View {
                     }
                 }
                 Section {
-                    Text("\(tenant.blockSelections.count) building block\(tenant.blockSelections.count == 1 ? "" : "s") with their changed settings, and the groups and categories they use from other blocks in the preset. Groups and categories picked from this tenant, and secret settings, are not saved.")
+                    Text("\(tenant.blockSelections.count) building block\(tenant.blockSelections.count == 1 ? "" : "s") with their changed settings, and the groups and categories they use from other blocks in the preset. Groups and categories picked from this tenant, and secret settings, aren’t saved.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                        .labelStyle(.tintedIcon(.red))
                 }
             }
             .formStyle(.grouped)
@@ -909,7 +954,7 @@ struct SavePresetSheet: View {
         }
         .frame(width: 480, height: 400)
         .confirmationDialog(
-            "Replace the existing preset “\(name.trimmingCharacters(in: .whitespaces))”?",
+            "Replace the Existing Preset “\(name.trimmingCharacters(in: .whitespaces))”?",
             isPresented: $isConfirmingReplace,
             titleVisibility: .visible
         ) {
@@ -929,7 +974,7 @@ struct SavePresetSheet: View {
             onSaved()
             dismiss()
         } catch {
-            errorMessage = "The preset could not be saved: \(error.localizedDescription)"
+            errorMessage = "The preset couldn’t be saved: \(error.localizedDescription)"
         }
     }
 }

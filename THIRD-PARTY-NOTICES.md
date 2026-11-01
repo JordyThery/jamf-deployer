@@ -1,6 +1,6 @@
 # Third-party notices
 
-Jamf Deployer is released under the MIT License (see LICENSE). It bundles or downloads the software below. The same credits and licence texts appear in the app, in About Jamf Deployer.
+Jamf Deployer is released under the MIT License (see LICENSE). It bundles or downloads the software below. The same credits and license texts appear in the app, in About Jamf Deployer.
 
 ## OpenTofu by the OpenTofu Authors
 
@@ -9,7 +9,7 @@ The deployment engine. It previews and deploys every change. Bundled with the ap
 - [opentofu.org](https://opentofu.org)
 - [github.com/opentofu/opentofu](https://github.com/opentofu/opentofu)
 
-Licence: Mozilla Public License 2.0
+License: Mozilla Public License 2.0
 
 ```text
 Copyright (c) The OpenTofu Authors
@@ -370,13 +370,13 @@ Exhibit B - “Incompatible With Secondary Licenses” Notice
       the Mozilla Public License, v. 2.0.
 ```
 
-## jamfplatform provider by Jamf
+## jamfplatform plugin by Jamf
 
 Lets the engine manage Jamf Platform resources. Bundled with the app.
 
 - [github.com/jamf/terraform-provider-jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform)
 
-Licence: Mozilla Public License 2.0
+License: Mozilla Public License 2.0
 
 ```text
 Mozilla Public License Version 2.0
@@ -754,13 +754,13 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-## jamfprotect provider by Jamf Concepts
+## jamfprotect plugin by Jamf Concepts
 
 Lets the engine manage Jamf Protect resources. Bundled with the app.
 
 - [github.com/Jamf-Concepts/terraform-provider-jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect)
 
-Licence: Mozilla Public License 2.0
+License: Mozilla Public License 2.0
 
 ```text
 Mozilla Public License Version 2.0
@@ -1138,13 +1138,13 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-## jamfpro provider by Deployment Theory
+## jamfpro plugin by Deployment Theory
 
 Lets the engine manage Jamf Pro resources. Bundled with the app.
 
 - [github.com/deploymenttheory/terraform-provider-jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro)
 
-Licence: Mozilla Public License 2.0
+License: Mozilla Public License 2.0
 
 ```text
 Copyright (c) 2025 Deployment Theory
@@ -1526,11 +1526,11 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
 ## terraform-backend-git by plumber-cd
 
-In Team Mode, stores and locks each tenant's deployment state in the team space's Git repository. Bundled with the app.
+In Team Mode, stores and locks each tenant’s deployment state in the team space’s Git repository. Bundled with the app.
 
 - [github.com/plumber-cd/terraform-backend-git](https://github.com/plumber-cd/terraform-backend-git)
 
-Licence: Apache License 2.0
+License: Apache License 2.0
 
 ```text
                                  Apache License
@@ -1738,11 +1738,11 @@ Licence: Apache License 2.0
 
 ## jamformer by Jamf Concepts
 
-Exports a tenant's existing configuration. Bundled with the app.
+Exports a tenant’s existing configuration. Bundled with the app.
 
 - [github.com/Jamf-Concepts/jamformer](https://github.com/Jamf-Concepts/jamformer)
 
-Licence: MIT License
+License: MIT License
 
 ```text
 MIT License
@@ -1774,7 +1774,7 @@ Compiled into jamformer, which writes configuration with its hclwrite package.
 
 - [github.com/hashicorp/hcl](https://github.com/hashicorp/hcl)
 
-Licence: Mozilla Public License 2.0
+License: Mozilla Public License 2.0
 
 ```text
 Copyright IBM Corp. 2014, 2026
@@ -2140,7 +2140,7 @@ Compiled into jamformer, which runs Terraform with its tfexec package.
 
 - [github.com/hashicorp/terraform-exec](https://github.com/hashicorp/terraform-exec)
 
-Licence: Mozilla Public License 2.0
+License: Mozilla Public License 2.0
 
 ```text
 Copyright IBM Corp. 2020, 2026
@@ -2526,7 +2526,7 @@ Compiled into jamformer, which reads Jamf Pro with it.
 
 - [github.com/deploymenttheory/go-api-sdk-jamfpro](https://github.com/deploymenttheory/go-api-sdk-jamfpro)
 
-Licence: Mozilla Public License 2.0
+License: Mozilla Public License 2.0
 
 ```text
 Copyright (c) 2025 Deployment Theory
@@ -2908,12 +2908,12 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
 ## Go by the Go Authors
 
-The Go runtime and standard library are compiled into OpenTofu, the providers, terraform-backend-git and jamformer.
+The Go runtime and standard library are compiled into OpenTofu, the engine plugins, terraform-backend-git and jamformer.
 
 - [go.dev](https://go.dev)
 - [github.com/golang/go](https://github.com/golang/go)
 
-Licence: BSD 3-Clause License
+License: BSD 3-Clause License
 
 ```text
 Copyright 2009 The Go Authors.

@@ -8,12 +8,10 @@ nonisolated enum DocsLinks {
     static let graduating = URL(string: base + "graduating.md")!
 
     static func stage(_ number: Int) -> URL {
+        // Only the stages the app links to.
         let anchors = [
-            0: "stage-0--what-you-already-know",
             1: "stage-1--watch-the-engine-work",
-            2: "stage-2--run-one-tenant-yourself",
             3: "stage-3--many-tenants-git-and-reviews",
-            4: "stage-4--run-a-fleet",
         ]
         return URL(string: base + "graduating.md#" + (anchors[number] ?? ""))!
     }

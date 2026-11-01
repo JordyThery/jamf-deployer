@@ -18,8 +18,9 @@ public nonisolated struct ExportedObject: Sendable, Identifiable, Hashable {
 }
 
 /// Scans and prunes exported configuration by whole resource blocks.
-/// This is file surgery for the picker, not configuration parsing — the
-/// engine itself never consumes these results.
+/// This is file surgery, not configuration parsing, but what `prune`,
+/// `protectOmittedSections` and the capture write back is what deploys: they
+/// split with `checkedTopLevelBlocks` and stop rather than lose a line.
 public nonisolated enum ExportedObjectInventory {
     public static func scan(directory: URL) throws -> [ExportedObject] {
         var objects: [ExportedObject] = []
@@ -67,7 +68,7 @@ public nonisolated enum ExportedObjectInventory {
 
     public static func unmanageable(directory: URL) -> [String: String] {
         let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
-        let values = BlockCapture.parseTfvars(at: directory.appending(path: "terraform.tfvars"))
+        let values = BlockCapture.parseTfvarsValues(at: directory.appending(path: "terraform.tfvars"))
         func hasValue(_ name: String) -> Bool {
             if values[name] != nil { return true }
             return declarations[name]?.range(of: #"(?m)^\s*default\s*="#, options: .regularExpression) != nil
@@ -80,12 +81,12 @@ public nonisolated enum ExportedObjectInventory {
                 guard let header = block.firstMatch(of: /resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) else { continue }
                 let address = "\(header.1).\(header.2)"
                 if Self.invitationTypes.contains(String(header.1)) {
-                    result[address] = "enrollment invitations cannot be managed as exported"
+                    result[address] = "enrollment invitations can’t be managed as exported"
                     continue
                 }
                 let missing = block.matches(of: /var\.([a-zA-Z0-9_]+)/).map { String($0.1) }.filter { !hasValue($0) }
                 if !missing.isEmpty {
-                    result[address] = "Jamf does not export its secret values (tokens, passwords)"
+                    result[address] = "Jamf doesn’t export its secret values (tokens, passwords)"
                 }
             }
         }
@@ -99,12 +100,12 @@ public nonisolated enum ExportedObjectInventory {
     /// `sensitiveVariables` hands their values to the Keychain.
     public static func inlineVariables(directory: URL) throws {
         let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
-        let values = BlockCapture.parseTfvars(at: directory.appending(path: "terraform.tfvars"))
+        let values = BlockCapture.parseTfvarsValues(at: directory.appending(path: "terraform.tfvars"))
         let sensitive = Set(declarations.filter { isSensitive($0.value) }.keys)
         var literal: [String: String] = [:]
         for (name, declaration) in declarations where !sensitive.contains(name) {
             if let value = values[name] {
-                literal[name] = "\"\(value)\""
+                literal[name] = value.expression
             } else if let match = declaration.firstMatch(of: /(?m)^\s*default\s*=\s*(.+?)\s*$/) {
                 // Only single-line defaults inline; `[`, `{` or a heredoc
                 // opening a multi-line value stays a variable.
@@ -113,7 +114,7 @@ public nonisolated enum ExportedObjectInventory {
                 if !opensBlock { literal[name] = value }
             }
         }
-        for (name, value) in values where literal[name] == nil && !sensitive.contains(name) { literal[name] = "\"\(value)\"" }
+        for (name, value) in values where literal[name] == nil && !sensitive.contains(name) { literal[name] = value.expression }
         guard !literal.isEmpty else { return }
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         for file in files where file.pathExtension == "tf" && !file.lastPathComponent.hasSuffix("_import.tf")
@@ -264,10 +265,12 @@ public nonisolated enum ExportedObjectInventory {
     /// Rewrites the export so only `keptAddresses` remain; matching import
     /// blocks follow their resources automatically.
     public static func prune(directory: URL, keeping keptAddresses: Set<String>) throws {
+        // Every file splits cleanly before any is rewritten.
+        var pruned: [(file: URL, kept: [String])] = []
         for file in try configurationFiles(in: directory, includeImports: true) {
             let text = try String(contentsOf: file, encoding: .utf8)
             var kept: [String] = []
-            for block in topLevelBlocks(in: text) {
+            for block in try checkedTopLevelBlocks(in: text) {
                 guard let header = block.split(separator: "\n").first else { continue }
                 if let match = header.firstMatch(of: /^resource\s+"([a-z0-9_]+)"\s+"([A-Za-z0-9_-]+)"/) {
                     if keptAddresses.contains("\(match.1).\(match.2)") { kept.append(block) }
@@ -281,6 +284,9 @@ public nonisolated enum ExportedObjectInventory {
                     kept.append(block)
                 }
             }
+            pruned.append((file, kept))
+        }
+        for (file, kept) in pruned {
             if kept.isEmpty {
                 try FileManager.default.removeItem(at: file)
             } else {
@@ -354,7 +360,7 @@ public nonisolated enum ExportedObjectInventory {
         for file in try configurationFiles(in: directory) {
             let text = try String(contentsOf: file, encoding: .utf8)
             guard omittablePreStageSections.keys.contains(where: { text.contains("resource \"\($0)\"") }) else { continue }
-            let blocks = topLevelBlocks(in: text).map { block -> String in
+            let blocks = try checkedTopLevelBlocks(in: text).map { block -> String in
                 guard let header = block.firstMatch(of: /^resource\s+"([a-z0-9_]+)"/),
                       let sections = omittablePreStageSections[String(header.1)],
                       !block.contains("\n  lifecycle {")
@@ -384,28 +390,72 @@ public nonisolated enum ExportedObjectInventory {
         topLevelBlocks(in: text).filter { $0.hasPrefix("resource") }
     }
 
-    /// Splits a file into top-level `xxx { … }` blocks by brace counting.
+    /// Configuration the block splitter could not follow: rewriting it would
+    /// lose lines, so the caller stops instead.
+    public enum SplitError: LocalizedError, Equatable {
+        /// A non-empty line outside every block (line number, 1-based).
+        case strayLine(Int)
+        /// A block, string or heredoc still open at the end of the file.
+        case unterminated(Int)
+
+        public var errorDescription: String? {
+            switch self {
+            case .strayLine(let line):
+                "The exported configuration has a line outside every block (line \(line)) that couldn’t be read. Nothing was changed; export again, or leave that object out."
+            case .unterminated(let line):
+                "The exported configuration has a block that never closes (from line \(line)). Nothing was changed; export again, or leave that object out."
+            }
+        }
+    }
+
+    /// Splits a file into top-level `xxx { … }` blocks. Braces inside quoted
+    /// strings, template interpolations, heredocs and comments don't count.
+    /// Lines it can't place are left out; use `checkedTopLevelBlocks` where
+    /// the result is written back as configuration.
     public static func topLevelBlocks(in text: String) -> [String] {
+        splitBlocks(in: text).blocks
+    }
+
+    /// `topLevelBlocks`, throwing instead of leaving out a non-empty line
+    /// (comments aside) or an unterminated block.
+    public static func checkedTopLevelBlocks(in text: String) throws -> [String] {
+        let split = splitBlocks(in: text)
+        if let error = split.error { throw error }
+        return split.blocks
+    }
+
+    static func splitBlocks(in text: String) -> (blocks: [String], error: SplitError?) {
         var blocks: [String] = []
         var current: [Substring] = []
-        var depth = 0
+        var scanner = HCLScanner()
         var inBlock = false
+        var blockStart = 0
+        var error: SplitError?
 
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        for (index, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
             if !inBlock {
-                guard line.first?.isLetter == true else { continue }
+                guard line.first?.isLetter == true else {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty, !trimmed.hasPrefix("#"), !trimmed.hasPrefix("//"), error == nil {
+                        error = .strayLine(index + 1)
+                    }
+                    continue
+                }
                 inBlock = true
+                blockStart = index + 1
                 current = [line]
-                depth = braceDelta(line)
-                if depth <= 0 && line.contains("{") {
+                scanner = HCLScanner()
+                scanner.scan(line)
+                if scanner.isAtTopLevel && line.contains("{") {
                     blocks.append(current.joined(separator: "\n"))
                     inBlock = false
                 }
                 continue
             }
             current.append(line)
-            depth += braceDelta(line)
-            if depth <= 0 {
+            scanner.scan(line)
+            if scanner.sawUnterminatedString, error == nil { error = .unterminated(blockStart) }
+            if scanner.isAtTopLevel {
                 blocks.append(current.joined(separator: "\n"))
                 current = []
                 inBlock = false
@@ -413,15 +463,9 @@ public nonisolated enum ExportedObjectInventory {
         }
         if inBlock && !current.isEmpty {
             blocks.append(current.joined(separator: "\n"))
+            if error == nil { error = .unterminated(blockStart) }
         }
-        return blocks
-    }
-
-    static func braceDelta(_ line: Substring) -> Int {
-        // Quoted braces are rare in exports and harmless for this purpose.
-        line.reduce(0) { count, character in
-            count + (character == "{" ? 1 : character == "}" ? -1 : 0)
-        }
+        return (blocks, error)
     }
 
     static func displayName(in block: String) -> String? {

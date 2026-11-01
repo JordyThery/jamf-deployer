@@ -1,8 +1,15 @@
 # Usage: drift_all.py <keychain-service> <prefix>
 # Changes one field on every object type the demo catalog creates, directly
-# in Jamf, so a check for changes has something to find for each type.
-import base64, json, subprocess, sys, urllib.request, urllib.error
+# in Jamf, so a check for changes has something to find for each type. Runs
+# only with a test prefix, for a full-access, non-production tenant on the
+# release-check allow-list (tenant_guard.py).
+import base64, json, os, subprocess, sys, urllib.request, urllib.error
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tenant_guard
 
+if len(sys.argv) != 3:
+    print("Usage: drift_all.py <keychain-service> <prefix>", file=sys.stderr)
+    sys.exit(2)
 svc, prefix = sys.argv[1], sys.argv[2]
 def kc(a):
     found = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", a, "-w"], capture_output=True, text=True)
@@ -10,6 +17,11 @@ def kc(a):
     if found.returncode != 0 or not value:
         sys.exit(f"Keychain item missing: service {svc!r}, account {a!r}")
     return value
+try:
+    tenant_guard.check_prefix(prefix)
+    tenant_guard.require_writable(svc, "jamfPro", kc("jamfpro-fqdn"))
+except tenant_guard.Refused as error:
+    sys.exit(f"Refused: {error}")
 base = "https://" + kc("jamfpro-fqdn")
 basic = base64.b64encode((kc("jamfpro-username") + ":" + kc("jamfpro-password")).encode()).decode()
 token = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/v1/auth/token", method="POST", headers={"Authorization": "Basic " + basic})))["token"]

@@ -16,7 +16,6 @@ public nonisolated struct PlanFile: Decodable, Sendable {
             public var afterUnknown: JSONValue?
             public var beforeSensitive: JSONValue?
             public var afterSensitive: JSONValue?
-            public var replacePaths: JSONValue?
             public var importing: Importing?
 
             public struct Importing: Decodable, Sendable {
@@ -28,7 +27,6 @@ public nonisolated struct PlanFile: Decodable, Sendable {
                 case afterUnknown = "after_unknown"
                 case beforeSensitive = "before_sensitive"
                 case afterSensitive = "after_sensitive"
-                case replacePaths = "replace_paths"
             }
         }
 
@@ -36,13 +34,11 @@ public nonisolated struct PlanFile: Decodable, Sendable {
         public var type: String
         public var name: String
         public var providerName: String?
-        public var actionReason: String?
         public var change: Change
 
         public enum CodingKeys: String, CodingKey {
             case address, type, name, change
             case providerName = "provider_name"
-            case actionReason = "action_reason"
         }
     }
 

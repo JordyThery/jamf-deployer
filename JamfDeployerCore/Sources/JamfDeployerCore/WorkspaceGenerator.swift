@@ -105,6 +105,11 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     case scopeNotChosen(block: String)
     case missingRequiredSetting(block: String, setting: String)
     case invalidNumber(block: String, setting: String, value: String)
+    /// A choice setting holds a value its block doesn't offer (a stale
+    /// tenant record, or a preset default outside the list).
+    case invalidChoice(block: String, setting: String, value: String)
+    /// A stored app list can't be read; deploying it would remove the apps.
+    case unreadableAppList(block: String, setting: String)
     case unmetDependencies(block: String, type: String, names: [String])
     /// Two selected blocks manage the same tenant-wide setting.
     case conflictingSettings(type: String, blocks: [String])
@@ -116,19 +121,23 @@ public nonisolated enum WorkspaceGeneratorError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .scopeNotChosen(let block):
-            "The block \"\(block)\" has no scope yet. Open its settings and choose a group."
+            "The block “\(block)” has no scope yet. Open its settings and choose a group."
         case .missingRequiredSetting(let block, let setting):
-            "The block \"\(block)\" needs a value for its \"\(setting)\" setting."
+            "The block “\(block)” needs a value for its “\(setting)” setting."
         case .invalidNumber(let block, let setting, let value):
-            "The block \"\(block)\" needs a number for its \"\(setting)\" setting, not \"\(value)\"."
+            "The block “\(block)” needs a number for its “\(setting)” setting, not “\(value)”."
+        case .unreadableAppList(let block, let setting):
+            "The app list in the “\(setting)” setting of the block “\(block)” can’t be read, so nothing was deployed. Choose the apps again in the block’s settings."
+        case .invalidChoice(let block, let setting, let value):
+            "The block “\(block)” doesn’t offer “\(value)” for its “\(setting)” setting. Open its settings and choose one of the listed values."
         case .unmetDependencies(let block, let type, let names):
-            "The block \"\(block)\" references \(type.replacingOccurrences(of: "_", with: " "))s no selected block creates: \(names.joined(separator: ", ")). Select the block that creates them, or remove this block."
+            "The block “\(block)” references \(type.replacingOccurrences(of: "_", with: " "))s no selected block creates: \(names.joined(separator: ", ")). Select the block that creates them, or remove this block."
         case .unsupportedConnection(let block, let connection):
-            "The block \"\(block)\" has no \(connection == .jamfPro ? "Jamf Pro API" : "Jamf Platform API") version in the catalog release this tenant uses. Update the block with Baseline Updates…, or remove it from the baseline."
+            "The block “\(block)” has no \(connection == .jamfPro ? "Jamf Pro API" : "Jamf Platform API") version in the catalog release this tenant uses. Update the block with Baseline Updates…, or remove it from the baseline."
         case .conflictingBlocks(let blocks):
-            "The blocks \(blocks.map { "\"\($0)\"" }.joined(separator: " and ")) do the same job in different ways and cannot be used together. Deselect one of them."
+            "The blocks \(blocks.map { "“\($0)”" }.joined(separator: " and ")) do the same job in different ways and can’t be used together. Deselect one of them."
         case .conflictingSettings(let type, let blocks):
-            "The blocks \(blocks.map { "\"\($0)\"" }.joined(separator: " and ")) both manage the tenant's \(type.replacingOccurrences(of: "jamfplatform_pro_", with: "").replacingOccurrences(of: "jamfpro_", with: "").replacingOccurrences(of: "_", with: " ")). A setting can belong to one block only — deselect one of them."
+            "The blocks \(blocks.map { "“\($0)”" }.joined(separator: " and ")) both manage the tenant’s \(type.replacingOccurrences(of: "jamfplatform_pro_", with: "").replacingOccurrences(of: "jamfpro_", with: "").replacingOccurrences(of: "_", with: " ")). A setting can belong to one block only — deselect one of them."
         }
     }
 }
@@ -305,7 +314,20 @@ public nonisolated enum WorkspaceGenerator {
                         throw WorkspaceGeneratorError.invalidNumber(block: block.name, setting: setting.title, value: raw)
                     }
                     arguments.append(.init(key: setting.key, value: .setting(trimmed.isEmpty ? "null" : trimmed, type: "number")))
-                case .string, .enumeration, .appPicker, .macAppStorePicker, .mobileAppStorePicker:
+                case .enumeration:
+                    if !raw.isEmpty, let choices = setting.enumValues, !choices.isEmpty, !choices.contains(raw) {
+                        throw WorkspaceGeneratorError.invalidChoice(block: block.name, setting: setting.title, value: raw)
+                    }
+                    arguments.append(.init(key: setting.key, value: .setting(hclString(raw), type: "string")))
+                case .appPicker, .macAppStorePicker, .mobileAppStorePicker:
+                    let readable = setting.type == .appPicker
+                        ? AppCatalogApp.decodeIfReadable(settingValue: raw) != nil
+                        : AppStoreApp.decodeIfReadable(settingValue: raw) != nil
+                    guard readable else {
+                        throw WorkspaceGeneratorError.unreadableAppList(block: block.name, setting: setting.title)
+                    }
+                    arguments.append(.init(key: setting.key, value: .setting(hclString(raw), type: "string")))
+                case .string:
                     arguments.append(.init(key: setting.key, value: .setting(hclString(raw), type: "string")))
                 case .stringList:
                     // "\r\n" is one Character, so splitting on "\n" alone

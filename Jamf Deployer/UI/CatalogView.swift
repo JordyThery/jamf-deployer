@@ -34,6 +34,14 @@ struct CatalogView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         }
+                        if !catalog.unreadablePresets.isEmpty {
+                            Label(
+                                "\(catalog.unreadablePresets.count) preset\(catalog.unreadablePresets.count == 1 ? " can’t be read and isn’t" : "s can’t be read and aren’t") offered: \(catalog.unreadablePresets.joined(separator: ", ")).",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        }
                         ForEach(groupedCategories(catalog), id: \.0) { category, blocks in
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(category)
@@ -44,8 +52,14 @@ struct CatalogView: View {
                                     spacing: 12
                                 ) {
                                     ForEach(blocks) { block in
-                                        BlockCard(block: block, sourceName: customSourceName(for: block))
-                                            .onTapGesture { selectedBlock = block }
+                                        // A button, so the card opens from the
+                                        // keyboard and VoiceOver too.
+                                        Button {
+                                            selectedBlock = block
+                                        } label: {
+                                            BlockCard(block: block, sourceName: customSourceName(for: block))
+                                        }
+                                        .buttonStyle(.plain)
                                     }
                                 }
                             }
@@ -118,13 +132,13 @@ struct CatalogView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Blocks come from catalogs")
                         .font(.headline)
-                    Text("The app ships only blocks without configuration opinions (App Catalog, App Store apps, Jamf Protect, Security Cloud); they use the groups and categories already in your tenant. Add the demo catalog for device groups, categories and a full baseline. For real fleets, capture your own blocks or publish your own catalog repository.")
+                    Text("The built-in blocks use the groups and categories already in your tenant. Add the demo catalog for a full baseline to start from.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     if let demoCatalogError {
                         Label(demoCatalogError, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .labelStyle(.tintedIcon(.orange))
                     }
                 }
                 Spacer()
@@ -166,7 +180,7 @@ struct CatalogView: View {
     private func customSourceName(for block: BlockMetadata) -> String? {
         guard let catalog else { return nil }
         let folder = catalog.blockFolderURL(id: block.id)
-        guard !folder.path.hasPrefix(EngineLocator.catalogURL.path) else { return nil }
+        guard !FolderPath.isInside(folder.path, EngineLocator.catalogURL.path) else { return nil }
         return catalog.sourceName(for: block.id)
     }
 
@@ -212,7 +226,7 @@ struct BlockCard: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(.quaternary, in: Capsule())
-                        .help("This block comes from the \"\(sourceName)\" catalog source")
+                        .help("This block comes from the “\(sourceName)” catalog source")
                 }
                 Spacer()
                 Text("\(block.objectsCreated.count) object type\(block.objectsCreated.count == 1 ? "" : "s")")
@@ -250,7 +264,7 @@ struct BlockDetailSheet: View {
     /// Built-in blocks live inside the app bundle and stay read-only.
     private var isBuiltIn: Bool {
         guard let catalog else { return true }
-        return catalog.blockFolderURL(id: block.id).path.hasPrefix(EngineLocator.catalogURL.path)
+        return FolderPath.isInside(catalog.blockFolderURL(id: block.id).path, EngineLocator.catalogURL.path)
     }
 
     /// Blocks from git catalog sources are tag-pinned checkouts; editing or
@@ -260,7 +274,7 @@ struct BlockDetailSheet: View {
         guard let catalog, !isBuiltIn else { return false }
         let path = catalog.blockFolderURL(id: block.id).path
         return catalogSources.customSources.contains {
-            $0.kind == .localFolder && path.hasPrefix($0.path)
+            $0.kind == .localFolder && FolderPath.isInside(path, $0.path)
         }
     }
 
@@ -401,13 +415,13 @@ struct BlockDetailSheet: View {
                 Button("Delete Block…", role: .destructive) { isConfirmingDelete = true }
             } else {
                 Button("Duplicate to My Blocks…") { duplicateToMyBlocks() }
-                    .help("Blocks from a git catalog follow their published tag; duplicate one into a folder source to edit it")
+                    .help("Blocks from a Git catalog follow their published tag; duplicate one into a folder source to edit it")
             }
             if block.needsReview {
                 Button("Mark as Reviewed") {
                     markReviewed()
                 }
-                .help("Confirms a curator checked this captured block's names, scope and settings")
+                .help("Confirms a curator checked this captured block’s names, scope and settings")
             }
             Button("Close") { dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -421,7 +435,7 @@ struct BlockDetailSheet: View {
             Button("Delete Block", role: .destructive) { deleteBlock() }
         } message: {
             Text((tenantsUsingBlock.isEmpty ? "" : "Selected by \(tenantsUsingBlock.joined(separator: ", ")); their baselines fail to generate until it is removed there. ")
-                + "The block folder is deleted from its catalog source. Objects already deployed in Jamf are not touched.")
+                + "The block folder is deleted from its catalog source. Objects already deployed in Jamf aren’t touched.")
         }
         .alert(
             "Action Failed",
@@ -465,7 +479,7 @@ struct BlockDetailSheet: View {
                 if let editError {
                     Label(editError, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .labelStyle(.tintedIcon(.red))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -489,7 +503,7 @@ struct BlockDetailSheet: View {
         } catch {
             Self.log.error("Saving details for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
             // Shown inline: an alert presented from this sheet is unreliable.
-            editError = "The details could not be saved: \(error.localizedDescription)"
+            editError = "The details couldn’t be saved: \(error.localizedDescription)"
             return
         }
         editError = nil
@@ -505,7 +519,7 @@ struct BlockDetailSheet: View {
             onChanged()
             dismiss()
         } catch {
-            actionError = "The block could not be deleted: \(error.localizedDescription)"
+            actionError = "The block couldn’t be deleted: \(error.localizedDescription)"
         }
     }
 
@@ -553,7 +567,7 @@ struct BlockDetailSheet: View {
             onChanged()
             dismiss()
         } catch {
-            actionError = "The block could not be duplicated: \(error.localizedDescription)"
+            actionError = "The block couldn’t be duplicated: \(error.localizedDescription)"
         }
     }
 
@@ -583,7 +597,7 @@ struct BlockDetailSheet: View {
     /// Rewrites the captured block's reviewStatus in block.json.
     private func markReviewed() {
         guard updateManifest({ $0["reviewStatus"] = "reviewed" }) else {
-            actionError = "The block could not be marked as reviewed. Check that the block folder is writable."
+            actionError = "The block couldn’t be marked as reviewed. Check that the block folder is writable."
             return
         }
         onChanged()
@@ -653,7 +667,7 @@ struct ManageSourcesSheet: View {
         }
         .frame(width: 600, height: 380)
         .alert(
-            "The folder could not be added",
+            "Folder Not Added",
             isPresented: Binding(get: { addError != nil }, set: { if !$0 { addError = nil } })
         ) {
             Button("OK", role: .cancel) {}
@@ -672,9 +686,9 @@ struct ManageSourcesSheet: View {
                 if let source = sourcePendingRemoval { remove(source) }
             }
         } message: {
-            Text(sourcePendingRemoval?.kind == .gitRepository
+            Text(removalUsersText + (sourcePendingRemoval?.kind == .gitRepository
                 ? "The downloaded checkouts are deleted; the repository itself is untouched."
-                : "The folder and its blocks stay on disk — the app just stops reading them.")
+                : "The folder and its blocks stay on disk — the app just stops reading them."))
         }
     }
 
@@ -702,12 +716,18 @@ struct ManageSourcesSheet: View {
 
     private var removalTitle: String {
         guard let source = sourcePendingRemoval else { return "" }
+        return "Remove “\(source.name)”?"
+    }
+
+    /// Who still selects blocks from the source, said in the message.
+    private var removalUsersText: String {
+        guard let source = sourcePendingRemoval else { return "" }
         let users = tenantStore.tenants
             .filter { tenant in tenant.blockSelections.contains { $0.sourceID == source.id.uuidString } }
             .map(\.name)
         return users.isEmpty
-            ? "Remove “\(source.name)”?"
-            : "Remove “\(source.name)”? Blocks from it are selected by \(users.joined(separator: ", ")) — their baselines will fail to generate."
+            ? ""
+            : "Blocks from it are selected by \(users.joined(separator: ", ")), and their baselines will fail to generate. "
     }
 
     private func remove(_ source: CatalogSourceStore.CustomSource) {
@@ -763,6 +783,7 @@ struct AddGitCatalogSheet: View {
                 .keyboardShortcut(.cancelAction)
             Button("Add Catalog") { add() }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(name.isEmpty || selectedTag.isEmpty || isWorking)
         }
         .frame(width: 520, height: 340)
@@ -803,5 +824,16 @@ struct AddGitCatalogSheet: View {
                 message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
+    }
+}
+
+/// Whether a path lies in a folder, compared by path components: a source
+/// at ~/Blocks doesn't contain ~/Blocks-cache/….
+nonisolated enum FolderPath {
+    static func isInside(_ path: String, _ folder: String) -> Bool {
+        guard !path.isEmpty, !folder.isEmpty else { return false }
+        let inner = URL(filePath: path).standardizedFileURL.pathComponents
+        let outer = URL(filePath: folder).standardizedFileURL.pathComponents
+        return inner.count >= outer.count && Array(inner.prefix(outer.count)) == outer
     }
 }

@@ -24,7 +24,7 @@ nonisolated final class ToolDoorway: Sendable {
         let tool: ExternalTool
 
         var errorDescription: String? {
-            "This isn't available in Demo Mode: it needs \(tool.rawValue), which would reach Jamf or Git itself instead of the sample data."
+            "This isn’t available in Demo Mode. Turn off Demo Mode in the Tenant menu to use it."
         }
     }
 

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// catalog.json at the root of a catalog source.
@@ -112,7 +113,6 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     public var requires: [String]
     public var conflicts: [String]
     public var products: [String]
-    public var minJamfProVersion: String?
     public var permissions: [String]
     /// The Jamf Pro API privileges the block's Jamf Pro API module needs,
     /// when it has one.
@@ -122,7 +122,6 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     public var scope: BlockScope
     public var settings: [BlockSetting]
     public var objectsCreated: [String]
-    public var docsURL: String?
     /// Whether the block takes a category_id, chosen per tenant.
     public var acceptsCategory: Bool
     /// Captured blocks start as "needsReview" until a curator marks them
@@ -130,8 +129,10 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
     public var reviewStatus: String?
     /// Field-to-setting mappings for "Keep this change".
     public var driftBindings: [DriftBinding]
-    /// Scope ID of the tenant a captured block was exported from; nil for
-    /// authored blocks.
+    /// Which tenant a captured block was exported from, as
+    /// `originMarker(forTenantScopeID:)` (blocks captured before 1.1.0 hold
+    /// the scope ID itself); nil for authored blocks. Compare with
+    /// `wasCaptured(fromTenantScopeID:)`.
     public var capturedFromTenant: String?
     /// Object names this block references per dependency type ("script",
     /// "category", "package", "device_group") — satisfied by blocks whose
@@ -156,7 +157,6 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
         requires = try container.decodeIfPresent([String].self, forKey: .requires) ?? []
         conflicts = try container.decodeIfPresent([String].self, forKey: .conflicts) ?? []
         products = try container.decodeIfPresent([String].self, forKey: .products) ?? []
-        minJamfProVersion = try container.decodeIfPresent(String.self, forKey: .minJamfProVersion)
         permissions = try container.decodeIfPresent([String].self, forKey: .permissions) ?? []
         jamfProPermissions = try container.decodeIfPresent([String].self, forKey: .jamfProPermissions) ?? []
         risk = try container.decodeIfPresent(String.self, forKey: .risk) ?? "medium"
@@ -165,7 +165,6 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
             ?? BlockScope(kind: .none, variable: nil, default: nil)
         settings = try container.decodeIfPresent([BlockSetting].self, forKey: .settings) ?? []
         objectsCreated = try container.decodeIfPresent([String].self, forKey: .objectsCreated) ?? []
-        docsURL = try container.decodeIfPresent(String.self, forKey: .docsURL)
         acceptsCategory = try container.decodeIfPresent(Bool.self, forKey: .acceptsCategory) ?? false
         reviewStatus = try container.decodeIfPresent(String.self, forKey: .reviewStatus)
         driftBindings = try container.decodeIfPresent([DriftBinding].self, forKey: .driftBindings) ?? []
@@ -185,6 +184,20 @@ public nonisolated struct BlockMetadata: Codable, Sendable, Identifiable, Equata
 
     public var needsReview: Bool {
         reviewStatus == "needsReview"
+    }
+
+    /// What a captured block records about its origin tenant: a hash of the
+    /// scope ID, so a block shared beyond this Mac (a Git catalog, the demo
+    /// catalog) doesn't publish the tenant's environment ID.
+    public static func originMarker(forTenantScopeID scopeID: String) -> String {
+        let digest = SHA256.hash(data: Data("jamf-deployer-capture-origin:\(scopeID.lowercased())".utf8))
+        return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Whether this block was captured from the tenant with this scope ID.
+    public func wasCaptured(fromTenantScopeID scopeID: String) -> Bool {
+        guard let capturedFromTenant, !scopeID.isEmpty else { return false }
+        return capturedFromTenant == Self.originMarker(forTenantScopeID: scopeID) || capturedFromTenant == scopeID
     }
 
     /// The provenance tag written into every object description.
@@ -341,6 +354,9 @@ public nonisolated struct LoadedCatalog: Sendable {
     /// written for a newer version), by folder name. They are left out
     /// rather than failing the whole catalog.
     public var unreadableBlocks: [String] = []
+    /// Preset files (by file name) this version of the app cannot read; left
+    /// out like unreadable blocks, so one bad preset doesn't hide the source.
+    public var unreadablePresets: [String] = []
     /// The connections each block can deploy through (see `BlockModule`).
     public var connectionsByBlockID: [String: Set<ConnectionKind>] = [:]
 
@@ -380,6 +396,7 @@ public nonisolated struct LoadedCatalog: Sendable {
                 }
             }
             merged.unreadableBlocks += catalog.unreadableBlocks
+            merged.unreadablePresets += catalog.unreadablePresets
             merged.presets.append(contentsOf: catalog.presets.filter { preset in
                 !merged.presets.contains { $0.id == preset.id }
             })
@@ -426,10 +443,15 @@ public nonisolated struct LoadedCatalog: Sendable {
         }
 
         var presets: [Preset] = []
+        var unreadablePresets: [String] = []
         let presetsURL = rootURL.appending(path: "presets")
         for file in (try? fileManager.contentsOfDirectory(at: presetsURL, includingPropertiesForKeys: nil)) ?? []
         where file.pathExtension == "json" {
-            presets.append(try decoder.decode(Preset.self, from: Data(contentsOf: file)))
+            if let preset = try? decoder.decode(Preset.self, from: Data(contentsOf: file)) {
+                presets.append(preset)
+            } else {
+                unreadablePresets.append(file.lastPathComponent)
+            }
         }
 
         var catalog = LoadedCatalog(
@@ -439,6 +461,7 @@ public nonisolated struct LoadedCatalog: Sendable {
             rootURL: rootURL
         )
         catalog.unreadableBlocks = unreadable.sorted()
+        catalog.unreadablePresets = unreadablePresets.sorted()
         for block in catalog.blocks {
             let folder = rootURL.appending(path: "blocks/\(block.id)")
             catalog.blockRoots[block.id] = folder

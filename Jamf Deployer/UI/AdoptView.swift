@@ -77,6 +77,13 @@ struct AdoptView: View {
         return false
     }
 
+    private var isFinished: Bool {
+        switch step {
+        case .ready, .failed: true
+        default: false
+        }
+    }
+
     // MARK: Content
 
     @ViewBuilder
@@ -89,7 +96,7 @@ struct AdoptView: View {
                     .foregroundStyle(.secondary)
                 if terraform.binaryURL == nil {
                     Label("Discovery needs the Terraform download from the Export tab first.", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
+                        .labelStyle(.tintedIcon(.yellow))
                 }
                 HStack {
                     TextField("Filter types", text: $typeFilter)
@@ -147,16 +154,16 @@ struct AdoptView: View {
                 if !secretObjects.isEmpty {
                     SecretObjectsNotice(
                         findings: secretObjects,
-                        message: "These may contain a secret, so they can't be adopted: adopted objects are saved in the tenant record. Remove the secret in Jamf (a script parameter, for example), then discover again.")
+                        message: "These may contain a secret, so they can’t be adopted: adopted objects are saved in the tenant record. Remove the secret in Jamf (a script parameter, for example), then discover again.")
                 }
                 if !unmanageableNotes.isEmpty {
-                    Text("Left out — the app cannot manage these: " + unmanageableNotes.joined(separator: "; ") + ". They stay in Jamf unchanged.")
+                    Text("Left out — the app can’t manage these: " + unmanageableNotes.joined(separator: "; ") + ". They stay in Jamf unchanged.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if !alreadyAdopted.isEmpty {
-                    Text("Objects already adopted are not listed; they stay managed as they are.")
+                    Text("Objects already adopted aren’t listed; they stay managed as they are.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -200,9 +207,9 @@ struct AdoptView: View {
                 VStack(spacing: 6) {
                     Text("\(count) object\(count == 1 ? "" : "s") staged. Preview Changes shows each one as “Adopt”; anything the first deploy would also change is listed with its exact differences.")
                     if let stagingNote {
-                        Text(stagingNote)
+                        Label(stagingNote, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .labelStyle(.tintedIcon(.orange))
                     }
                 }
             }
@@ -237,7 +244,8 @@ struct AdoptView: View {
     @ViewBuilder
     private var footer: some View {
         Spacer()
-        Button("Cancel") { dismiss() }
+        // once staged (or failed) nothing is left to cancel
+        Button(isFinished ? "Close" : "Cancel") { dismiss() }
             .keyboardShortcut(.cancelAction)
         switch step {
         case .pickTypes:
@@ -254,6 +262,7 @@ struct AdoptView: View {
                 dismiss()
             }
             .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
         case .discovering, .failed:
             EmptyView()
         }
@@ -263,7 +272,7 @@ struct AdoptView: View {
 
     private func discover() {
         guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
-            step = .failed("The tenant's stored credentials are missing. Enter them on the tenant page (Update Client Secret… or Update Password…).")
+            step = .failed(JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
             return
         }
         guard let terraformURL = terraform.binaryURL else { return }
@@ -272,7 +281,10 @@ struct AdoptView: View {
         // Only names the exporter offers: an unknown name aborts the export.
         let available = Set(resourceTypes.map(\.filterKey))
         let types = available.isEmpty ? Array(selectedTypes) : Array(selectedTypes.intersection(available))
+        // the Demo Mode switch waits for it (`ScreenWork`)
+        let work = ScreenWork.shared.begin("adopt discovery")
         Task {
+            defer { ScreenWork.shared.end(work) }
             do {
                 let result = try await runner.export(
                     tenant: tenant,
@@ -338,7 +350,7 @@ struct AdoptView: View {
             let kept = selection.kept
             let leftOutNames = objects.filter { selection.leftOut.contains($0.address) }.map(\.displayName).sorted()
             stagingNote = leftOutNames.isEmpty ? nil
-                : "Not staged — they depend on objects the app cannot adopt: \(leftOutNames.joined(separator: ", "))."
+                : "Not staged — they depend on objects the app can’t adopt: \(leftOutNames.joined(separator: ", "))."
             guard !kept.isEmpty else {
                 step = .failed(stagingNote ?? "Nothing was selected to adopt.")
                 return
@@ -355,11 +367,11 @@ struct AdoptView: View {
             let secrets = TenantSecrets(tenantID: tenant.id)
             for variable in sensitive {
                 guard let value = variable.value else {
-                    step = .failed("Jamf did not export the sensitive value “\(variable.name)”, so nothing was staged.")
+                    step = .failed("Jamf didn’t export the sensitive value “\(variable.name)”, so nothing was staged.")
                     return
                 }
                 guard secrets.adoptedVariable(variable.name).save(value) else {
-                    step = .failed("The sensitive value “\(variable.name)” could not be stored in the Keychain, so nothing was staged.")
+                    step = .failed("The Keychain refused to save the secret “\(variable.name)”, so nothing was staged.")
                     return
                 }
             }

@@ -54,6 +54,17 @@ struct AppStorePickerView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var categories: [ExistingObjectRef] = []
+    /// The location listed now. It reaches the block's settings only when
+    /// picked, or when an app is added from it, never just by opening.
+    @State private var shownLocation = ""
+    /// The adam IDs of the listed location's content, once it loaded.
+    @State private var loadedContentIDs: Set<String>?
+
+    /// Chosen apps the listed location has no licenses for.
+    private var unlicensedIDs: Set<String> {
+        guard let loadedContentIDs else { return [] }
+        return AppStoreLicenses.unlicensed(apps, contentIDs: loadedContentIDs)
+    }
 
     private var visibleContent: [Content] {
         let query = searchText.trimmingCharacters(in: .whitespaces)
@@ -98,16 +109,24 @@ struct AppStorePickerView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 if locations.count > 1 {
-                    Picker("Apps and Books location", selection: $locationName) {
+                    Picker("Apps and Books location", selection: Binding(
+                        get: { shownLocation },
+                        set: { name in
+                            // an explicit pick: the block uses this location
+                            shownLocation = name
+                            locationName = name
+                            Task { await loadContent(locationNamed: name) }
+                        }
+                    )) {
                         ForEach(locations) { location in
                             Text(location.name).tag(location.name)
                         }
                     }
-                    .onChange(of: locationName) { Task { await loadContent(locationNamed: locationName) } }
                 }
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     TextField("Filter licensed apps", text: $searchText)
                         .textFieldStyle(.plain)
                 }
@@ -130,8 +149,8 @@ struct AppStorePickerView: View {
                     "No Licensed Apps",
                     systemImage: "bag",
                     description: Text(locations.isEmpty
-                        ? "This tenant has no Apps and Books location. Connect one in Jamf Pro (Settings → Global → Volume purchasing) first."
-                        : "Get apps for this location in Apple Business Manager — free apps too — and Jamf lists them here after its next sync.")
+                        ? "This tenant has no Apps and Books location. Connect one in Jamf Pro (Settings › Global › Volume purchasing) first."
+                        : "Get apps for this location in Apple Business or Apple School Manager, free apps too, and Jamf lists them here after its next sync.")
                 )
                 .frame(maxHeight: .infinity)
             } else {
@@ -155,6 +174,8 @@ struct AppStorePickerView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(width: 28, height: 28)
+            // the app's name follows
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name)
@@ -169,6 +190,8 @@ struct AppStorePickerView: View {
                 if isSelected {
                     apps.removeAll { $0.adamID == item.adamId }
                 } else {
+                    // adding from the listed location chooses it for the block
+                    if locationName != shownLocation { locationName = shownLocation }
                     apps.append(AppStoreApp(adamID: item.adamId, name: item.name))
                 }
             }
@@ -199,8 +222,16 @@ struct AppStorePickerView: View {
                                     apps.removeAll { $0.adamID == app.adamID }
                                 }
                                 .labelStyle(.iconOnly)
+                                .accessibilityLabel("Remove \(app.name)")
+                                .help("Remove \(app.name)")
                                 .buttonStyle(.plain)
                                 .foregroundStyle(.secondary)
+                            }
+                            if unlicensedIDs.contains(app.adamID) {
+                                Label("No licenses in “\(shownLocation)”. Remove it, or pick the location that has them.",
+                                      systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .labelStyle(.tintedIcon(.orange))
                             }
                             Picker("Delivery", selection: $app.deploymentType) {
                                 ForEach(AppStoreApp.DeploymentType.allCases, id: \.self) { type in
@@ -240,7 +271,7 @@ struct AppStorePickerView: View {
 
     private func client() -> JamfPlatformClient? {
         guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
-            loadError = "The tenant's stored credentials are missing."
+            loadError = JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
             return nil
         }
         return TenantClients.shared.client(for: tenant, activityLog: activityLog)
@@ -253,10 +284,9 @@ struct AppStorePickerView: View {
         do {
             locations = try await client.allPages("/pro/v1/volume-purchasing-locations", as: Location.self,
                                                   privileges: [.readVolumePurchasingLocations])
-            // The binding writes through the tenant store, so read the
-            // choice from a local rather than back from the binding.
+            // Shown only: the block's setting changes on an explicit pick.
             let chosen = locations.contains(where: { $0.name == locationName }) ? locationName : (locations.first?.name ?? "")
-            if chosen != locationName { locationName = chosen }
+            shownLocation = chosen
             await loadContent(locationNamed: chosen)
         } catch {
             loadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -264,6 +294,7 @@ struct AppStorePickerView: View {
     }
 
     private func loadContent(locationNamed name: String) async {
+        loadedContentIDs = nil
         guard let location = locations.first(where: { $0.name == name }), let client = client() else {
             content = []
             return
@@ -271,13 +302,24 @@ struct AppStorePickerView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            content = try await client.allPages(
+            let loaded = try await client.allPages(
                 "/pro/v1/volume-purchasing-locations/\(location.id)/content", as: Content.self,
                 pageSize: 2000, privileges: [.readVolumePurchasingLocations]
             )
+            // a quicker pick may have replaced this one
+            guard name == shownLocation else { return }
+            content = loaded
+            loadedContentIDs = Set(loaded.map(\.adamId))
             loadError = nil
         } catch {
             loadError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+}
+
+/// Which chosen App Store apps an Apps and Books location can't license.
+nonisolated enum AppStoreLicenses {
+    static func unlicensed(_ apps: [AppStoreApp], contentIDs: Set<String>) -> Set<String> {
+        Set(apps.map(\.adamID).filter { !contentIDs.contains($0) })
     }
 }

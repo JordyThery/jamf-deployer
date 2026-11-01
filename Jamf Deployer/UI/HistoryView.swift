@@ -45,10 +45,10 @@ struct HistoryView: View {
                     TableColumn("Result") { row in
                         if row.entry.failed == 0 {
                             Label("Succeeded", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                                .labelStyle(.tintedIcon(.green))
                         } else {
                             Label("\(row.entry.failed) failed", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.yellow)
+                                .labelStyle(.tintedIcon(.yellow))
                         }
                     }
                     TableColumn("Roll back") { row in
@@ -56,7 +56,7 @@ struct HistoryView: View {
                             rowPendingRollback = row
                         }
                         .controlSize(.small)
-                        .help("Restore this deploy's baseline; preview and deploy to apply it")
+                        .help("Restore this deploy’s baseline; preview and deploy to apply it")
                     }
                     .width(90)
                     TableColumn("Blocks") { row in
@@ -84,7 +84,7 @@ struct HistoryView: View {
             }
         }
         .confirmationDialog(
-            "Roll back “\(rowPendingRollback?.tenantName ?? "")”?",
+            "Roll Back “\(rowPendingRollback?.tenantName ?? "")”?",
             isPresented: Binding(
                 get: { rowPendingRollback != nil },
                 set: { if !$0 { rowPendingRollback = nil } }
@@ -96,7 +96,7 @@ struct HistoryView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The tenant's baseline returns to the one from this deploy. Nothing changes in Jamf until you preview and deploy.")
+            Text("The tenant’s baseline returns to the one from this deploy. Nothing changes in Jamf until you preview and deploy.")
         }
         .alert(rollbackFailed ? "Roll Back Failed" : "Baseline Restored", isPresented: Binding(
             get: { rollbackMessage != nil },
