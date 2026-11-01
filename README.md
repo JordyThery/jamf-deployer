@@ -64,8 +64,10 @@ Jamf Deployer stands on [OpenTofu](https://opentofu.org) (MPL-2.0), the [jamfpla
 
 Export as Terraform owes its layout and pipeline to three JNUC 2026 sessions: *Managing the Jamf Platform at Scale With IaC* by Kyle and Neil Martin (Jamf), and *From ClickOps to GitOps: Migrating Jamf Pro at Enterprise Scale to Terraform* and *From Zero to GitOps: Training a Mac Team to Work Like DevOps Engineers* by Joseph, Gordon and Dafydd (Lloyds Banking Group). See [Graduating to Terraform](docs/graduating.md#credits).
 
-This is an independent project, not affiliated with or endorsed by Jamf.
-
 ## Support
 
 If Jamf Deployer saves you time, you can [buy me a coffee](https://buymeacoffee.com/jordythery). ☕️
+
+## Disclaimer
+
+This tool is provided as-is, without warranty of any kind. Use it at your own risk. This is a personal project. It is not affiliated with or endorsed by my employer or Jamf. Issues and pull requests are appreciated. Support is best-effort.
