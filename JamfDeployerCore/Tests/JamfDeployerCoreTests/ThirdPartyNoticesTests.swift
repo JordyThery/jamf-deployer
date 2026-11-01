@@ -3,7 +3,7 @@ import Testing
 @testable import JamfDeployerCore
 
 /// About is built from `ThirdPartyComponent.all`; THIRD-PARTY-NOTICES.md must
-/// say the same thing word for word, and the licence texts must be the ones
+/// say the same thing word for word, and the license texts must be the ones
 /// that ship next to the bundled copies.
 @Suite("Third-party notices")
 struct ThirdPartyNoticesTests {
@@ -22,7 +22,7 @@ struct ThirdPartyNoticesTests {
             text += "- [\(link.title)](\(link.address))\n"
         }
         if let licence = component.licence, let name = component.licenceName {
-            text += "\nLicence: \(name)\n\n```text\n\(licence)\n```\n"
+            text += "\nLicense: \(name)\n\n```text\n\(licence)\n```\n"
         }
         return text
     }
@@ -66,7 +66,7 @@ struct ThirdPartyNoticesTests {
 
     // MARK: The copies next to the bundled tools
 
-    /// Where `Vendor/fetch.sh` puts each licence. The providers' are inside their zips.
+    /// Where `Vendor/fetch.sh` puts each license. The providers' are inside their zips.
     private static let vendorLicences: [String: String] = [
         "opentofu": "Vendor/opentofu/bin/LICENSE",
         "terraform-backend-git": "Vendor/terraform-backend-git/LICENSE",

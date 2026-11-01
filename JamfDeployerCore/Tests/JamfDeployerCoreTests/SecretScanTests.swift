@@ -95,6 +95,15 @@ struct SecretScanTests {
         #"token_type = "Bearer""#,
         #"client_secret = "********""#,
         #"PASSWORD="$1""#,
+        #"PASSWORD="$API_PASSWORD""#,
+        "export TOKEN=$(security find-generic-password -w)",
+        #"curl -su "$API_USER:$API_PASS" https://example.com"#,
+        #"curl -u "${USER}:${PASS}" https://example.com"#,
+        #"curl -H "Authorization: Bearer $TOKEN" https://example.com"#,
+        #"curl -H "Authorization: Bearer ${ACCESS_TOKEN}" https://example.com"#,
+        #"header = "Authorization: Basic " + credentials"#,
+        "docker run -u 1000:1000 image",
+        #"sort -u names.txt"#,
     ])
     func ignoresReferencesAndPlaceholders(_ text: String) {
         #expect(SecretScan.scan(text: text, path: "x").isEmpty)
@@ -109,9 +118,102 @@ struct SecretScanTests {
         "-----BEGIN RSA PRIVATE KEY-----",
         // A README captured before this check, listing jamformer's findings.
         "- Line 3    FAKE***************-123  (Password value in HCL attribute)",
+        // Script forms.
+        #"curl -u admin:FAKE-Hunter2! https://example.com"#,
+        #"curl -su "api:FAKE-Hunter2!" https://example.com"#,
+        "wget --user=admin:FAKEpass99 https://example.com",
+        #"curl -H "Authorization: Basic ZmFrZTpOb3RBUmVhbDEyMw==" https://example.com"#,
+        #"curl -H 'Authorization: Bearer eyJhbGciOiJGQUtFIn0.ZmFrZQ.c2ln' https://example.com"#,
+        #"PASSWORD="$uperSecret1!""#,
+        "ADMIN_PASSWORD=$uperSecret1!",
+        // Quoted values with spaces (passphrases).
+        #"passphrase = "correct horse FAKE staple""#,
+        "wifi_password: 'FAKE not real 456'",
+        // A history plan: JSON escapes slashes, newlines and quotes.
+        #"{"payloads":"<plist><dict><key>Password<\/key>\n\t<string>FAKE-NotARealWifi-456<\/string><\/dict><\/plist>"}"#,
+        ##"{"script_contents":"#!/bin/sh\ncurl -su \"api:FAKE-Hunter2!\" https://example.com\n"}"##,
     ])
     func findsSecrets(_ text: String) {
-        #expect(SecretScan.scan(text: text, path: "x").count == 1)
+        #expect(SecretScan.scan(text: text, path: "x").count == 1, "\(text)")
+    }
+
+    @Test func historyPlansKeepSlashesReadable() throws {
+        // A Wi-Fi password typed into a managed profile in Jamf, as it reaches
+        // a refresh plan's prior state.
+        let payload = "<plist><dict><key>Password</key>\n<string>FAKE-NotARealWifi-456</string></dict></plist>"
+        let plan: [String: Any] = [
+            "format_version": "1.2",
+            "prior_state": ["values": ["root_module": ["resources": [[
+                "address": "jamfplatform_pro_macos_configuration_profile.wifi",
+                "values": ["payloads": payload], "sensitive_values": [:],
+            ]]]]],
+        ]
+        let escaped = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
+        #expect(escaped.contains(#"<\/key>"#))
+        let redacted = String(decoding: try #require(PlanRedactor.redact(Data(escaped.utf8))), as: UTF8.self)
+        #expect(redacted.contains("</key>") && !redacted.contains(#"<\/key>"#))
+        #expect(SecretScan.scan(text: redacted, path: "history/x/plan.json").count == 1)
+        // Plans written before this change are still caught.
+        #expect(SecretScan.scan(text: escaped, path: "history/x/plan.json").count == 1)
+    }
+
+    @Test func tfvarsValuesAreScannedBeforeTheyAreInlined() throws {
+        let export = try Self.copyExport()
+        defer { try? FileManager.default.removeItem(at: export) }
+        try Data("""
+        variable "bind_password" {
+          type = string
+        }
+
+        variable "wifi_password" {
+          type      = string
+          sensitive = true
+        }
+        """.utf8).write(to: export.appending(path: "variables.tf"))
+        try Data("bind_password = \"FAKE-NotARealBind-789\"\nwifi_password = \"\(Self.fakeWifiSecret)\"\n".utf8)
+            .write(to: export.appending(path: "terraform.tfvars"))
+        try Data("resource \"jamfplatform_pro_script\" \"bind\" {\n  name = \"Bind\"\n  parameter4 = var.bind_password\n}\n".utf8)
+            .write(to: export.appending(path: "bind.tf"))
+        let findings = SecretScan.scanExport(export).filter { $0.path == "terraform.tfvars" }
+        // The sensitive one goes to the Keychain; the unmarked one is a finding.
+        #expect(findings == [SecretFinding(path: "terraform.tfvars", line: 1, rule: "Password value in HCL attribute")])
+        #expect(SecretScan.objectFindings(findings, in: export).map(\.objectDescription) == ["Script “Bind”"])
+    }
+
+    @Test func captureTurnsAFlaggedTfvarsValueIntoASecretSetting() throws {
+        let export = try Self.copyExport()
+        let root = FileManager.default.temporaryDirectory.appending(path: "secret-catalog-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: export)
+            try? FileManager.default.removeItem(at: root)
+        }
+        try Data("variable \"bind_password\" {\n  type = string\n}\n".utf8).write(to: export.appending(path: "variables.tf"))
+        try Data("bind_password = \"FAKE-NotARealBind-789\"\n".utf8).write(to: export.appending(path: "terraform.tfvars"))
+        try Data("resource \"jamfplatform_pro_script\" \"bind\" {\n  name = \"Bind\"\n  parameter4 = var.bind_password\n}\n".utf8)
+            .write(to: export.appending(path: "bind.tf"))
+        let result = try Self.capture(export: export, findings: [], root: root)
+        #expect(!Self.allText(in: result.blockFolderURL).contains("FAKE-NotARealBind"))
+        #expect(result.secretSettings.contains { $0.key == "bind_password" && $0.rule == "Password value in HCL attribute" })
+        let declaration = try #require(BlockCapture.parseVariableDeclarations(
+            at: result.blockFolderURL.appending(path: "variables.tf"))["bind_password"])
+        #expect(declaration.contains("sensitive = true") && !declaration.contains("default"))
+    }
+
+    @Test func replacingAValueLeavesNamesAndHeredocTemplatesRight() {
+        let text = """
+        resource "jamfplatform_pro_script" "reset_welcome2024" {
+          name            = "Reset Welcome2024"
+          parameter4      = "Welcome2024"
+          script_contents = <<-EOT
+            PASSWORD="Welcome2024"
+          EOT
+        }
+        """
+        let referenced = SecretScan.referencing(text, replacing: [("Welcome2024", "secret_x")])
+        #expect(referenced.contains(#"name            = "Reset Welcome2024""#))
+        #expect(referenced.contains(#"resource "jamfplatform_pro_script" "reset_welcome2024""#))
+        #expect(referenced.contains("parameter4      = var.secret_x"))
+        #expect(referenced.contains(#"PASSWORD="${var.secret_x}""#))
     }
 
     @Test func templatesEscapeExistingInterpolation() {
@@ -299,5 +401,30 @@ struct SecretScanTests {
             at: result.blockFolderURL.appending(path: "variables.tf"))["wifi_password"])
         #expect(!declaration.contains("default"))
         #expect(variables.contains("variable \"wifi_password\""))
+    }
+}
+
+@Suite("Secret scan on shipped files")
+struct ShippedFilesScanTests {
+    /// The repository root, from this file's location.
+    static let repository = URL(filePath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+
+    /// The built-in catalog and the export templates ship with the app and
+    /// end up in stores and repositories: the store check must pass on them.
+    @Test(arguments: ["Catalog", "Templates"])
+    func shippedFilesPassTheStoreCheck(_ folder: String) throws {
+        let root = Self.repository.appending(path: folder)
+        let enumerator = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]))
+        var scanned = 0
+        var findings: [SecretFinding] = []
+        while let url = enumerator.nextObject() as? URL {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+                  let text = SecretScan.scannableText(try Data(contentsOf: url)) else { continue }
+            scanned += 1
+            findings += SecretScan.scan(text: text, path: url.path.replacingOccurrences(of: root.path + "/", with: ""))
+        }
+        #expect(scanned > 0)
+        #expect(findings.isEmpty, "\(findings)")
     }
 }

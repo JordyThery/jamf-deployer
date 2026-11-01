@@ -1,7 +1,7 @@
 import Foundation
 
 /// Third-party software the app bundles or downloads, credited in About and in
-/// THIRD-PARTY-NOTICES.md with the same words. The licence texts are kept in
+/// THIRD-PARTY-NOTICES.md with the same words. The license texts are kept in
 /// `Licences/` exactly as each project publishes them.
 public nonisolated struct ThirdPartyComponent: Sendable, Hashable, Identifiable {
     public nonisolated struct Link: Sendable, Hashable {
@@ -14,7 +14,7 @@ public nonisolated struct ThirdPartyComponent: Sendable, Hashable, Identifiable 
     /// What the app uses it for.
     public var summary: String
     public var links: [Link]
-    /// The licence's name as shown in About, e.g. "Mozilla Public License 2.0".
+    /// The license’s name as shown in About, e.g. "Mozilla Public License 2.0".
     public var licenceName: String?
     /// The text's file in `Licences/`, without ".txt". Nil when nothing is bundled.
     public var licenceFile: String?
@@ -26,15 +26,15 @@ public nonisolated struct ThirdPartyComponent: Sendable, Hashable, Identifiable 
         author.map { "\(name) by \($0)" } ?? name
     }
 
-    /// The licence file as published, byte for byte.
-    public var licenceFileText: String? {
+    /// The license file as published, byte for byte.
+    var licenceFileText: String? {
         guard let licenceFile,
               let url = Bundle.module.url(forResource: licenceFile, withExtension: "txt", subdirectory: "Licences")
         else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }
 
-    /// The licence text for display: the file without its closing line break.
+    /// The license text for display: the file without its closing line break.
     public var licence: String? {
         licenceFileText.map { text in
             var text = text
@@ -61,7 +61,7 @@ nonisolated extension ThirdPartyComponent {
             licenceFile: "opentofu"
         ),
         ThirdPartyComponent(
-            name: "jamfplatform provider",
+            name: "jamfplatform plugin",
             author: "Jamf",
             summary: "Lets the engine manage Jamf Platform resources. Bundled with the app.",
             links: [Link(title: "github.com/jamf/terraform-provider-jamfplatform", address: "https://github.com/jamf/terraform-provider-jamfplatform")],
@@ -69,7 +69,7 @@ nonisolated extension ThirdPartyComponent {
             licenceFile: "jamfplatform-provider"
         ),
         ThirdPartyComponent(
-            name: "jamfprotect provider",
+            name: "jamfprotect plugin",
             author: "Jamf Concepts",
             summary: "Lets the engine manage Jamf Protect resources. Bundled with the app.",
             links: [Link(title: "github.com/Jamf-Concepts/terraform-provider-jamfprotect", address: "https://github.com/Jamf-Concepts/terraform-provider-jamfprotect")],
@@ -77,7 +77,7 @@ nonisolated extension ThirdPartyComponent {
             licenceFile: "jamfprotect-provider"
         ),
         ThirdPartyComponent(
-            name: "jamfpro provider",
+            name: "jamfpro plugin",
             author: "Deployment Theory",
             summary: "Lets the engine manage Jamf Pro resources. Bundled with the app.",
             links: [Link(title: "github.com/deploymenttheory/terraform-provider-jamfpro", address: "https://github.com/deploymenttheory/terraform-provider-jamfpro")],
@@ -87,7 +87,7 @@ nonisolated extension ThirdPartyComponent {
         ThirdPartyComponent(
             name: "terraform-backend-git",
             author: "plumber-cd",
-            summary: "In Team Mode, stores and locks each tenant's deployment state in the team space's Git repository. Bundled with the app.",
+            summary: "In Team Mode, stores and locks each tenant’s deployment state in the team space’s Git repository. Bundled with the app.",
             links: [Link(title: "github.com/plumber-cd/terraform-backend-git", address: "https://github.com/plumber-cd/terraform-backend-git")],
             licenceName: "Apache License 2.0",
             licenceFile: "terraform-backend-git"
@@ -95,7 +95,7 @@ nonisolated extension ThirdPartyComponent {
         ThirdPartyComponent(
             name: "jamformer",
             author: "Jamf Concepts",
-            summary: "Exports a tenant's existing configuration. Bundled with the app.",
+            summary: "Exports a tenant’s existing configuration. Bundled with the app.",
             links: [Link(title: "github.com/Jamf-Concepts/jamformer", address: "https://github.com/Jamf-Concepts/jamformer")],
             licenceName: "MIT License",
             licenceFile: "jamformer"
@@ -127,7 +127,7 @@ nonisolated extension ThirdPartyComponent {
         ThirdPartyComponent(
             name: "Go",
             author: "the Go Authors",
-            summary: "The Go runtime and standard library are compiled into OpenTofu, the providers, terraform-backend-git and jamformer.",
+            summary: "The Go runtime and standard library are compiled into OpenTofu, the engine plugins, terraform-backend-git and jamformer.",
             links: [
                 Link(title: "go.dev", address: "https://go.dev"),
                 Link(title: "github.com/golang/go", address: "https://github.com/golang/go"),

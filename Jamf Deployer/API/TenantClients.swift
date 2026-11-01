@@ -15,7 +15,7 @@ import os
 /// - the tenant is removed.
 ///
 /// Deploy bookkeeping (last deploy, deployed versions, token expiry dates)
-/// changes none of these, so it keeps the client (decided by Jordy).
+/// changes none of these, so it keeps the client.
 ///
 /// The wizard and Test Connection check credentials that aren't saved yet,
 /// so they make a one-off `JamfPlatformClient` instead.

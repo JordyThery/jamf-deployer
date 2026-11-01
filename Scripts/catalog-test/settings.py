@@ -1,8 +1,15 @@
 # Usage: settings.py <keychain-service> snapshot|restore|show <file>
 # Snapshots and restores the tenant-wide settings the catalog blocks manage,
-# through the Jamf Pro API with the Keychain's jamfpro-* credentials.
-import base64, json, subprocess, sys, urllib.request
+# through the Jamf Pro API with the Keychain's jamfpro-* credentials. Restore
+# writes only for a full-access, non-production tenant on the release-check
+# allow-list (tenant_guard.py); snapshot and show only read.
+import base64, json, os, subprocess, sys, urllib.request
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tenant_guard
 
+if len(sys.argv) != 4 or sys.argv[2] not in ("snapshot", "restore", "show"):
+    print("Usage: settings.py <keychain-service> snapshot|restore|show <file>", file=sys.stderr)
+    sys.exit(2)
 svc, action, path = sys.argv[1:4]
 def kc(a):
     found = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", a, "-w"], capture_output=True, text=True)
@@ -10,6 +17,11 @@ def kc(a):
     if found.returncode != 0 or not value:
         sys.exit(f"Keychain item missing: service {svc!r}, account {a!r}")
     return value
+if action == "restore":
+    try:
+        tenant_guard.require_writable(svc, "jamfPro", kc("jamfpro-fqdn"))
+    except tenant_guard.Refused as error:
+        sys.exit(f"Refused: {error}")
 base = "https://" + kc("jamfpro-fqdn")
 basic = base64.b64encode((kc("jamfpro-username") + ":" + kc("jamfpro-password")).encode()).decode()
 token = json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/v1/auth/token", method="POST", headers={"Authorization": "Basic " + basic})))["token"]

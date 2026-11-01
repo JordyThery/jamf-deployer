@@ -66,7 +66,9 @@ public nonisolated enum PlanRedactor {
             plan["output_changes"] = outputs
         }
 
-        return try? JSONSerialization.data(withJSONObject: plan, options: [.sortedKeys])
+        // Slashes stay unescaped, so the store's secret scan reads
+        // `</key>` in profile payloads as written.
+        return try? JSONSerialization.data(withJSONObject: plan, options: [.sortedKeys, .withoutEscapingSlashes])
     }
 
     private static func maskedChange(_ change: [String: Any]) -> [String: Any] {

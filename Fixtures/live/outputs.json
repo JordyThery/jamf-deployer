@@ -12,7 +12,7 @@
   "apple_silicon_platform_uuid": {
     "sensitive": false,
     "type": "string",
-    "value": "8a074764-c548-464a-bf4d-79b5f0357440"
+    "value": "00000000-0000-4000-8000-000000000102"
   },
   "baseline_titles": {
     "sensitive": false,
@@ -69,6 +69,6 @@
   "pilot_platform_uuid": {
     "sensitive": false,
     "type": "string",
-    "value": "384fe2ec-3a2f-4e53-a832-95d13302dd3a"
+    "value": "00000000-0000-4000-8000-000000000101"
   }
 }

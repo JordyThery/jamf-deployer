@@ -59,7 +59,7 @@ struct FleetDashboardView: View {
                     TableColumn("Status") { tenant in
                         if let lock = deployService.lock(for: tenant.id) {
                             Label("Being \(lock.activity) by \(lock.engineer)", systemImage: "lock.fill")
-                                .foregroundStyle(.orange)
+                                .labelStyle(.tintedIcon(.orange))
                                 .help(lock.created.map { "Since \($0.formatted(.relative(presentation: .named)))" } ?? "Locked in the team space")
                         } else {
                             statusLabel(for: tenant)
@@ -85,7 +85,7 @@ struct FleetDashboardView: View {
                     TableColumn("ADE token") { tenant in
                         expiryText(tenant.preflight?.adeTokenExpiration)
                     }
-                    TableColumn("VPP token") { tenant in
+                    TableColumn("Apps and Books token") { tenant in
                         expiryText(tenant.preflight?.vppTokenExpiration)
                     }
                 }
@@ -172,24 +172,24 @@ struct FleetDashboardView: View {
                 .foregroundStyle(.secondary)
         } else if let failure = deployService.fleetCheckFailure(for: tenant.id) {
             Label("Check failed", systemImage: "xmark.circle.fill")
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
                 .help(failure)
         } else if tenant.lastDeploy == nil {
             if tenant.preflight?.allGreen == false {
                 Label("Check preflight", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
+                    .labelStyle(.tintedIcon(.yellow))
             } else {
                 Label("Never deployed", systemImage: "circle.dashed")
                     .foregroundStyle(.secondary)
             }
         } else if !tenant.outstandingDrift.isEmpty {
             Label("\(tenant.outstandingDrift.count) change\(tenant.outstandingDrift.count == 1 ? "" : "s") made in Jamf", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
+                .labelStyle(.tintedIcon(.yellow))
         } else if let checked = tenant.lastDriftCheck {
             // "In sync" only with a recent check; otherwise show the age.
             if Date.now.timeIntervalSince(checked) < 24 * 60 * 60 {
                 Label("In sync", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .labelStyle(.tintedIcon(.green))
             } else {
                 Label("Last checked \(checked.formatted(.relative(presentation: .named)))", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
@@ -225,9 +225,21 @@ struct FleetDashboardView: View {
     @ViewBuilder
     private func expiryText(_ raw: String?) -> some View {
         if let raw, let date = parseExpiry(raw), let days = daysUntil(raw) {
-            Text(date, format: .dateTime.day().month().year())
-                .foregroundStyle(days < 30 ? AnyShapeStyle(.yellow) : AnyShapeStyle(.primary))
+            // Soon or already expired: a warning symbol, not just a color.
+            if days < 30 {
+                Label {
+                    Text(date, format: .dateTime.day().month().year())
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .labelStyle(.tintedIcon(.yellow))
                 .help(expiryHelp(days))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(date.formatted(.dateTime.day().month().year())). \(expiryHelp(days))")
+            } else {
+                Text(date, format: .dateTime.day().month().year())
+                    .help(expiryHelp(days))
+            }
         } else {
             Text("—")
                 .foregroundStyle(.secondary)

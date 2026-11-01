@@ -44,14 +44,14 @@ resource "jamfplatform_pro_category" "jamf" {
 resource "jamfplatform_pro_category" "jd_spike_cis_l1_monitor" {
   provider = jamfplatform
 
-  name     = "JD Spike - CIS L1 Monitor"
+  name     = "JD - CIS L1 Monitor"
   priority = 9
 }
 
 resource "jamfplatform_pro_category" "jd_spike_deployer" {
   provider = jamfplatform
 
-  name     = "JD Spike - Deployer"
+  name     = "JD - Deployer"
   priority = 9
 }
 

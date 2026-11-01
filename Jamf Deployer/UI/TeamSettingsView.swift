@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import JTKit
 
 /// Settings → Team: the safe switch into (and out of) a shared store.
 ///
@@ -32,6 +33,7 @@ struct TeamSettingsView: View {
             }
             if isWorking {
                 ProgressView().controlSize(.small)
+                    .accessibilityLabel("In progress")
             }
             if let message {
                 Text(message)
@@ -42,14 +44,14 @@ struct TeamSettingsView: View {
             if let syncMessage = deployService.syncMessage {
                 Label(syncMessage, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.yellow)
+                    .labelStyle(.tintedIcon(.yellow))
             }
         } header: {
             Text("Team")
         } footer: {
             Text(deployService.isTeamMode
-                ? "Tenant records, history and the list of catalog sources sync through the team space. Each tenant's deployment state is stored encrypted on the repository's \(StateBackendService.stateBranch) branch and locked while someone previews, checks or deploys it. Every engineer signs in to tenants with their own API client or account, kept in their own Keychain."
-                : "A team space is a Git repository (for example on GitHub) that tenants, history and catalog sources sync through; each tenant's deployment state is stored encrypted on a separate branch of it. Git authentication uses your existing git, gh or SSH setup. A full backup of this Mac's store is made before anything changes.")
+                ? "Tenant records, history and the list of catalog sources sync through the team space. Each tenant’s deployment state is stored encrypted on the repository’s \(StateBackendService.stateBranch) branch and locked while someone previews, checks or deploys it. Every engineer signs in to tenants with their own API client or account, kept in their own Keychain."
+                : "A team space is a Git repository (for example on GitHub) that tenants, history and catalog sources sync through; each tenant’s deployment state is stored encrypted on a separate branch of it. Git authentication uses your existing git, gh or SSH setup. A full backup of this Mac’s store is made before anything changes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -61,7 +63,7 @@ struct TeamSettingsView: View {
             Button("Leave Team Mode", role: .destructive) { leave() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every tenant's deployment state is copied back to this Mac and this Mac stops syncing. The team space itself is untouched.")
+            Text("Every tenant’s deployment state is copied back to this Mac and this Mac stops syncing. The team space itself is untouched.")
         }
     }
 
@@ -91,7 +93,7 @@ struct TeamSettingsView: View {
                             .font(.callout.monospaced())
                             .textSelection(.enabled)
                         Button("Copy") {
-                            Self.copyConcealed(TeamPassphrase.item.load() ?? "")
+                            SecretPasteboard.copy(TeamPassphrase.item.load() ?? "")
                         }
                         .controlSize(.small)
                     }
@@ -101,7 +103,7 @@ struct TeamSettingsView: View {
                 }
             }
         } else {
-            passphraseEntry(prompt: "This Mac needs the team passphrase to read the team's deployment state. Ask a teammate for it.")
+            passphraseEntry(prompt: "This Mac needs the team passphrase to read the team’s deployment state. Ask a teammate for it.")
         }
     }
 
@@ -119,7 +121,7 @@ struct TeamSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Team passphrase")
                     .font(.callout.bold())
-                Text("It encrypts every tenant's deployment state in the team space. Save it in your team's password manager now: engineers enter it when they join, and without it the state cannot be read.")
+                Text("It encrypts every tenant’s deployment state in the team space. Save it in your team’s password manager now: engineers enter it when they join, and without it the state can’t be read.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -128,7 +130,7 @@ struct TeamSettingsView: View {
                         .font(.callout.monospaced())
                         .textSelection(.enabled)
                     Button("Copy") {
-                        Self.copyConcealed(newPassphrase)
+                        SecretPasteboard.copy(newPassphrase)
                     }
                     .controlSize(.small)
                 }
@@ -149,9 +151,9 @@ struct TeamSettingsView: View {
                     hasSavedPassphrase = false
                     isCreating = true
                 }
-                .help("Publishes this Mac's tenants to an empty repository as a new team space")
+                .help("Publishes this Mac’s tenants to an empty repository as a new team space")
                 Button("Join Team Space") { joinTeamSpace() }
-                    .help("Clones an existing team space with its team passphrase; this Mac's current tenants are imported into it")
+                    .help("Clones an existing team space with its team passphrase; this Mac’s current tenants are imported into it")
                     .disabled(passphraseField.isEmpty)
             }
             .disabled(remoteURLField.isEmpty || isWorking || !GitStoreService.isGitAvailable)
@@ -168,7 +170,7 @@ struct TeamSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label(prompt, systemImage: "key.fill")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .labelStyle(.tintedIcon(.orange))
             HStack {
                 SecureField("Team passphrase", text: $passphraseField)
                 Button("Save") { savePassphrase() }
@@ -193,7 +195,7 @@ struct TeamSettingsView: View {
         Task {
             defer { isWorking = false }
             guard TeamPassphrase.item.save(passphrase) else {
-                message = "The Keychain did not accept the passphrase."
+                message = "The Keychain refused to save the secret, so the team passphrase wasn’t saved."
                 return
             }
             do {
@@ -207,7 +209,7 @@ struct TeamSettingsView: View {
                 }
             } catch {
                 TeamPassphrase.item.delete()
-                message = "The passphrase could not be checked: \(Self.describe(error))"
+                message = "The passphrase couldn’t be checked: \(Self.describe(error))"
             }
         }
     }
@@ -235,6 +237,7 @@ struct TeamSettingsView: View {
                     try await deployService.gitStore.ensureStateBranch()
                     guard TeamPassphrase.item.save(newPassphrase) else { throw TeamError.keychain }
                     await deployService.syncTeamState()
+                    try await deployService.ensurePassphraseCheck(replacing: true)
                     try await deployService.moveStateToTeam(tenants: tenantStore.tenants)
                     _ = try await deployService.commitStore(message: "Create team space")
                     try await deployService.gitStore.pushRebasing()
@@ -381,15 +384,15 @@ struct TeamSettingsView: View {
         var errorDescription: String? {
             switch self {
             case .backupFailed:
-                "The store could not be backed up, so nothing was changed. Check the free disk space and try again."
+                "The store couldn’t be backed up, so nothing was changed. Check the free disk space and try again."
             case .repositoryNotEmpty:
-                "The repository could not be used: it already has content, or Git could not push to it. Use an empty repository you can push to, or join the team space instead."
+                "The repository couldn’t be used: it already has content, or Git couldn’t push to it. Use an empty repository you can push to, or join the team space instead."
             case .keychain:
-                "The Keychain did not accept the team passphrase."
+                "The Keychain refused to save the secret."
             case .wrongPassphrase:
-                "That passphrase does not open the team's deployment state. Check it with a teammate."
+                "That passphrase doesn’t open the team’s deployment state. Check it with a teammate."
             case .createFailed(let reason):
-                "The team space could not be created: \(reason) This Mac is unchanged. The repository may hold a partial copy now, so empty it before trying again."
+                "The team space couldn’t be created: \(reason) This Mac is unchanged. The repository may hold a partial copy now, so empty it before trying again."
             case .joinFailed(let reason):
                 "\(reason) This Mac is unchanged; join again when that is resolved."
             }
@@ -397,16 +400,6 @@ struct TeamSettingsView: View {
     }
 
     /// Puts this Mac's own store back after a join that did not finish.
-    /// Copies a secret to the pasteboard marked concealed, so clipboard
-    /// managers and pasteboard history skip it.
-    private static func copyConcealed(_ text: String) {
-        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
-        let pasteboard = NSPasteboard.general
-        pasteboard.declareTypes([.string, concealed], owner: nil)
-        pasteboard.setString(text, forType: .string)
-        pasteboard.setString("", forType: concealed)
-    }
-
     nonisolated static func restoreReplacedStore() throws {
         let fileManager = FileManager.default
         let store = GitStoreService.storeURL
@@ -443,7 +436,7 @@ struct TeamSettingsView: View {
         }
         guard fileManager.fileExists(atPath: fresh.appending(path: "store.json").path) else {
             try? fileManager.removeItem(at: fresh)
-            throw GitStoreService.GitError.commandFailed("clone", output: "The repository is not a Jamf Deployer team space (store.json missing).")
+            throw GitStoreService.GitError.commandFailed("clone", output: "The repository isn’t a Jamf Deployer team space (store.json missing).")
         }
 
         // Import local tenants the team space doesn't know yet.

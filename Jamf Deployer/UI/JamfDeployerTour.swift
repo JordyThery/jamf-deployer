@@ -1,7 +1,7 @@
 import Foundation
 import JTKit
 
-/// The first-launch guided tour, re-openable from Help → Guided Tour.
+/// The first-launch guided tour, re-openable from Help › Guided Tour.
 enum JamfDeployerTour {
     static func makeState() -> TourState<TourAnchor> {
         TourState(
@@ -32,20 +32,20 @@ enum JamfDeployerTour {
         ),
         TourStep(
             title: "Preview, then deploy",
-            text: "Nothing is ever written to a tenant without a preview. You see exactly what would be created, changed or removed — and deploying always asks for confirmation.",
+            text: "Every deploy starts with a preview: you see exactly what would be created, changed or removed, and nothing is written until you click Deploy. Only Day 0 Setup’s one-time steps write straight away, when you start them.",
             pointsAtToolbar: true
         ),
         TourStep(
             title: "Everything is recorded",
-            text: "Every deploy lands in History, and the Activity Log window (⌘⇧L) shows each call the app makes. Secrets are never logged."
+            text: "Every deploy lands in History, and the Activity Log window (⇧⌘L) shows each call the app makes. Secrets are never logged."
         ),
         TourStep(
             title: "Try it on a test tenant",
-            text: "The best first step: connect a test tenant (tick “This is a test tenant” in the wizard) and run its preflight. Production tenants get extra guardrails."
+            text: "The best first step: connect a test tenant (select “This is a test tenant” in the wizard) and run its preflight. Production tenants get extra guardrails."
         ),
         TourStep(
-            title: "That's the tour",
-            text: "Replay it any time from Help → Guided Tour. Now connect your first tenant."
+            title: "That’s the tour",
+            text: "Replay it any time from Help › Guided Tour. Now connect your first tenant."
         ),
     ]
 }

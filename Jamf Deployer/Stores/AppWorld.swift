@@ -59,13 +59,28 @@ final class AppWorlds {
     let real: AppWorld
     @ObservationIgnored private let activityLog: ActivityLog
     @ObservationIgnored private var demoWorld: AppWorld?
+    /// Screen work that isn't engine work (exports, discovery, Day 0, a rollout).
+    @ObservationIgnored private let screenWork: ScreenWork
 
-    init(demo: DemoMode, activityLog: ActivityLog) {
+    init(demo: DemoMode, activityLog: ActivityLog, screenWork: ScreenWork = .shared) {
         self.demo = demo
         self.activityLog = activityLog
-        real = .real(activityLog: activityLog, sandboxFolder: demo.isSandbox ? demo.scratchDirectory : nil)
+        self.screenWork = screenWork
+        real = .real(activityLog: activityLog, sandboxFolder: Self.sandboxFolder(demo: demo))
         ToolDoorway.setDemoMode(demo.isOn)
     }
+
+    /// Where the "real" world keeps its store when it must not be the real
+    /// one: a sandbox launch's temporary folder, or, in the host of the unit
+    /// tests (which may run beside the installed app), a folder of its own.
+    static func sandboxFolder(demo: DemoMode, isUnitTestHost: Bool = TestRun.isUnitTestHost) -> URL? {
+        if demo.isSandbox { return demo.scratchDirectory }
+        if isUnitTestHost { return unitTestHostFolder }
+        return nil
+    }
+
+    static let unitTestHostFolder = FileManager.default.temporaryDirectory
+        .appending(path: "jamf-deployer-unit-test-host-\(ProcessInfo.processInfo.processIdentifier)", directoryHint: .isDirectory)
 
     /// The world the main window shows now.
     var active: AppWorld {
@@ -76,10 +91,11 @@ final class AppWorlds {
         return created
     }
 
-    /// Engine work, a check or a removal running in either world: the
-    /// switch waits for it.
+    /// Engine work, a check or a removal running in either world, or screen
+    /// work (an export, Adopt's discovery, a Day 0 step, a rollout under
+    /// way): the switch waits for it, since it swaps the main window.
     var isBusy: Bool {
-        [real, demoWorld].compactMap(\.self).contains {
+        screenWork.isBusy || [real, demoWorld].compactMap(\.self).contains {
             $0.deployService.isBusy || $0.deployService.fleetCheckProgress != nil
         }
     }

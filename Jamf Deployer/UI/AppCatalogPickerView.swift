@@ -79,6 +79,7 @@ struct AppCatalogPickerView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 TextField("Search apps and publishers", text: $searchText)
                     .textFieldStyle(.plain)
                     .onSubmit { search() }
@@ -96,6 +97,8 @@ struct AppCatalogPickerView: View {
                         search()
                     }
                     .labelStyle(.iconOnly)
+                    .accessibilityLabel("Clear Search")
+                    .help("Clear the search")
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                 }
@@ -143,6 +146,8 @@ struct AppCatalogPickerView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(width: 28, height: 28)
+            // the app's name follows
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title.titleName)
@@ -186,6 +191,8 @@ struct AppCatalogPickerView: View {
                                     apps.removeAll { $0.titleName == app.titleName }
                                 }
                                 .labelStyle(.iconOnly)
+                                .accessibilityLabel("Remove \(app.titleName)")
+                                .help("Remove \(app.titleName)")
                                 .buttonStyle(.plain)
                                 .foregroundStyle(.secondary)
                             }
@@ -208,7 +215,7 @@ struct AppCatalogPickerView: View {
                                     Text(category.name).tag(category.id)
                                 }
                             }
-                            .help("Categories already in the tenant; one that another block creates is chosen in the block's settings")
+                            .help("Categories already in the tenant; one that another block creates is chosen in the block’s settings")
                         }
                         .controlSize(.small)
                         .padding(.vertical, 4)
@@ -223,7 +230,7 @@ struct AppCatalogPickerView: View {
 
     private func search() {
         guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
-            loadError = "The tenant's stored credentials are missing."
+            loadError = JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
             return
         }
         isLoading = true

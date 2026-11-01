@@ -42,6 +42,13 @@ struct PreviewDeploySheet: View {
     @State private var isExportingRecovery = false
     /// Built when the user saves the sheet, never during rendering.
     @State private var recoveryText = ""
+    /// Whether this Mac has the passphrase the recovery sheet must carry;
+    /// read when the recovery step starts and again when the sheet is built.
+    @State private var hasRecoveryPassphrase = false
+    @State private var recoveryIncludesPassphrase = false
+    /// Try Again's preview, cancelled when the sheet closes, as the first
+    /// preview's `.task` is.
+    @State private var retryTask: Task<Void, Never>?
     @AppStorage("showsTechnicalDetails") private var showsTechnicalDetails = false
 
     private var tenant: Tenant? {
@@ -59,10 +66,13 @@ struct PreviewDeploySheet: View {
             footer
         }
         .frame(width: 700, height: 580)
+        // Esc mustn't hide a running apply: its result and errors would never show
+        .interactiveDismissDisabled(isDeploying)
         .task {
             await runPreview()
         }
         .onDisappear {
+            retryTask?.cancel()
             // A preview holds the tenant's team lock; closing without
             // deploying releases it.
             if case .finished = stage {} else if let tenant {
@@ -75,7 +85,8 @@ struct PreviewDeploySheet: View {
             contentType: .plainText,
             defaultFilename: "Jamf Deployer Recovery — \(tenant?.name ?? "tenant").txt"
         ) { result in
-            if case .success = result, let tenant {
+            if case .success = result, let tenant,
+               RecoveryEscrow.marksSaved(exportSucceeded: true, includesPassphrase: recoveryIncludesPassphrase) {
                 deployService.markRecoverySaved(for: tenant)
                 if case .needsRecovery(let session) = stage {
                     stage = .reviewing(session)
@@ -94,6 +105,11 @@ struct PreviewDeploySheet: View {
         case .previewing, .deploying: true
         default: false
         }
+    }
+
+    private var isDeploying: Bool {
+        if case .deploying = stage { return true }
+        return false
     }
 
     // MARK: Content
@@ -153,7 +169,7 @@ struct PreviewDeploySheet: View {
                             let translated = ErrorTranslation.translate(raw, for: tenant?.errorConnection ?? .platform)
                             VStack(alignment: .leading, spacing: 4) {
                                 Label(translated.message, systemImage: "xmark.circle.fill")
-                                    .foregroundStyle(.red)
+                                    .labelStyle(.tintedIcon(.red))
                                 if let hint = translated.hint {
                                     Text(hint)
                                         .font(.callout)
@@ -263,7 +279,7 @@ struct PreviewDeploySheet: View {
             ForEach(change.notes, id: \.self) { note in
                 Label(note, systemImage: "person.3")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .labelStyle(.tintedIcon(.orange))
             }
             if !change.fieldDiffs.isEmpty {
                 DisclosureGroup("\(change.fieldDiffs.count) field change\(change.fieldDiffs.count == 1 ? "" : "s")") {
@@ -271,12 +287,8 @@ struct PreviewDeploySheet: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(diff.path)
                                 .font(.caption.bold().monospaced())
-                            Text("− \(diff.before)")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.red)
-                            Text("+ \(diff.after)")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.green)
+                            DiffLine(.before, diff.before)
+                            DiffLine(.after, diff.after)
                         }
                         .padding(.vertical, 2)
                     }
@@ -328,7 +340,7 @@ struct PreviewDeploySheet: View {
                     }
                 }
                 Text(deployService.isTeamMode
-                     ? "In Team Mode the state sits behind the app's own state backend, so ./plan.sh cannot run it outside the app; Export as Terraform takes a tenant to a repository you run yourself."
+                     ? "In Team Mode the state sits behind the app’s own state backend, so ./plan.sh can’t run it outside the app; Export as Terraform takes a tenant to a repository you run yourself."
                      : "Run the same plan yourself: in the workspace, ./plan.sh runs it in Terminal with your Keychain credentials. A plan only reads, so nothing in Jamf changes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -377,17 +389,26 @@ struct PreviewDeploySheet: View {
                 .help(session.summary.isEmpty ? "There is nothing to deploy" : "Write these changes to the tenant")
 
         case .needsRecovery:
-            Label("First deploy: save this tenant's recovery sheet before deploying.", systemImage: "key")
+            Label(hasRecoveryPassphrase
+                    ? "First deploy: save this tenant’s recovery sheet before deploying."
+                    : RecoveryEscrow.missingPassphraseText(isTeamMode: deployService.isTeamMode),
+                  systemImage: "key")
                 .font(.callout)
             Spacer()
             Button("Close") { close(.closedWithoutDeploying) }
                 .keyboardShortcut(.cancelAction)
             Button("Save Recovery Sheet…") {
-                recoveryText = tenant.map { deployService.recoverySheetText(for: $0) } ?? ""
+                guard let tenant else { return }
+                // a sheet without the passphrase recovers nothing
+                recoveryIncludesPassphrase = hasPassphrase(for: tenant)
+                hasRecoveryPassphrase = recoveryIncludesPassphrase
+                guard recoveryIncludesPassphrase else { return }
+                recoveryText = deployService.recoverySheetText(for: tenant)
                 isExportingRecovery = true
             }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                .disabled(!hasRecoveryPassphrase)
 
         case .confirmingProduction(let session):
             VStack(alignment: .leading, spacing: 2) {
@@ -401,6 +422,7 @@ struct PreviewDeploySheet: View {
                 stage = .reviewing(session)
                 typedName = ""
             }
+            .keyboardShortcut(.cancelAction)
             Button("Deploy") { confirmDeploy(session) }
                 .buttonStyle(.borderedProminent)
                 .disabled(typedName != tenant?.name)
@@ -428,7 +450,8 @@ struct PreviewDeploySheet: View {
                 .keyboardShortcut(.cancelAction)
             Button("Try Again") {
                 stage = .previewing
-                Task { await runPreview() }
+                retryTask?.cancel()
+                retryTask = Task { await runPreview() }
             }
             .buttonStyle(.borderedProminent)
 
@@ -478,6 +501,7 @@ struct PreviewDeploySheet: View {
         do {
             let session = try await deployService.preview(tenant: tenant)
             if deployService.needsRecoveryEscrow(for: tenant) {
+                hasRecoveryPassphrase = hasPassphrase(for: tenant)
                 stage = .needsRecovery(session)
             } else {
                 stage = .reviewing(session)
@@ -511,6 +535,11 @@ struct PreviewDeploySheet: View {
         return (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
 
+    /// Whether this Mac has the state passphrase (the team's in Team Mode).
+    private func hasPassphrase(for tenant: Tenant) -> Bool {
+        RecoveryEscrow.isUsable((try? deployService.statePassphrase(for: tenant)))
+    }
+
     private func startDeploy(_ session: PreviewSession) {
         guard let tenant else { return }
         if tenant.isProduction && session.summary.hasDestructiveChanges {
@@ -538,5 +567,23 @@ struct PreviewDeploySheet: View {
                 }
             }
         }
+    }
+}
+
+/// The first-deploy recovery sheet: it counts as saved only when it carries
+/// the passphrase.
+nonisolated enum RecoveryEscrow {
+    static func isUsable(_ passphrase: String?) -> Bool {
+        !(passphrase ?? "").isEmpty
+    }
+
+    static func marksSaved(exportSucceeded: Bool, includesPassphrase: Bool) -> Bool {
+        exportSucceeded && includesPassphrase
+    }
+
+    static func missingPassphraseText(isTeamMode: Bool) -> String {
+        isTeamMode
+            ? "This Mac doesn’t have the team passphrase, so there’s no recovery sheet to save. Enter it in Settings › Team, then preview again."
+            : "This Mac doesn’t have the tenant’s passphrase, so there’s no recovery sheet to save. Enter it with Update Client Secret… in the tenant’s Connection section, then preview again."
     }
 }

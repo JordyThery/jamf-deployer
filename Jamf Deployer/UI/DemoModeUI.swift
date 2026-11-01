@@ -5,10 +5,10 @@ import JTKit
 enum DemoModeText {
     /// Why an action is dimmed in demo mode.
     /// Kept short, as a tooltip (and VoiceOver hint) should be; the error
-    /// a refused action shows explains it in full.
-    static let unavailable = "Unavailable in Demo Mode: needs OpenTofu, jamformer or Git"
+    /// a refused action shows says how to turn demo mode off.
+    static let unavailable = "Not available in Demo Mode"
     /// The preview's footer: demo mode stops at the plan.
-    static let deployUnavailable = "Deploying isn't available in Demo Mode."
+    static let deployUnavailable = "Deploying isn’t available in Demo Mode."
     /// Settings tabs that work on the real store.
     static let realStoreOnly = "Demo Mode is on. These settings are for your real store; turn off Demo Mode in the Tenant menu to change them."
 }
@@ -66,7 +66,7 @@ struct DemoModeUnavailableView: View {
         ContentUnavailableView {
             Label(title, systemImage: "testtube.2")
         } description: {
-            Text("Not available in Demo Mode: it runs OpenTofu, jamformer or Git, which would reach Jamf or Git itself instead of the sample data.")
+            Text("This isn’t available in Demo Mode. Turn off Demo Mode in the Tenant menu to use it.")
         }
     }
 }

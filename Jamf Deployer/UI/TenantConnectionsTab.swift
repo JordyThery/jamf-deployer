@@ -27,9 +27,8 @@ struct TenantConnectionsTab: View {
             },
             add: { isConnectingTenant = true },
             delete: { record in try await remove(record) },
-            deleteMessage: deployService.isTeamMode
-                ? "Nothing in Jamf is changed. The tenant record and its state are deleted from the team space for everyone, and its credentials from this Mac."
-                : "Nothing in Jamf is changed. The tenant record kept by this app and its stored credentials are deleted.",
+            // managed tenants are refused here (`remove`), so this is the unmanaged text
+            deleteMessage: TenantRemoval.message(isTeamMode: deployService.isTeamMode, isManaged: false),
             test: { record, typed in try await test(record, typed: typed) }
         ) { $record in
             scopeSection(record)
@@ -47,7 +46,7 @@ struct TenantConnectionsTab: View {
     private func scopeSection(_ record: TenantConnection) -> some View {
         let tenant = record.tenant
         Section {
-            LabeledContent("Connected through", value: tenant.isJamfPro ? "Jamf Pro API" : "Platform API")
+            LabeledContent("Connected through", value: tenant.isJamfPro ? "Jamf Pro API" : "Jamf Platform API")
             if !tenant.isJamfPro {
                 LabeledContent("Scope", value: tenant.apiScope == .environment ? "Platform environment" : "Tenant (legacy)")
                 if tenant.apiScope == .tenant {
@@ -74,19 +73,29 @@ struct TenantConnectionsTab: View {
         guard !folders.isEmpty else { return nil }
         let list = folders.joined(separator: ", ")
         return folders.count == 1
-            ? "One tenant record could not be read and is not listed (tenants/\(list)/tenant.json). It is left as it is."
-            : "\(folders.count) tenant records could not be read and are not listed (in tenants/: \(list)). They are left as they are."
+            ? "One tenant record couldn’t be read and isn’t listed (tenants/\(list)/tenant.json). It is left as it is."
+            : "\(folders.count) tenant records couldn’t be read and aren’t listed (in tenants/: \(list)). They are left as they are."
     }
 
     // MARK: Actions
 
-    /// The same removal as the sidebar's Remove Tenant…
+    /// The same removal as the sidebar's Remove Tenant…, for tenants with
+    /// nothing managed: JTKit's delete confirmation can't ask for the
+    /// tenant's name, so a managed tenant is removed from the sidebar. The
+    /// minus button can't be disabled from here, so running engine work is
+    /// refused with a message below the list.
     private func remove(_ record: TenantConnection) async throws {
         guard let tenant = tenantStore.tenant(id: record.id) else { return }
+        if let refusal = TenantRemoval.refusal(isEngineBusy: deployService.isEngineWorkRunning) {
+            throw RefusedRemoval(text: refusal)
+        }
+        guard !TenantRemoval.needsTypedName(isManaged: deployService.isManaged(tenant)) else {
+            throw RefusedRemoval(text: TenantRemoval.managedFromSettingsText)
+        }
         do {
             try await deployService.removeTenant(tenant)
         } catch {
-            throw RemovalError(detail: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            throw RefusedRemoval(text: SidebarView.removalErrorText(error))
         }
     }
 
@@ -125,11 +134,9 @@ struct TenantConnectionsTab: View {
                                     tenantID: tenant.tenantID)
     }
 
-    private nonisolated struct RemovalError: LocalizedError {
-        let detail: String
-        var errorDescription: String? {
-            "The tenant was not removed. Its deployment state could not be deleted from the team space: \(detail). Try again later."
-        }
+    private nonisolated struct RefusedRemoval: LocalizedError {
+        let text: String
+        var errorDescription: String? { "The tenant wasn’t removed. \(text)" }
     }
 
     private nonisolated enum TestError: LocalizedError {
@@ -143,7 +150,7 @@ struct TenantConnectionsTab: View {
                     ? "The password is missing from the Keychain. Type it in the Password field."
                     : "The client secret is missing from the Keychain. Type it in the Client secret field."
             case .invalidURL:
-                "The saved Jamf Pro URL is not valid."
+                "The saved Jamf Pro URL isn’t valid."
             }
         }
     }

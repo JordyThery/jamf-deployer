@@ -66,6 +66,20 @@ public nonisolated enum CreateFailureRecovery {
         return result
     }
 
+    /// Every create in the approved plan a server error could leave behind,
+    /// as candidates. Looked up before the apply (`matchingIDs`), they name
+    /// the objects that already existed with a planned name, so a recovery
+    /// never adopts a hand-made object that only shares its name.
+    public static func plannedCreates(plan: PlanFile) -> [Candidate] {
+        var result: [Candidate] = []
+        for change in plan.resourceChanges ?? [] where change.change.actions == ["create"] && lookups[change.type] != nil {
+            guard let name = plannedName(change.change.after),
+                  !result.contains(where: { $0.address == change.address }) else { continue }
+            result.append(Candidate(address: change.address, resourceType: change.type, name: name))
+        }
+        return result
+    }
+
     /// A create that ended in a server error. The Platform plugin reports
     /// "Error creating … status 500"; the jamfpro plugin reports
     /// "failed to create … "status_code":500" in the summary itself.
@@ -129,11 +143,20 @@ public nonisolated enum CreateFailureRecovery {
     }
 
     /// The Jamf ID from a lookup response, when exactly one object with the
-    /// planned name exists that the state does not already track. Duplicate
-    /// names (several App Installer deployments of one title) would otherwise
-    /// bind two resources to the same object.
-    public static func objectID(in data: Data, for candidate: Candidate, excluding managed: Set<String> = []) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    /// planned name exists that the state does not already track and that
+    /// didn't exist before the apply (`existedBefore`, from `matchingIDs`
+    /// before it ran). Duplicate names (several App Installer deployments of
+    /// one title) would otherwise bind two resources to the same object.
+    public static func objectID(
+        in data: Data, for candidate: Candidate, excluding managed: Set<String> = [], existedBefore: Set<String> = []
+    ) -> String? {
+        let matches = matchingIDs(in: data, for: candidate).subtracting(managed).subtracting(existedBefore)
+        return matches.count == 1 ? matches.first : nil
+    }
+
+    /// The IDs of every object with the candidate's name in a lookup response.
+    public static func matchingIDs(in data: Data, for candidate: Candidate) -> Set<String> {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
         func text(_ value: Any?) -> String? {
             if let string = value as? String { return string }
             if let number = value as? NSNumber { return number.stringValue }
@@ -142,18 +165,13 @@ public nonisolated enum CreateFailureRecovery {
         switch lookups[candidate.resourceType] {
         case .byName(_, let root):
             let general = (object[root] as? [String: Any])?["general"] as? [String: Any]
-            guard text(general?["name"]) == candidate.name,
-                  let id = text(general?["id"]), !managed.contains(id) else { return nil }
-            return id
+            guard text(general?["name"]) == candidate.name, let id = text(general?["id"]) else { return [] }
+            return [id]
         case .list(_, let root, _):
             let items = object[root] as? [[String: Any]] ?? []
-            let matches = items
-                .filter { text($0["name"]) == candidate.name }
-                .compactMap { text($0["id"]) }
-                .filter { !managed.contains($0) }
-            return matches.count == 1 ? matches[0] : nil
+            return Set(items.filter { text($0["name"]) == candidate.name }.compactMap { text($0["id"]) })
         case nil:
-            return nil
+            return []
         }
     }
 

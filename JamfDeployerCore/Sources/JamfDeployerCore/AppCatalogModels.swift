@@ -68,9 +68,17 @@ public nonisolated struct AppCatalogApp: Codable, Sendable, Identifiable, Hashab
 
     // MARK: Setting round-trip
 
+    /// The apps in a stored setting; empty for an empty or unreadable value.
+    /// Before saving a picker's result, check `decodeIfReadable`: an
+    /// unreadable list shown as empty and saved would remove every app.
     public static func decode(settingValue: String) -> [AppCatalogApp] {
-        guard !settingValue.isEmpty, let data = settingValue.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([AppCatalogApp].self, from: data)) ?? []
+        decodeIfReadable(settingValue: settingValue) ?? []
+    }
+
+    /// The apps in a stored setting, or nil when the value can't be read.
+    public static func decodeIfReadable(settingValue: String) -> [AppCatalogApp]? {
+        guard !settingValue.isEmpty else { return [] }
+        return try? JSONDecoder().decode([AppCatalogApp].self, from: Data(settingValue.utf8))
     }
 
     public static func encode(_ apps: [AppCatalogApp]) -> String {
@@ -123,9 +131,16 @@ public nonisolated struct AppStoreApp: Codable, Sendable, Identifiable, Hashable
         case categoryName
     }
 
+    /// The apps in a stored setting; empty for an empty or unreadable value
+    /// (see `AppCatalogApp.decode(settingValue:)`).
     public static func decode(settingValue: String) -> [AppStoreApp] {
-        guard !settingValue.isEmpty, let data = settingValue.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([AppStoreApp].self, from: data)) ?? []
+        decodeIfReadable(settingValue: settingValue) ?? []
+    }
+
+    /// The apps in a stored setting, or nil when the value can't be read.
+    public static func decodeIfReadable(settingValue: String) -> [AppStoreApp]? {
+        guard !settingValue.isEmpty else { return [] }
+        return try? JSONDecoder().decode([AppStoreApp].self, from: Data(settingValue.utf8))
     }
 
     public static func encode(_ apps: [AppStoreApp]) -> String {

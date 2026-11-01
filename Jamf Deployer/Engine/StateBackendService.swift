@@ -35,17 +35,23 @@ final class StateBackendService {
         case didNotStart(String)
         case missingGitCredentials(String)
         case request(String)
+        case status(String, Int)
+        case sshKeyNeedsAgent
 
         var errorDescription: String? {
             switch self {
             case .missingBinary:
                 "The Team Mode state backend is missing from the app. Reinstall Jamf Deployer."
             case .didNotStart(let detail):
-                "The Team Mode state backend did not start: \(detail)"
+                "The Team Mode state backend didn’t start: \(detail)"
             case .missingGitCredentials(let host):
                 "No Git credentials for \(host) were found. Sign in with git or gh (for example `gh auth login`), or use an SSH repository URL with your SSH agent."
             case .request(let detail):
                 "The Team Mode state backend refused the request: \(detail)"
+            case .status(let method, let status):
+                "The Team Mode state backend refused the request: \(method) answered HTTP \(status)"
+            case .sshKeyNeedsAgent:
+                "Your SSH key is protected by a passphrase, which the Team Mode state backend can’t ask for. Add the key to your SSH agent (in Terminal: ssh-add --apple-use-keychain followed by the key’s path), then try again."
             }
         }
     }
@@ -76,26 +82,76 @@ final class StateBackendService {
         URL.applicationSupportDirectory.appending(path: "Jamf Deployer/engine/state-backend")
     }
 
-    /// Stops a backend left running by an app that crashed or was force-quit,
-    /// when the recorded process is the app's bundled copy.
+    /// Stops a backend left running by an app that crashed or was force-quit:
+    /// the recorded process is the app's bundled copy and the app that
+    /// started it is gone (launchd adopted it). A backend another running
+    /// copy of the app owns (the installed app while unit tests or a
+    /// release-check build run) is left alone, and so is its PID file.
     nonisolated static func stopLeftoverBackend() {
         let pidFile = workFolderURL.appending(path: ".terraform-backend-git.pid")
         guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
               let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0
         else { return }
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        if proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0,
-           String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self).hasSuffix("/Vendor/terraform-backend-git/terraform-backend-git") {
+        switch leftoverVerdict(path: processPath(pid), parent: parentProcess(of: pid), parentIsAlive: { kill($0, 0) == 0 }) {
+        case .stop:
             kill(pid, SIGTERM)
+            try? FileManager.default.removeItem(at: pidFile)
+        case .gone:
+            try? FileManager.default.removeItem(at: pidFile)
+        case .ownedByARunningApp:
+            break
         }
-        try? FileManager.default.removeItem(at: pidFile)
     }
+
+    nonisolated enum LeftoverVerdict: Equatable {
+        /// An orphaned copy of the bundled backend.
+        case stop
+        /// Not running any more (or another program reuses the number).
+        case gone
+        /// Its app still runs: never touched.
+        case ownedByARunningApp
+    }
+
+    /// What to do with the process a PID file names.
+    nonisolated static func leftoverVerdict(path: String?, parent: pid_t?,
+                                            parentIsAlive: (pid_t) -> Bool) -> LeftoverVerdict {
+        guard let path, path.hasSuffix("/Vendor/terraform-backend-git/terraform-backend-git") else { return .gone }
+        guard let parent, parent > 1, parentIsAlive(parent) else { return .stop }
+        return .ownedByARunningApp
+    }
+
+    private nonisolated static func processPath(_ pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+
+    private nonisolated static func parentProcess(of pid: pid_t) -> pid_t? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return pid_t(info.pbi_ppid)
+    }
+
+    /// Where the team passphrase check lives on the state branch: a tiny
+    /// state with nothing in it, encrypted by OpenTofu with the team
+    /// passphrase. Outside `tenants/`, so it's never taken for a tenant.
+    nonisolated static let passphraseCheckPath = "_passphrase-check/terraform.tfstate"
 
     /// The engine's HTTP backend settings for one tenant (TF_HTTP_*). Starts
     /// the backend for `remote` first when needed. Never written to disk.
     func environment(tenantID: UUID, remote: String) async throws -> [String: String] {
+        try await environment(statePath: Self.statePath(tenantID: tenantID), remote: remote)
+    }
+
+    nonisolated static func statePath(tenantID: UUID) -> String {
+        "tenants/\(tenantID.uuidString)/terraform.tfstate"
+    }
+
+    /// The same for any state on the state branch (the passphrase check).
+    func environment(statePath: String, remote: String) async throws -> [String: String] {
         try await ensureRunning(remote: remote)
-        let address = stateAddress(tenantID: tenantID, remote: remote)
+        let address = Self.address(port: port, remote: remote, ref: Self.stateBranch, path: statePath)
         return [
             "TF_HTTP_ADDRESS": address,
             "TF_HTTP_LOCK_ADDRESS": address,
@@ -124,8 +180,10 @@ final class StateBackendService {
         try await send("LOCK", address, body: body)
         do {
             try await send("DELETE", address + "&ID=\(lockID)", body: nil)
+        } catch BackendError.status(_, 404) {
+            // Nothing to delete: the tenant never had state in the team space.
         } catch {
-            try? await send("UNLOCK", address, body: unlock)
+            _ = try? await send("UNLOCK", address, body: unlock)
             throw error
         }
         try await send("UNLOCK", address, body: unlock)
@@ -147,11 +205,14 @@ final class StateBackendService {
         do {
             try await send("POST", address + "&ID=\(lockID)", body: state)
         } catch {
-            try? await send("UNLOCK", address, body: unlock)
+            _ = try? await send("UNLOCK", address, body: unlock)
             throw error
         }
         try await send("UNLOCK", address, body: unlock)
     }
+
+    /// Whether this app's backend runs now.
+    var isRunning: Bool { process?.isRunning == true }
 
     func stop() {
         process?.terminate()
@@ -177,8 +238,7 @@ final class StateBackendService {
     // MARK: Plumbing
 
     private func stateAddress(tenantID: UUID, remote: String) -> String {
-        Self.address(port: port, remote: remote, ref: Self.stateBranch,
-                     path: "tenants/\(tenantID.uuidString)/terraform.tfstate")
+        Self.address(port: port, remote: remote, ref: Self.stateBranch, path: Self.statePath(tenantID: tenantID))
     }
 
     private static func address(port: Int, remote: String, ref: String, path: String) -> String {
@@ -265,7 +325,7 @@ final class StateBackendService {
         let errorHandle = errors.fileHandleForReading
         let output = await Task.detached { errorHandle.readDataToEndOfFile() }.value
         let detail = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        throw BackendError.didNotStart(detail.isEmpty ? "it did not respond on its local port" : String(detail.prefix(200)))
+        throw BackendError.didNotStart(detail.isEmpty ? "it didn’t respond on its local port" : String(detail.prefix(200)))
     }
 
     @discardableResult
@@ -279,7 +339,7 @@ final class StateBackendService {
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
-            throw BackendError.request("\(method) answered HTTP \(status)")
+            throw BackendError.status(method, status)
         }
         return data
     }
@@ -300,39 +360,76 @@ final class StateBackendService {
             environment["GIT_USERNAME"] = filled["username"] ?? "x-access-token"
             environment["GIT_PASSWORD"] = password
         } else {
-            if let agent = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
-                environment["SSH_AUTH_SOCK"] = agent
-            }
+            let agent = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
             let ssh = URL.homeDirectory.appending(path: ".ssh")
-            if let key = ["id_ed25519", "id_ecdsa", "id_rsa"].map({ ssh.appending(path: $0) })
-                .first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
-                environment["SSH_PRIVATE_KEY"] = key.path
-            }
+            let keys = ["id_ed25519", "id_ecdsa", "id_rsa"].map { ssh.appending(path: $0) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+                .map { (path: $0.path, text: (try? String(contentsOf: $0, encoding: .utf8)) ?? "") }
+            environment = try sshEnvironment(
+                agentSocket: agent, agentHasKeys: agent != nil && !tools.refusesEverything && agentHasKeys(),
+                keys: keys)
         }
         return environment
+    }
+
+    /// SSH sign-in for the backend: the engineer's agent when it holds a
+    /// key (it follows their own setup); otherwise the first default key
+    /// file without a passphrase, which the backend can't ask for.
+    nonisolated static func sshEnvironment(
+        agentSocket: String?, agentHasKeys: Bool, keys: [(path: String, text: String)]
+    ) throws -> [String: String] {
+        var environment: [String: String] = [:]
+        if let agentSocket { environment["SSH_AUTH_SOCK"] = agentSocket }
+        if agentSocket != nil && agentHasKeys { return environment }
+        if let key = keys.first(where: { !isPassphraseProtected(keyText: $0.text) }) {
+            environment["SSH_PRIVATE_KEY"] = key.path
+        } else if !keys.isEmpty {
+            throw BackendError.sshKeyNeedsAgent
+        }
+        return environment
+    }
+
+    /// Whether a private key file is encrypted: a PEM key says so in its
+    /// header, an OpenSSH key names a cipher other than "none".
+    nonisolated static func isPassphraseProtected(keyText: String) -> Bool {
+        if keyText.contains("ENCRYPTED") { return true }
+        guard keyText.contains("BEGIN OPENSSH PRIVATE KEY") else { return false }
+        let body = keyText.split(whereSeparator: \.isNewline)
+            .filter { !$0.hasPrefix("-----") }
+            .joined()
+        guard let data = Data(base64Encoded: body, options: .ignoreUnknownCharacters) else { return true }
+        // "openssh-key-v1\0", then the cipher name as a length-prefixed string.
+        let magic = Data("openssh-key-v1\0".utf8)
+        guard data.starts(with: magic), data.count >= magic.count + 4 else { return true }
+        let lengthBytes = data[data.startIndex + magic.count ..< data.startIndex + magic.count + 4]
+        let length = lengthBytes.reduce(0) { $0 << 8 | Int($1) }
+        let start = data.startIndex + magic.count + 4
+        guard length > 0, data.count >= magic.count + 4 + length else { return true }
+        return String(decoding: data[start ..< start + length], as: UTF8.self) != "none"
+    }
+
+    /// Whether the SSH agent holds at least one key (`ssh-add -l` exits 0).
+    private nonisolated static func agentHasKeys() -> Bool {
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/bin/ssh-add")
+        process.arguments = ["-l"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     /// `git credential fill`: the same lookup git itself does for a push.
     nonisolated static func credentialFill(protocol scheme: String, host: String,
                                            tools: ToolDoorway) throws -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        let process = try tools.process(.git, executable: URL(filePath: "/usr/bin/git"), arguments: ["credential", "fill"],
-                                        environment: environment)
-        let input = Pipe()
-        let output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-        try process.run()
-        try? input.fileHandleForWriting.write(contentsOf: Data("protocol=\(scheme)\nhost=\(host)\n\n".utf8))
-        try? input.fileHandleForWriting.close()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return [:] }
+        let output = try GitCommand.run(["credential", "fill"], in: nil,
+                                        input: Data("protocol=\(scheme)\nhost=\(host)\n\n".utf8),
+                                        discardsErrors: true, tools: tools)
+        guard output.status == 0 else { return [:] }
         var values: [String: String] = [:]
-        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+        for line in output.text.split(separator: "\n") {
             let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
             if parts.count == 2 { values[parts[0]] = parts[1] }
         }

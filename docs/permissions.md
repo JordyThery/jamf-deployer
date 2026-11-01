@@ -7,9 +7,9 @@ has no access of its own.
 ## Jamf Platform API client
 
 Connecting a tenant takes one API client (client ID + secret) for the Jamf
-Platform API gateway. The connect wizard's preflight probes the essentials
+Platform API gateway. The connect wizard’s preflight probes the essentials
 and names any missing privilege before you save; you can still add the tenant
-and fix the integration's permissions later.
+and fix the integration’s permissions later.
 
 ### Always needed
 
@@ -22,7 +22,7 @@ and fix the integration's permissions later.
 ### Per building block
 
 Each block declares the privileges it needs; the app only uses what the
-tenant's baseline actually contains. Checking for changes needs only the
+tenant’s baseline actually contains. Checking for changes needs only the
 `read` half; deploying needs everything listed (create/read/update/delete,
 or read/update for tenant-wide settings).
 
@@ -50,15 +50,15 @@ or read/update for tenant-wide settings).
 | Security Cloud | `uem-connections`, `activation-profiles` (create/read/update/delete), `tenant-id:read`; `uem-connections:read` is enough with *Use the existing connection* |
 | Jamf Protect Baseline | none on the Platform client — see the Protect client below |
 
-Picking an existing group or category in a block's settings lists them
+Picking an existing group or category in a block’s settings lists them
 with read access to computer groups (mobile device groups for iPad and
 iPhone blocks) and `categories:read`. The App Store pickers read the
-tenant's Apps and Books locations and their licensed content with
+tenant’s Apps and Books locations and their licensed content with
 `volume-purchasing-locations:read`.
 
 Captured blocks list the privileges recorded at export, narrowed to their
 own object types, plus read access for the lookups capture adds: the
-Automated Device Enrollment instance, Jamf's built-in groups and the Apps
+Automated Device Enrollment instance, Jamf’s built-in groups and the Apps
 and Books location.
 
 ### Per feature
@@ -66,11 +66,11 @@ and Books location.
 | Feature | Needs |
 | --- | --- |
 | **Export / capture blocks** | Read privileges for the object types you export — nothing is ever written during an export |
-| **Adopt** | Read during discovery; the adopted objects' own create/read/update/delete on first deploy |
-| **Check for changes (drift)** | The read half of the deployed blocks' privileges |
+| **Adopt** | Read during discovery; the adopted objects’ own create/read/update/delete on first deploy |
+| **Check for changes (drift)** | The read half of the deployed blocks’ privileges |
 | **Day 0: ADE public key download** | `device-enrollment-program-instances:read` |
 | **Day 0: ADE token upload** | Create/update for device enrollment instances |
-| **Day 0: Apps and Books token upload** | Create/update for volume purchasing locations |
+| **Day 0: Apps and Books token upload** | Create/update for Apps and Books locations |
 | **Day 0: Self Service branding** | Create for Self Service branding |
 | **Day 0: Protect registration** | The Jamf Pro ↔ Protect registration privilege |
 
@@ -83,8 +83,8 @@ Instances** and **Read Volume Purchasing Locations** (for a user account, the Re
 on those object types); the preflight names any
 that are missing. Adopting, checking for changes and deploying need read —
 and for deploys create, update and delete — on the object types you manage.
-A block's detail view lists the Jamf Pro API privileges its Jamf Pro API
-version declares. App Catalog deployments (Jamf Pro's App Installers) have no
+A block’s detail view lists the Jamf Pro API privileges its Jamf Pro API
+version declares. App Catalog deployments (Jamf Pro’s App Installers) have no
 privileges of their own: they come under **Mac Applications**.
 Day 0 actions need the same privileges as listed above, in their Jamf Pro
 API role form.
@@ -100,18 +100,18 @@ or Day 0 tab:
 - The **Jamf Protect Baseline block** additionally needs a role that can
   manage plans, telemetry, action configurations and exception sets.
 
-Deploying the Protect plan to devices still happens through Jamf Pro's
+Deploying the Protect plan to devices still happens through Jamf Pro’s
 Protect deployment sync, under the Platform client above.
 
 ## Team Mode
 
-- Each engineer's Mac needs **push access** to the team's GitHub repository,
+- Each engineer’s Mac needs **push access** to the team’s GitHub repository,
   with Git credentials already configured (SSH key or `gh auth login`) — the
   app never asks for Git passwords. The engine state lives on the
-  repository's `jamf-deployer-state` branch and its locks on `locks/…`
+  repository’s `jamf-deployer-state` branch and its locks on `locks/…`
   branches, so engineers must be allowed to create and delete branches.
 - Repository access is tenant-record access: names, baselines, scope IDs and
-  encrypted state are visible to every collaborator. Credentials are not in
+  encrypted state are visible to every collaborator. Credentials aren’t in
   the repository — each engineer uses their own Jamf API client or account
   (see [Team Mode](team-mode.md)).
 
@@ -119,28 +119,28 @@ Protect deployment sync, under the Platform client above.
 
 - Moving tenants to a repository needs **push access** to an empty private
   repository, with Git credentials already configured, the same way as Team
-  Mode. The export creates the repository's `main` and `terraform-state`
+  Mode. The export creates the repository’s `main` and `terraform-state`
   branches.
 - The exported workflows use the same Jamf API privileges as the app: each
-  tenant's GitHub Environment holds its own API client, and only `main` may
-  use it. Pull request plans use the tenant's `<tenant>-plan` Environment,
+  tenant’s GitHub Environment holds its own API client, and only `main` may
+  use it. Pull request plans use the tenant’s `<tenant>-plan` Environment,
   which any branch can reach; a read-only API client is enough there.
-- The **Not in code** workflow runs in the tenant's full-credential
+- The **Not in code** workflow runs in the tenant’s full-credential
   Environment, but only lists objects: it changes nothing in Jamf.
 - `scripts/new-tenant.sh` and `scripts/hand-over.sh` run on your Mac with
   your own GitHub CLI sign-in: creating Environments needs admin access to
   the repository.
-- **`plan.sh`** in a tenant's workspace reads the tenant's credentials from
+- **`plan.sh`** in a tenant’s workspace reads the tenant’s credentials from
   your login Keychain while it runs; macOS asks the first time whether
   `security` may read them.
 
 ## On the Mac
 
-- Secrets are stored in the **login Keychain** under the app's own items;
+- Secrets are stored in the **login Keychain** under the app’s own items;
   nothing is shared with other apps.
 - The app talks only to your Jamf tenants, your Git remotes (Team Mode and
-  Git catalog sources), GitHub's public API (release and component-update
-  checks) and HashiCorp's release server when you agree to the Terraform
+  Git catalog sources), GitHub’s public API (release and component-update
+  checks) and HashiCorp’s release server when you agree to the Terraform
   download for capturing blocks and adoption.
 - No admin rights, no configuration profiles, no system extensions — it is
   an ordinary signed and notarized app.

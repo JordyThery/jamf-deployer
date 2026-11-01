@@ -860,16 +860,21 @@ struct BlockCaptureTests {
         // The origin's instance resource is dropped (its token is not
         // exportable); the lookup file replaces it.
         #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "pro_automated_device_enrollment.tf").path))
+        // The origin's instance name never goes into the block (it often
+        // names the organization); the capture sheet shows it instead.
         let lookup = try String(contentsOf: folder.appending(path: "enrollment_instance.tf"), encoding: .utf8)
-        #expect(lookup.contains(#"default     = "Apple Business Manager""#))
+        #expect(!lookup.contains("default"))
+        #expect(!lookup.contains("Apple Business Manager"))
         #expect(lookup.contains(#"data "jamfplatform_pro_automated_device_enrollment" "instance""#))
 
         let manifest = try JSONSerialization.jsonObject(
             with: Data(contentsOf: folder.appending(path: "block.json"))) as? [String: Any]
         let settings = manifest?["settings"] as? [[String: Any]]
         #expect(settings?.first?["key"] as? String == "ade_instance_name")
-        #expect(settings?.first?["default"] as? String == "Apple Business Manager")
-        #expect(result.warnings.contains { $0.contains("Automated Device Enrollment instance") })
+        #expect(settings?.first?["default"] as? String == "")
+        #expect(settings?.first?["required"] as? Bool == true)
+        #expect(result.originSettingValues == ["ade_instance_name": "Apple Business Manager"])
+        #expect(result.warnings.contains { $0.contains("Automated Device Enrollment instance") && $0.contains("“Apple Business Manager”") })
 
         // Recovery Lock passwords are not exportable; the capture turns the
         // feature off rather than shipping a PreStage that cannot be created.
@@ -1243,7 +1248,7 @@ struct ErrorTranslationTests {
 
     @Test func translatesMissingUEMConnect() {
         let translated = ErrorTranslation.translate("Error: No UEM Connect integration on this tenant")
-        #expect(translated.message.contains("not connected"))
+        #expect(translated.message.contains("isn’t connected"))
         #expect(translated.hint?.contains("Connect this Jamf Pro tenant") == true)
     }
 
@@ -1428,7 +1433,7 @@ struct ServerErrorTranslationTests {
             "Error creating Jamf Pro policy\nCreatePolicyByID(0): API request failed with status 500 Internal Server Error",
             "Error creating Jamf Pro patch software title\nAPI request failed with status 504 Gateway Timeout",
         ] {
-            #expect(ErrorTranslation.translateIfKnown(raw)?.message == "Jamf had a temporary server problem with this object.")
+            #expect(ErrorTranslation.translateIfKnown(raw)?.message == "Jamf had a problem answering. Try again in a few minutes.")
         }
     }
 }
@@ -1791,9 +1796,12 @@ struct MobileDeviceTests {
         #expect(apps.contains("data.jamfplatform_pro_volume_purchasing_location.apps_and_books.id"))
         #expect(apps.contains(#"vpp_admin_account_id             = "-1""#))
         let lookup = try String(contentsOf: result.blockFolderURL.appending(path: "apps_and_books_location.tf"), encoding: .utf8)
-        #expect(lookup.contains(#"default     = "Company Apps""#))
+        #expect(!lookup.contains("Company Apps"))
         let block = try JSONDecoder().decode(BlockMetadata.self, from: Data(contentsOf: result.blockFolderURL.appending(path: "block.json")))
         #expect(block.settings.map(\.key) == ["vpp_location_name"])
+        #expect(block.settings.first?.default == "")
+        #expect(result.originSettingValues == ["vpp_location_name": "Company Apps"])
+        #expect(!SecretScanTests.allText(in: result.blockFolderURL).contains("Company Apps"))
         #expect(ErrorTranslation.translate("409 Conflict: App is not available for device assignment").message.contains("Apps and Books"))
     }
 
@@ -2524,10 +2532,10 @@ struct ErrorTranslationConnectionTests {
 
     @Test func platformWordingIsUnchanged() {
         #expect(ErrorTranslation.translate(unauthorized).hint
-                == "The API integration may have been rotated or disabled. Update the client secret in the tenant's settings.")
+                == "Check the client ID, client secret and region. If the client secret was rotated, enter the new one with Update Client Secret… in the tenant’s Connection section.")
         #expect(ErrorTranslation.translate(forbidden, for: .platform).hint
                 == "Open the integration in Jamf Account and grant the permissions listed on the building block.")
-        #expect(ErrorTranslation.translate(noHost, for: .platform).hint == "Check the tenant's region setting.")
+        #expect(ErrorTranslation.translate(noHost, for: .platform).hint == "Check the tenant’s region setting.")
     }
 
     @Test(arguments: [ErrorTranslation.Connection.jamfProAPIClient, .jamfProUser])
@@ -2539,7 +2547,7 @@ struct ErrorTranslationConnectionTests {
             #expect(!text.contains("Jamf Account"))
             #expect(text.contains("Jamf Pro"))
         }
-        #expect(ErrorTranslation.translate(noHost, for: connection).hint == "Check the tenant's Jamf Pro URL.")
+        #expect(ErrorTranslation.translate(noHost, for: connection).hint == "Check the tenant’s Jamf Pro URL.")
     }
 
     @Test func anAPIClientIsPointedToItsAPIRole() {

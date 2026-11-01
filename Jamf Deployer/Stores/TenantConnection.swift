@@ -115,7 +115,7 @@ nonisolated enum TenantConnectionError: LocalizedError, Equatable {
         case .notFound(let name):
             "“\(name)” is no longer in the store. It may have been removed on another Mac."
         case .unreadable(let name):
-            "The record of “\(name)” could not be read, so it was not changed."
+            "The record of “\(name)” couldn’t be read, so it wasn’t changed."
         case .notThisFormat(let name):
             "The record of “\(name)” contains something this version of Jamf Deployer doesn’t write, for example from a newer version on a teammate’s Mac. Nothing was changed. Update Jamf Deployer, then try again."
         }

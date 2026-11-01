@@ -40,7 +40,7 @@ nonisolated enum PreflightService {
               jamfProPrivilege: JamfPro.Privilege.readScripts.rawValue),
         .init("Read Automated Device Enrollment", path: adePath, permission: "device-enrollment-program-instances:read",
               jamfProPrivilege: JamfPro.Privilege.readDeviceEnrollmentProgramInstances.rawValue),
-        .init("Read volume purchasing", path: vppPath, permission: "volume-purchasing-locations:read",
+        .init("Read Apps and Books", path: vppPath, permission: "volume-purchasing-locations:read",
               jamfProPrivilege: JamfPro.Privilege.readVolumePurchasingLocations.rawValue),
     ]
 
@@ -76,7 +76,7 @@ nonisolated enum PreflightService {
             await record(PreflightCheck(
                 id: "auth", title: "Credentials",
                 outcome: .pass,
-                detail: isJamfPro ? "Signed in to the Jamf Pro API." : "Signed in to the Jamf Platform gateway."
+                detail: isJamfPro ? "Signed in to the Jamf Pro API." : "Signed in to the Jamf Platform API."
             ))
             if meetsMinimumVersion(version) {
                 await record(PreflightCheck(
@@ -96,7 +96,10 @@ nonisolated enum PreflightService {
                 id: "auth", title: "Credentials",
                 outcome: .fail,
                 detail: (error as? LocalizedError)?.errorDescription
-                    ?? "Jamf did not accept the credentials."
+                    ?? (!isJamfPro ? "Jamf didn’t accept the sign-in. Check the client ID, client secret and region."
+                        : client.signIn == .usernamePassword
+                            ? "Jamf Pro didn’t accept the sign-in. Check the username and password."
+                            : "Jamf Pro didn’t accept the sign-in. Check the client ID and client secret, and that the API client is enabled in Jamf Pro under Settings › API Roles and Clients.")
             ))
             return PreflightReport(checks: checks, snapshot: snapshot)
         }
@@ -118,7 +121,7 @@ nonisolated enum PreflightService {
         } catch {
             checks = checksBefore + permissionChecks.map {
                 PreflightCheck(id: $0.path, title: $0.name, outcome: .warn,
-                               detail: "Could not check: \(error.localizedDescription)")
+                               detail: "Couldn’t check: \(error.localizedDescription)")
             }
         }
         await publish()
@@ -146,13 +149,13 @@ nonisolated enum PreflightService {
                 await record(PreflightCheck(
                     id: "csc", title: "Cloud Services Connection",
                     outcome: .warn,
-                    detail: "Not established (HTTP \(status)). Connect it in Jamf Pro under Settings → Jamf apps, or the App Catalog block won't be available."
+                    detail: "Not established (HTTP \(status)). Connect it in Jamf Pro under Settings › Jamf apps, or the App Catalog block won’t be available."
                 ))
             }
         } catch {
             await record(PreflightCheck(
                 id: "csc", title: "Cloud Services Connection",
-                outcome: .warn, detail: "Could not check: \(error.localizedDescription)"
+                outcome: .warn, detail: "Couldn’t check: \(error.localizedDescription)"
             ))
         } }
 
@@ -178,7 +181,7 @@ nonisolated enum PreflightService {
         } catch {
             await record(PreflightCheck(
                 id: "content", title: "Existing configuration",
-                outcome: .warn, detail: "Could not check: \(error.localizedDescription)"
+                outcome: .warn, detail: "Couldn’t check: \(error.localizedDescription)"
             ))
         }
 
@@ -205,9 +208,9 @@ nonisolated enum PreflightService {
         let (outcome, detail): (PreflightCheck.Outcome, String) = switch result {
         case .allowed: (.pass, "Allowed.")
         case .missingPermission: (.fail, "Not allowed. \(hint)")
-        case .notFound: (.warn, "Could not check: not found (HTTP 404).")
-        case .failed(let status): (.warn, "Could not check: unexpected answer (HTTP \(status)).")
-        case .unreachable(let message): (.warn, "Could not check: \(message)")
+        case .notFound: (.warn, "Couldn’t check: not found (HTTP 404).")
+        case .failed(let status): (.warn, "Couldn’t check: unexpected answer (HTTP \(status)).")
+        case .unreachable(let message): (.warn, "Couldn’t check: \(message)")
         }
         return PreflightCheck(id: check.path, title: check.name, outcome: outcome, detail: detail)
     }

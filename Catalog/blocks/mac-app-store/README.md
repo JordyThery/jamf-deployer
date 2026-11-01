@@ -5,7 +5,7 @@ get the app without anyone signing in with an Apple Account.
 
 The picker lists only apps the tenant holds licenses for. Every tenant the
 block deploys to needs licenses for the same apps in its own Apps and Books
-location — free apps too, obtained in Apple Business Manager. App names and
+location — free apps too, obtained in Apple Business. App names and
 versions come from the App Store when deploying.
 
 The **Apps and Books location** setting names the location to license from.

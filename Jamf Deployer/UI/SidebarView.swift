@@ -24,7 +24,10 @@ struct SidebarView: View {
     @Binding var selection: SidebarSelection?
     @Binding var isConnectingTenant: Bool
     @State private var tenantPendingRemoval: Tenant?
+    @State private var managedTenantPendingRemoval: Tenant?
+    @State private var removalTypedName = ""
     @State private var removalError: String?
+    private var screenWork: ScreenWork { .shared }
 
     var body: some View {
         List(selection: $selection) {
@@ -50,9 +53,15 @@ struct SidebarView: View {
                     .tag(SidebarSelection.tenant(tenant.id))
                     .contextMenu {
                         Button("Remove Tenant…", role: .destructive) {
-                            tenantPendingRemoval = tenant
+                            removalTypedName = ""
+                            if TenantRemoval.needsTypedName(isManaged: deployService.isManaged(tenant)) {
+                                managedTenantPendingRemoval = tenant
+                            } else {
+                                tenantPendingRemoval = tenant
+                            }
                         }
-                        .disabled(deployService.isRemoving(tenant.id))
+                        // engine work would lose its folder and state halfway
+                        .disabled(deployService.isRemoving(tenant.id) || deployService.isEngineWorkRunning)
                     }
                 }
                 Button {
@@ -70,6 +79,8 @@ struct SidebarView: View {
                     }
                     .buttonStyle(.borderless)
                     .help(DemoMode.helpText)
+                    // as the Tenant menu's switch: running work would be torn down
+                    .disabled(deployService.isEngineWorkRunning || screenWork.isBusy)
                 }
             }
             .tourAnchor(TourAnchor.tenants)
@@ -83,7 +94,7 @@ struct SidebarView: View {
             .tourAnchor(TourAnchor.catalog)
         }
         .confirmationDialog(
-            "Remove “\(tenantPendingRemoval?.name ?? "")” from this app?",
+            "Remove “\(tenantPendingRemoval?.name ?? "")” from This App?",
             isPresented: Binding(
                 get: { tenantPendingRemoval != nil },
                 set: { if !$0 { tenantPendingRemoval = nil } }
@@ -91,24 +102,30 @@ struct SidebarView: View {
             titleVisibility: .visible
         ) {
             Button("Remove Tenant", role: .destructive) {
-                if let tenant = tenantPendingRemoval {
-                    if case .tenant(tenant.id) = selection {
-                        selection = .fleet
-                    }
-                    Task {
-                        do {
-                            try await deployService.removeTenant(tenant)
-                        } catch {
-                            removalError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                        }
-                    }
-                }
+                if let tenant = tenantPendingRemoval { remove(tenant) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(deployService.isTeamMode
-                ? "Nothing in Jamf is changed. The tenant record and its state are deleted from the team space for everyone, and its credentials from this Mac."
-                : "Nothing in Jamf is changed. The tenant record kept by this app and its stored credentials are deleted.")
+            Text(TenantRemoval.message(isTeamMode: deployService.isTeamMode, isManaged: false))
+        }
+        // A managed tenant's state goes with it: type its name, as for Hand Over.
+        .alert(
+            "Remove “\(managedTenantPendingRemoval?.name ?? "")” from This App?",
+            isPresented: Binding(
+                get: { managedTenantPendingRemoval != nil },
+                set: { if !$0 { managedTenantPendingRemoval = nil } }
+            )
+        ) {
+            TextField("Type the tenant name to confirm", text: $removalTypedName)
+            Button("Cancel", role: .cancel) { removalTypedName = "" }
+            Button("Remove Tenant", role: .destructive) {
+                removalTypedName = ""
+                if let tenant = managedTenantPendingRemoval { remove(tenant) }
+            }
+            .disabled(!TenantRemoval.confirms(typed: removalTypedName,
+                                              tenantName: managedTenantPendingRemoval?.name ?? ""))
+        } message: {
+            Text(TenantRemoval.message(isTeamMode: deployService.isTeamMode, isManaged: true))
         }
         .alert(
             "Tenant Not Removed",
@@ -116,7 +133,37 @@ struct SidebarView: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Its deployment state could not be deleted from the team space: \(removalError ?? ""). Try again later.")
+            Text(removalError ?? "")
+        }
+    }
+
+    private func remove(_ tenant: Tenant) {
+        // the dialog may have stayed open while a deploy started
+        if let refusal = TenantRemoval.refusal(isEngineBusy: deployService.isEngineWorkRunning) {
+            removalError = refusal
+            return
+        }
+        if case .tenant(tenant.id) = selection {
+            selection = .fleet
+        }
+        Task {
+            do {
+                try await deployService.removeTenant(tenant)
+            } catch {
+                removalError = Self.removalErrorText(error)
+            }
+        }
+    }
+
+    /// A refusal (busy, locked) says what to do itself; anything else
+    /// comes from deleting the state in the team space.
+    static func removalErrorText(_ error: Error) -> String {
+        let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        switch error as? TenantDeployService.DeployError {
+        case .tenantBusy?, .engineWorkInProgress?, .previewInProgress?, .locked?:
+            return detail
+        default:
+            return "Its deployment state couldn’t be deleted from the team space: \(detail). Try again later."
         }
     }
 }

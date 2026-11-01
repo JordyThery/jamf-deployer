@@ -150,22 +150,11 @@ actor EngineRunner {
         return result
     }
 
-    /// Raw stdout of an engine command (schema dumps, `show -json` of the state).
+    /// Raw stdout of an engine command (schema dumps, `show -json` of the
+    /// state). A failed run throws with its error output, like
+    /// `checkedOutput`: half an answer is never read as a whole one.
     func rawCommandOutput(arguments: [String]) async throws -> Data {
-        var environment = configuration.environment
-        environment["TF_CLI_CONFIG_FILE"] = configuration.cliConfigURL.path
-        environment["HOME"] = NSHomeDirectory()
-        let process = try engineProcess(arguments, environment: environment)
-        let stdout = Pipe()
-        // No stdin: a TTY here (dev runs from Xcode) switches child tools into
-        // interactive mode and they block waiting for input.
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = stdout
-        let terminated = Self.installTerminationWait(process)
-        try process.run()
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        await Self.awaitTermination(terminated)
-        return data
+        try await checkedOutput(arguments: arguments)
     }
 
     /// stdout of an engine command that must succeed, optionally fed `input`

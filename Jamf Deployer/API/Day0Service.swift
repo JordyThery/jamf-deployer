@@ -33,7 +33,7 @@ final class Day0Service {
 
     private func client(for tenant: Tenant) throws -> JamfPlatformClient {
         guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
-            throw TenantDeployService.DeployError.missingCredentials
+            throw TenantDeployService.DeployError.missingCredentials(usesPassword: tenant.usesPassword)
         }
         return TenantClients.shared.client(for: tenant, activityLog: activityLog)
     }
@@ -46,9 +46,7 @@ final class Day0Service {
         guard let client = try? client(for: tenant) else {
             steps = [Day0Step(
                 id: "credentials", title: "Stored credentials",
-                state: .pending(detail: tenant.jamfProAuth == .userAccount
-                    ? "The tenant's password is missing from the Keychain."
-                    : "The tenant's client secret is missing from the Keychain.")
+                state: .pending(detail: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
             )]
             return
         }
@@ -92,10 +90,10 @@ final class Day0Service {
                     .done(detail: "“\(instance.name)” connected\(instance.tokenExpirationDate.map { ", token expires \($0)" } ?? "")."))
             } else {
                 add("ade", "Automated Device Enrollment",
-                    .pending(detail: "Connect Apple Business Manager so new devices enroll automatically: download the public key, create the MDM server in ABM, upload its token here."))
+                    .pending(detail: "Connect Apple Business or Apple School Manager so new devices enroll automatically: download the public key, create the MDM server there, upload its token here."))
             }
         } else {
-            add("ade", "Automated Device Enrollment", .unknown(detail: "Could not check."))
+            add("ade", "Automated Device Enrollment", .unknown(detail: "Couldn’t check."))
         }
 
         // VPP.
@@ -106,14 +104,14 @@ final class Day0Service {
         if let locations = try? await client.allPages("/pro/v1/volume-purchasing-locations", as: VPPLocation.self,
                                                       privileges: [.readVolumePurchasingLocations]) {
             if let location = locations.first {
-                add("vpp", "Apps and Books (volume purchasing)",
+                add("vpp", "Apps and Books",
                     .done(detail: "“\(location.name ?? "Location")” connected\(location.tokenExpiration.map { ", token expires \($0.prefix(10))" } ?? "")."))
             } else {
-                add("vpp", "Apps and Books (volume purchasing)",
-                    .pending(detail: "Upload the location token (.vpptoken) from Apple Business Manager → Payments and Billing."))
+                add("vpp", "Apps and Books",
+                    .pending(detail: "Upload the location token (.vpptoken) from Apple Business or Apple School Manager › Payments and Billing."))
             }
         } else {
-            add("vpp", "Apps and Books (volume purchasing)", .unknown(detail: "Could not check."))
+            add("vpp", "Apps and Books", .unknown(detail: "Couldn’t check."))
         }
 
         // Self Service branding.
@@ -122,9 +120,9 @@ final class Day0Service {
             add("branding", "Self Service branding",
                 (page.totalCount ?? page.results.count + page.unreadableCount) > 0
                     ? .done(detail: "Branding is configured.")
-                    : .pending(detail: "Give Self Service your organization's name before users first see it."))
+                    : .pending(detail: "Give Self Service your organization’s name before users first see it."))
         } else {
-            add("branding", "Self Service branding", .unknown(detail: "Could not check."))
+            add("branding", "Self Service branding", .unknown(detail: "Couldn’t check."))
         }
 
         // SSO.
@@ -134,11 +132,11 @@ final class Day0Service {
             let enabled = (object["ssoEnabled"] as? Bool) ?? (object["enabled"] as? Bool)
             switch enabled {
             case true: ssoState = .done(detail: "Single sign-on is enabled.")
-            case false: ssoState = .info(detail: "Not enabled. Optional — configure it in Jamf Pro's SSO settings when your identity provider is ready.")
-            default: ssoState = .info(detail: "Configured state could not be read. Review it in Jamf Pro's SSO settings.")
+            case false: ssoState = .info(detail: "Not enabled. Optional — configure it in Jamf Pro’s SSO settings when your identity provider is ready.")
+            default: ssoState = .info(detail: "Configured state couldn’t be read. Review it in Jamf Pro’s SSO settings.")
             }
         } else {
-            ssoState = .unknown(detail: "Could not check.")
+            ssoState = .unknown(detail: "Couldn’t check.")
         }
         add("sso", "Single sign-on", ssoState)
 
@@ -155,7 +153,7 @@ final class Day0Service {
                     .pending(detail: "Optional. Link Jamf Protect so its deployment and plans sync with Jamf Pro."))
             }
         } else {
-            add("protect", "Jamf Protect link", .unknown(detail: "Could not check."))
+            add("protect", "Jamf Protect link", .unknown(detail: "Couldn’t check."))
         }
 
         // Cloud Services Connection (status only).
@@ -167,9 +165,9 @@ final class Day0Service {
             add("csc", "Cloud Services Connection",
                 status == 200
                     ? .done(detail: "Established — the App Catalog works.")
-                    : .pending(detail: "Connect it in Jamf Pro under Settings → Jamf apps; the App Catalog block needs it."))
+                    : .pending(detail: "Connect it in Jamf Pro under Settings › Jamf apps; the App Catalog block needs it."))
         } else {
-            add("csc", "Cloud Services Connection", .unknown(detail: "Could not check."))
+            add("csc", "Cloud Services Connection", .unknown(detail: "Couldn’t check."))
         }
 
         steps = detected
@@ -177,14 +175,14 @@ final class Day0Service {
 
     // MARK: Actions
 
-    /// The ADE public key the user uploads to Apple Business Manager.
+    /// The ADE public key the user uploads to Apple Business.
     func downloadADEPublicKey(tenant: Tenant) async throws -> Data {
         let client = try client(for: tenant)
         return try await client.getRaw("/pro/v1/device-enrollments/public-key", accept: "application/x-pem-file",
                                         privileges: [.readDeviceEnrollmentProgramInstances])
     }
 
-    /// Uploads the .p7m server token downloaded from Apple Business Manager.
+    /// Uploads the .p7m server token downloaded from Apple Business.
     func uploadADEToken(tenant: Tenant, tokenFile: Data, name: String) async throws {
         let client = try client(for: tenant)
         _ = try await client.post("/pro/v1/device-enrollments/upload-token", json: [
@@ -193,7 +191,7 @@ final class Day0Service {
         ], privileges: [.createDeviceEnrollmentProgramInstances])
     }
 
-    /// Uploads the .vpptoken from Apple Business Manager. The file content
+    /// Uploads the .vpptoken from Apple Business. The file content
     /// is already the base64 service token.
     func uploadVPPToken(tenant: Tenant, tokenFile: Data, name: String) async throws {
         let client = try client(for: tenant)

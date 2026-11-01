@@ -46,14 +46,14 @@ scripts/                  new-tenant.sh and hand-over.sh, run on your Mac
    close on the next check.
 4. **Objects made outside the code are listed weekly.** The Not in code
    workflow (Monday, after the change check) lists the object types each
-   tenant's code manages and opens `Not in code: <tenant>` for objects in Jamf
-   the code does not know. The issue holds their configuration (a
+   tenant’s code manages and opens `Not in code: <tenant>` for objects in Jamf
+   the code doesn’t know. The issue holds their configuration (a
    `resource` and an `import` block each) to paste into a new file in the
-   tenant's directory in a pull request, and lines for the tenant's
+   tenant’s directory in a pull request, and lines for the tenant’s
    `not-in-code.ignore` to leave them alone. That configuration includes
    what the objects contain, such as script bodies and profile payloads, one
    more reason to keep the repository private. It uses `terraform query` (Terraform 1.14 or later) and skips
-   tenants on the Jamf Pro API, whose plugin cannot list objects.
+   tenants on the Jamf Pro API, whose plugin can’t list objects.
 5. **Destroy** is manual: run the workflow and type the tenant name twice.
 
 ## Setting up
@@ -64,7 +64,7 @@ Make it **private**. The workflows run from the default branch.
 
 ### 2. Choose where state lives
 
-Each tenant's state is one object with its own lock.
+Each tenant’s state is one object with its own lock.
 
 - **As shipped:** a `terraform-state` branch of this repository, written by
   terraform-backend-git on the runner (`.github/actions/state-backend`). It
@@ -89,10 +89,10 @@ Each tenant's state is one object with its own lock.
 
 ### 3. Create two GitHub Environments per tenant
 
-Each workflow job runs in one of the tenant's Environments, so it can only
-read that tenant's credentials:
+Each workflow job runs in one of the tenant’s Environments, so it can only
+read that tenant’s credentials:
 
-- **`<tenant>`**, named after the tenant's directory, holds the credentials
+- **`<tenant>`**, named after the tenant’s directory, holds the credentials
   that change Jamf. Apply, Restore, Destroy, Check for Changes and Not in
   code use it, and its deployment branch policy allows only `main`.
 - **`<tenant>-plan`** holds the credentials pull request plans use. Any branch
@@ -134,7 +134,7 @@ gh secret   set JAMFPRO_CLIENT_ID     --env <environment>   # basic: JAMFPRO_BAS
 gh secret   set JAMFPRO_CLIENT_SECRET --env <environment>   # basic: JAMFPRO_BASIC_PASSWORD
 ```
 
-The workflows read both sets; the one a tenant does not use stays empty.
+The workflows read both sets; the one a tenant doesn’t use stays empty.
 Tenants with Jamf Protect blocks also set `JAMFPROTECT_URL` and the
 `JAMFPROTECT_CLIENT_ID` and `JAMFPROTECT_CLIENT_SECRET` secrets, in both
 Environments. Secret block
@@ -147,7 +147,7 @@ In the repository settings, require a pull request with at least one approving
 review, and require the **Plan result** status check. Without branch
 protection, anyone with write access can push straight to `main` and the review
 step is optional. Branch protection guards what reaches `main`; the
-Environments' branch policy is what keeps the credentials that change Jamf
+Environments’ branch policy is what keeps the credentials that change Jamf
 away from other branches.
 
 ### 5. Optional settings
@@ -162,19 +162,19 @@ away from other branches.
 scripts/new-tenant.sh contoso-production
 ```
 
-The script copies `tenants/_template` (the first exported tenant's blocks and
-values), creates the tenant's two Environments, asking for each secret with
+The script copies `tenants/_template` (the first exported tenant’s blocks and
+values), creates the tenant’s two Environments, asking for each secret with
 typing hidden, waits while you set its values in `tenant.auto.tfvars`, and
 opens a pull request. Its plan shows everything the new tenant gets before
-anything is created. It needs git and the GitHub CLI, signed in. The template
-uses the first tenant's connection; for a tenant on the other API, copy a
+anything is created. It needs Git and the GitHub CLI, signed in. The template
+uses the first tenant’s connection; for a tenant on the other API, copy a
 tenant directory of that kind instead.
 
 The directory name ties a tenant to its state, Environments and issues.
 Renaming the directory alone looks like a new, empty tenant, whose first
 apply would create everything again: to rename one, also move
 `tenants/<old>/terraform.tfstate` to the new name on the `terraform-state`
-branch and create its two Environments under the new name (GitHub cannot
+branch and create its two Environments under the new name (GitHub can’t
 rename them), before merging.
 
 ## Stopping managing a tenant
@@ -183,20 +183,20 @@ rename them), before merging.
 scripts/hand-over.sh contoso-production
 ```
 
-The script opens a pull request that removes the tenant's directory. When it
-is merged, the Apply workflow moves the tenant's state to `handed-over/` on
+The script opens a pull request that removes the tenant’s directory. When it
+is merged, the Apply workflow moves the tenant’s state to `handed-over/` on
 the `terraform-state` branch: nothing plans against the tenant again, and its
 objects stay in Jamf exactly as they are. Delete its two Environments
 afterwards. To delete the objects as well, run the Destroy workflow first.
-(With another backend, remove the tenant's state object there yourself.)
+(With another backend, remove the tenant’s state object there yourself.)
 
 ## A stuck lock
 
-Every run locks the tenant's state and unlocks it when it ends. A cancelled
+Every run locks the tenant’s state and unlocks it when it ends. A canceled
 or crashed run can leave the lock behind, as a branch named
 `locks/tenants/<tenant>/terraform.tfstate`. Every later run for that tenant
-then fails at Init with "Error loading state: Failed to get state … giving
-up". Check under Actions that no run is still working on the tenant, then run
-the **Force unlock** workflow with the tenant's name, typed twice. It shows
+then fails at Init with “Error loading state: Failed to get state … giving
+up”. Check under Actions that no run is still working on the tenant, then run
+the **Force unlock** workflow with the tenant’s name, typed twice. It shows
 who held the lock and when, deletes it, and waits for any run still in
 progress on the tenant first, so a lock in use is never taken away.

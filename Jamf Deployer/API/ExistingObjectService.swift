@@ -5,10 +5,12 @@ import JTKit
 /// them instead of creating their own.
 nonisolated enum ExistingObjectService {
     enum LookupError: LocalizedError {
-        case missingSecret
+        case missingSecret(usesPassword: Bool)
 
         var errorDescription: String? {
-            "The tenant's client secret or password is missing from the Keychain. Enter it on the tenant page (Update Client Secret… or Update Password…)."
+            switch self {
+            case .missingSecret(let usesPassword): JamfAPIError.missingSecret(usesPassword: usesPassword)
+            }
         }
     }
 
@@ -64,7 +66,7 @@ nonisolated enum ExistingObjectService {
 
     private static func client(for tenant: Tenant, activityLog: ActivityLog?) throws -> JamfPlatformClient {
         guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
-            throw LookupError.missingSecret
+            throw LookupError.missingSecret(usesPassword: tenant.usesPassword)
         }
         return TenantClients.shared.client(for: tenant, activityLog: activityLog)
     }

@@ -16,6 +16,12 @@ final class TenantStore {
     let rootURL: URL
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "TenantStore")
 
+    enum Change { case added, updated }
+
+    /// Hears of every record added or changed here (not of reloads), so the
+    /// deploy service can record it in the store's history.
+    @ObservationIgnored var onChange: ((Tenant, Change) -> Void)?
+
     /// The default store under Application Support; injectable for tests.
     init(rootURL: URL? = nil) {
         self.rootURL = rootURL ?? GitStoreService.storeURL.appending(path: "tenants")
@@ -44,18 +50,21 @@ final class TenantStore {
         guard let index = tenants.firstIndex(where: { $0.id == tenant.id }) else { return }
         try JSONFile.save(tenant, to: recordURL(for: tenant.id))
         tenants[index] = tenant
+        onChange?(tenant, .updated)
     }
 
     func add(_ tenant: Tenant) {
         tenants.append(tenant)
         createWorkspace(for: tenant)
         save(tenant)
+        onChange?(tenant, .added)
     }
 
     func update(_ tenant: Tenant) {
         guard let index = tenants.firstIndex(where: { $0.id == tenant.id }) else { return }
         tenants[index] = tenant
         save(tenant)
+        onChange?(tenant, .updated)
     }
 
     /// Removes the tenant from the app. Nothing in Jamf is touched; the

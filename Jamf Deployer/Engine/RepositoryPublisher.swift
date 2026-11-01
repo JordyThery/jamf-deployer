@@ -18,7 +18,7 @@ nonisolated enum RepositoryPublisher {
 
             case .git(let step, let output):
                 let detail = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                return "Git could not \(step)\(detail.isEmpty ? "." : ": \(detail.prefix(300))")"
+                return "Git couldn’t \(step)\(detail.isEmpty ? "." : ": \(detail.prefix(300))")"
             }
         }
     }
@@ -59,31 +59,15 @@ nonisolated enum RepositoryPublisher {
     /// Pushes the first commit as main.
     static func publishMain(_ directory: URL, tools: ToolDoorway) async throws {
         try await Task.detached {
-            try git(tools, directory, "push to the repository", "push", "-q", "-u", "origin", "main")
+            _ = try git(tools, directory, "push to the repository", "push", "-q", "-u", "origin", "main")
         }.value
     }
 
     @discardableResult
     private static func git(_ tools: ToolDoorway, _ directory: URL, _ step: String, _ arguments: String...,
                             input: String? = nil) throws -> String {
-        var environment = ProcessInfo.processInfo.environment
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        let process = try tools.process(.git, executable: URL(filePath: "/usr/bin/git"), arguments: arguments,
-                                        directory: directory, environment: environment)
-        let stdin = Pipe()
-        let output = Pipe()
-        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
-        process.standardOutput = output
-        process.standardError = output
-        try process.run()
-        if let input {
-            try? stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8))
-            try? stdin.fileHandleForWriting.close()
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let text = String(decoding: data, as: UTF8.self)
-        guard process.terminationStatus == 0 else { throw PublishError.git(step, output: text) }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = try GitCommand.run(arguments, in: directory, input: input.map { Data($0.utf8) }, tools: tools)
+        guard output.status == 0 else { throw PublishError.git(step, output: output.text) }
+        return output.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

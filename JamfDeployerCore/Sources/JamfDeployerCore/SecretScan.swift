@@ -115,11 +115,16 @@ public nonisolated enum SecretScan {
     /// around it. Findings in files no object uses keep the file as name.
     public static func objectFindings(_ findings: [SecretFinding], in exportDirectory: URL) -> [SecretObjectFinding] {
         let resources = resourceBlocks(in: exportDirectory)
+        let tfvarsText = try? String(contentsOf: exportDirectory.appending(path: tfvarsFile), encoding: .utf8)
         var result: [SecretObjectFinding] = []
         var seen: Set<String> = []
         for finding in findings {
             var matched: [ResourceBlock] = []
-            if finding.path.hasSuffix(".tf") {
+            if finding.path == tfvarsFile, let tfvarsText,
+               let variable = tfvarsVariable(atLine: finding.line, in: tfvarsText) {
+                // A tfvars value belongs to every object using its variable.
+                matched = resources.filter { BlockCapture.mentions($0.text, address: "var.\(variable)") }
+            } else if finding.path.hasSuffix(".tf") {
                 matched = resources.filter { $0.file == finding.path && $0.lines.contains(finding.line) }
             } else {
                 matched = resources.filter { $0.text.contains(finding.path) }
@@ -222,15 +227,31 @@ public nonisolated enum SecretScan {
         func rule(_ description: String, _ pattern: String, value: Int, key: Int? = nil, line: Int? = nil) -> Rule {
             Rule(description: description, regex: try! NSRegularExpression(pattern: pattern), valueGroup: value, keyGroup: key, lineGroup: line)
         }
+        // Text stored as JSON (history plans, engine logs) escapes `/` as
+        // `\/`, newlines as `\n` and quotes as `\"`: the rules accept both.
+        let space = #"(?:\s|\\[nrt])*"#
+        let key = #"([A-Za-z0-9_.-]{0,40}(?:pass(?:word|wd|phrase)?|secret|token|psk|challenge|api[_-]?key)[A-Za-z0-9_]{0,40})"#
         return [
             rule("Password or secret in plist/XML configuration",
-                 #"(?is)<key>\s*([^<]{1,64}?)\s*</key>\s*<string>([^<]{6,})</string>"#, value: 2, key: 1, line: 1),
+                 #"(?is)<key>"# + space + #"([^<]{1,64}?)"# + space + #"<\\?/key>"# + space + #"<string>([^<]{6,})<\\?/string>"#,
+                 value: 2, key: 1, line: 1),
+            // Quoted values may hold spaces (passphrases); in JSON the quotes are `\"`.
             rule("Password value in HCL attribute",
-                 #"(?i)\b([A-Za-z0-9_.-]{0,40}(?:pass(?:word|wd|phrase)?|secret|token|psk|challenge|api[_-]?key)[A-Za-z0-9_]{0,40})\\?["']?[ \t]*[:=][ \t]*\\?["']([^"'\s\\]{6,})\\?["']"#,
+                 #"(?i)\b"# + key + #"\\?["']?[ \t]*[:=][ \t]*\\?"((?:[^"\\\n]|\\(?!")){6,}?)\\?""#,
+                 value: 2, key: 1),
+            rule("Password value in HCL attribute",
+                 #"(?i)\b"# + key + #"\\?["']?[ \t]*[:=][ \t]*'([^'\n]{6,}?)'"#,
                  value: 2, key: 1),
             rule("Password value in a script",
-                 #"(?im)^[ \t]*(?:export[ \t]+)?([A-Za-z_]{0,40}(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Za-z_]{0,40})=([^\s"'$;#`(][^\s;#`]{5,})"#,
+                 #"(?im)^[ \t]*(?:export[ \t]+)?([A-Za-z_]{0,40}(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[A-Za-z_]{0,40})=([^\s"';#`(\\][^\s;#`\\]{5,})"#,
                  value: 2, key: 1),
+            // curl -u user:pass, -su, --user=user:pass (wget, httpie alike).
+            rule("Password in a command-line credential",
+                 #"(?:^|[\s(])(?:-[A-Za-z]*u|--user)(?:[ \t]+|=)\\?["']?[^\s"':\\]+:(?=[^\s"'\\]{4,})([^\s"'\\]*[^\s"'\\0-9][^\s"'\\]*)\\?["']?"#,
+                 value: 1),
+            rule("Credential in an Authorization header",
+                 #"(?i)\bAuthorization\\?["']?[ \t]*[:=][ \t]*\\?["']?(?:Basic|Bearer|Token)[ \t]+(?=[A-Za-z0-9+/=._~-]*[0-9+/=])([A-Za-z0-9+/=._~-]{12,})"#,
+                 value: 1),
             rule("Private key", #"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----"#, value: 0),
             rule("AWS access key", #"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#, value: 0),
             rule("GitHub token", #"\bgh[pousr]_[A-Za-z0-9]{36,}\b"#, value: 0),
@@ -245,7 +266,10 @@ public nonisolated enum SecretScan {
     /// Values that are placeholders or references, not secrets.
     static func isPlaceholder(_ value: String) -> Bool {
         let lowered = value.lowercased()
-        if value.contains("${") || value.contains("%{") || value.contains("<redacted>") || value.hasPrefix("$") { return true }
+        if value.contains("${") || value.contains("%{") || value.contains("<redacted>") { return true }
+        // Shell references: $NAME, $1, $@, $(command). Anything else starting
+        // with `$` ($uperSecret1!) is a value.
+        if value.wholeMatch(of: /\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?])/) != nil || value.hasPrefix("$(") { return true }
         if ["var.", "local.", "data.", "each.", "module."].contains(where: lowered.hasPrefix) { return true }
         if ["bearer", "basic", "true", "false", "null", "none", "string", "required", "changeme", "password"].contains(lowered) { return true }
         // Masks such as "******" or "••••••".
@@ -311,7 +335,12 @@ public nonisolated enum SecretScan {
     }
 
     static func exportMatches(_ directory: URL) -> [Match] {
-        let skipped: Set<String> = ["provider.tf", "versions.tf", "variables.tf", "terraform.tfvars", ".terraform", ".terraform.lock.hcl", "PERMISSIONS.md", ".gitignore"]
+        // terraform.tfvars is scanned: Adopt inlines its values into the
+        // configuration and capture makes them defaults. Values of sensitive
+        // variables go to the Keychain instead and aren't findings.
+        let skipped: Set<String> = ["provider.tf", "versions.tf", "variables.tf", ".terraform", ".terraform.lock.hcl", "PERMISSIONS.md", ".gitignore"]
+        let declarations = BlockCapture.parseVariableDeclarations(at: directory.appending(path: "variables.tf"))
+        let sensitive = Set(declarations.filter { ExportedObjectInventory.isSensitive($0.value) }.keys)
         let base = directory.resolvingSymlinksInPath().path
         guard let enumerator = FileManager.default.enumerator(
             at: directory, includingPropertiesForKeys: [.isRegularFileKey],
@@ -327,7 +356,38 @@ public nonisolated enum SecretScan {
                   let data = try? Data(contentsOf: item), let text = scannableText(data) else { continue }
             let resolved = item.resolvingSymlinksInPath().path
             guard resolved.hasPrefix(base + "/") else { continue }
-            result += matches(in: text, path: String(resolved.dropFirst(base.count + 1)))
+            let path = String(resolved.dropFirst(base.count + 1))
+            var found = matches(in: text, path: path)
+            if path == tfvarsFile {
+                found.removeAll { tfvarsVariable(atLine: $0.finding.line, in: text).map(sensitive.contains) ?? false }
+            }
+            result += found
+        }
+        return result
+    }
+
+    static let tfvarsFile = "terraform.tfvars"
+
+    /// The tfvars variable whose value spans `line` (1-based): the nearest
+    /// assignment at or above it.
+    static func tfvarsVariable(atLine line: Int, in text: String) -> String? {
+        let lines = text.components(separatedBy: "\n")
+        var index = min(line, lines.count) - 1
+        while index >= 0 {
+            if let match = lines[index].firstMatch(of: /^([a-zA-Z0-9_]+)\s*=/) { return String(match.1) }
+            index -= 1
+        }
+        return nil
+    }
+
+    /// Variables whose terraform.tfvars value holds a finding, with the
+    /// finding's rule: they must become secret settings, never defaults or
+    /// inlined values.
+    static func flaggedTfvarsVariables(_ findings: [SecretFinding], in directory: URL) -> [String: String] {
+        guard let text = try? String(contentsOf: directory.appending(path: tfvarsFile), encoding: .utf8) else { return [:] }
+        var result: [String: String] = [:]
+        for finding in findings where finding.path == tfvarsFile {
+            if let name = tfvarsVariable(atLine: finding.line, in: text), result[name] == nil { result[name] = finding.rule }
         }
         return result
     }
@@ -352,12 +412,30 @@ public nonisolated enum SecretScan {
 
     /// HCL text with each value replaced by its variable: a whole string
     /// literal becomes `var.key`, a value inside a longer string `${var.key}`.
+    /// Block headers and object names keep their text: a name that happens
+    /// to contain the value ("Reset Welcome2024") is not where it was found.
     static func referencing(_ text: String, replacing values: [(value: String, key: String)]) -> String {
-        var result = text
-        for entry in values.sorted(by: { $0.value.count > $1.value.count }) {
-            result = result.replacingOccurrences(of: "\"\(entry.value)\"", with: "var.\(entry.key)")
-            result = result.replacingOccurrences(of: entry.value, with: "${var.\(entry.key)}")
+        let ordered = values.sorted { $0.value.count > $1.value.count }
+        var lines = text.components(separatedBy: "\n")
+        var scanner = HCLScanner()
+        for index in lines.indices {
+            let line = lines[index]
+            // Heredoc text is a template: a value there is always `${var.key}`.
+            let inHeredoc = scanner.isInHeredoc
+            scanner.scan(line)
+            guard ordered.contains(where: { line.contains($0.value) }),
+                  inHeredoc || line.firstMatch(of: /^\s*(?:resource|data|module|variable|output)\s+"/) == nil,
+                  inHeredoc || line.firstMatch(of: /^\s*(?:display_)?name\s*=/) == nil
+            else { continue }
+            var updated = line
+            for entry in ordered {
+                if !inHeredoc {
+                    updated = updated.replacingOccurrences(of: "\"\(entry.value)\"", with: "var.\(entry.key)")
+                }
+                updated = updated.replacingOccurrences(of: entry.value, with: "${var.\(entry.key)}")
+            }
+            lines[index] = updated
         }
-        return result
+        return lines.joined(separator: "\n")
     }
 }

@@ -108,6 +108,7 @@ struct OverrideEditorView: View {
                 .keyboardShortcut(.cancelAction)
             Button("Stage Object") { stage() }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(!canStage)
         }
         .frame(width: 680, height: 560)

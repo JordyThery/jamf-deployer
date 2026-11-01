@@ -102,24 +102,26 @@ nonisolated struct JamfAPIConfiguration: Sendable {
 /// The app's own errors, before anything is sent. Jamf's answers come as
 /// JTKit's `JamfPlatform.APIError`.
 nonisolated enum JamfAPIError: LocalizedError {
-    /// No secret saved; worded for the connection, as JTKit's sign-in hints
-    /// are: a direct Jamf Pro tenant has no region and no Jamf Account, and
-    /// a user account no client secret.
+    /// No secret saved in the Keychain: a local condition, found before
+    /// anything is sent. A user account has a password, not a client secret.
     case notAuthenticated(String, flavor: JamfAPIConfiguration.Flavor)
     /// A Jamf Pro tenant whose saved URL is not a valid instance URL.
     case invalidInstanceURL
 
     var errorDescription: String? {
         switch self {
-        case .notAuthenticated(let detail, .platform):
-            "Jamf did not accept the credentials. Check the client ID, client secret and region. (\(detail))"
-        case .notAuthenticated(let detail, .jamfProAPIClient):
-            "Jamf Pro did not accept the credentials. Check the client ID and client secret, and that the API client is enabled in Jamf Pro under Settings › API Roles and Clients. (\(detail))"
-        case .notAuthenticated(let detail, .jamfProUser):
-            "Jamf Pro did not accept the credentials. Check the username and password. (\(detail))"
+        case .notAuthenticated(_, let flavor):
+            Self.missingSecret(usesPassword: flavor == .jamfProUser)
         case .invalidInstanceURL:
-            "The saved Jamf Pro URL is not valid. Check the tenant's Jamf Pro URL."
+            "The saved Jamf Pro URL isn’t valid. Check the tenant’s Jamf Pro URL."
         }
+    }
+
+    /// The one sentence for a tenant secret missing from the Keychain.
+    static func missingSecret(usesPassword: Bool) -> String {
+        usesPassword
+            ? "The password is missing from the Keychain. Enter it with Update Password… in the tenant’s Connection section."
+            : "The client secret is missing from the Keychain. Enter it with Update Client Secret… in the tenant’s Connection section."
     }
 }
 
@@ -223,7 +225,7 @@ actor JamfPlatformClient {
             return try JSONDecoder().decode(type, from: response.data)
         } catch {
             throw try platform.get().failure(
-                JamfPlatform.APIError(.invalidResponse("\(path) could not be read: \(error.localizedDescription)")))
+                JamfPlatform.APIError(.invalidResponse("\(path) couldn’t be read: \(error.localizedDescription)")))
         }
     }
 
@@ -353,8 +355,8 @@ actor JamfPlatformClient {
     }
 
     /// Callers pass unencoded paths (a Classic API lookup by name can hold
-    /// spaces, `%` or `?`); each part is percent-encoded, as the old client's
-    /// `appending(path:)` did. A name that is `..` or holds a backslash is
+    /// spaces, `%` or `?`); each part is percent-encoded, so such a name
+    /// stays one path segment. A name that is `..` or holds a backslash is
     /// then refused by JTKit before anything is sent.
     static func encodedPath(_ path: String) -> String {
         var allowed = CharacterSet.urlPathAllowed

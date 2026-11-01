@@ -3,17 +3,6 @@ import AppKit
 import UniformTypeIdentifiers
 import JTKit
 
-/// Versions of the tools that ship inside the app. They only change with app
-/// updates, never silently.
-nonisolated enum EngineInfo {
-    static let openTofuVersion = "1.13.2"
-    static let jamfPlatformProviderVersion = "1.6.0"
-    static let jamfProtectProviderVersion = "0.12.0"
-    static let jamfProProviderVersion = "0.42.0"
-    static let jamformerVersion = "0.6.1"
-    static let stateBackendVersion = "0.1.12"
-}
-
 /// Settings → General, below JTKit's Appearance picker. The daily update
 /// check is in JTKit's Updates tab, under the same "checksForUpdates" key.
 struct GeneralSettingsSections: View {
@@ -58,8 +47,8 @@ struct AdvancedSettingsSections: View {
                     HStack(spacing: 6) {
                         Text(component.pinned)
                         if component.hasUpdate, let latest = component.latest {
-                            Text("· \(latest) available")
-                                .foregroundStyle(.orange)
+                            Label("\(latest) available", systemImage: "arrow.up.circle.fill")
+                                .labelStyle(.tintedIcon(.orange))
                         }
                     }
                 }
@@ -98,7 +87,7 @@ struct SupportBundleButton: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("Contains app and tool versions, team-sync status and the activity log. Secrets, tenant records and tenant state are never included.")
+            Text("Contains app and tool versions, team-sync status and the activity log, with device identifiers, usernames and IP addresses replaced by placeholders. Secrets, tenant records and tenant state are never included.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -109,25 +98,18 @@ struct SupportBundleButton: View {
             let staging = FileManager.default.temporaryDirectory
                 .appending(path: "jd-support-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: staging) }
 
-            let versions = """
-            Jamf Deployer \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
-            macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
-            OpenTofu \(EngineInfo.openTofuVersion)
-            jamfplatform provider \(EngineInfo.jamfPlatformProviderVersion)
-            jamfprotect provider \(EngineInfo.jamfProtectProviderVersion)
-            jamfpro provider \(EngineInfo.jamfProProviderVersion)
-            jamformer \(EngineInfo.jamformerVersion)
-            terraform-backend-git \(EngineInfo.stateBackendVersion)
-            Team Mode: \(deployService.isTeamMode ? "on" : "off")
-            Last sync: \(deployService.lastSync?.formatted(.iso8601) ?? "-")
-            Sync message: \(deployService.syncMessage ?? "-")
-            """
+            let entries = activityLog.entries
+            let versions = SupportBundle.versionsText(
+                appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev",
+                system: "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
+                isTeamMode: deployService.isTeamMode, lastSync: deployService.lastSync,
+                syncMessage: deployService.syncMessage, entries: entries)
             try Data(versions.utf8).write(to: staging.appending(path: "versions.txt"))
 
-            let log = activityLog.entries.map {
-                "\($0.date.formatted(.iso8601)) [\($0.category)] \($0.operation) \($0.detail) \($0.status.map(String.init) ?? "-") \($0.note ?? "")"
-            }.joined(separator: "\n")
+            // masked, as the Activity Log window's Export for Bug Report…
+            let log = SupportBundle.activityLogText(entries)
             try Data(log.utf8).write(to: staging.appending(path: "activity-log.txt"))
 
             let panel = NSSavePanel()
@@ -140,10 +122,9 @@ struct SupportBundleButton: View {
             ditto.arguments = ["-c", "-k", staging.path, destination.path]
             try ditto.run()
             ditto.waitUntilExit()
-            try? FileManager.default.removeItem(at: staging)
             message = ditto.terminationStatus == 0
                 ? "Saved \(destination.lastPathComponent)."
-                : "The support bundle could not be written."
+                : "The support bundle couldn’t be written."
         } catch {
             message = error.localizedDescription
         }

@@ -16,7 +16,7 @@ struct ConnectTenantWizard: View {
         var title: String {
             switch self {
             case .identity: "Tenant"
-            case .integration: "API integration"
+            case .integration: "API Integration"
             case .credentials: "Credentials"
             case .protect: "Jamf Protect"
             case .preflight: "Preflight"
@@ -125,7 +125,7 @@ struct ConnectTenantWizard: View {
     private var demoCredentialsNote: some View {
         if deployService.isDemo {
             Section {
-                Label("Demo Mode: Contoso's demo credentials are filled in. Nothing is sent to a tenant, and nothing is saved in the Keychain.",
+                Label("Demo Mode: Contoso’s demo credentials are filled in. Nothing is sent to a tenant, and nothing is saved in the Keychain.",
                       systemImage: "testtube.2")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -145,6 +145,11 @@ struct ConnectTenantWizard: View {
                         .font(.caption)
                         .foregroundStyle(candidate == step ? .primary : .secondary)
                 }
+                // the symbol and the text color say done / current / to do
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(candidate.title)
+                .accessibilityValue(candidate.rawValue < step.rawValue
+                    ? "Done" : (candidate == step ? "Current step" : "Not started"))
             }
         }
         .padding(.vertical, 10)
@@ -177,7 +182,7 @@ struct ConnectTenantWizard: View {
                     Text("Jamf Platform API").tag(ConnectionKind.platform)
                     Text("Jamf Pro API").tag(ConnectionKind.jamfPro)
                 }
-                .help("Which Jamf API the app uses for this tenant; it cannot be changed later")
+                .help("Which Jamf API the app uses for this tenant; it can’t be changed later")
                 if !isJamfPro {
                     Picker("Region", selection: $region) {
                         ForEach(Tenant.Region.allCases, id: \.self) { region in
@@ -190,7 +195,7 @@ struct ConnectTenantWizard: View {
                     .help("Production tenants ask for extra confirmation before risky changes")
             } footer: {
                 Text(isJamfPro
-                    ? "The name is only used inside this app. Most building blocks deploy through the Jamf Pro API too; Blueprints, compliance benchmarks, Security Cloud and App Store apps need the Jamf Platform API."
+                    ? "The name is only used inside this app. A few building blocks need the Jamf Platform API."
                     : "The name is only used inside this app.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -222,7 +227,7 @@ struct ConnectTenantWizard: View {
             Text("Prepare Jamf Pro API access")
                 .font(.headline)
             VStack(alignment: .leading, spacing: 8) {
-                instruction(1, "In Jamf Pro, open **Settings → System → API roles and clients**.")
+                instruction(1, "In Jamf Pro, open **Settings › API Roles and Clients**.")
                 instruction(2, "Create an API role with the privileges below, plus create, read, update and delete for the object types you want to manage.")
                 instruction(3, "Create an API client with that role, enable it and generate a client secret. A Jamf Pro user account with the same privileges works too.")
             }
@@ -266,7 +271,7 @@ struct ConnectTenantWizard: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(Self.requiredPermissions.joined(separator: "\n"), forType: .string)
             }
-            .help("Copies the permission names so you can tick them off in Jamf Account")
+            .help("Copies the permission names so you can check them off in Jamf Account")
             Link(
                 "Open Jamf Account",
                 destination: URL(string: "https://account.jamf.com")!
@@ -326,7 +331,7 @@ struct ConnectTenantWizard: View {
     private var platformCredentialsStep: some View {
         Form {
             demoCredentialsNote
-            Section("Platform API integration") {
+            Section("Jamf Platform API integration") {
                 TextField("Client ID", text: $clientID, prompt: Text("d5e385c3-738f-4169-ad07-…"))
                     .font(.body.monospaced())
                 SecureField("Client secret", text: $clientSecret)
@@ -405,7 +410,7 @@ struct ConnectTenantWizard: View {
             } header: {
                 Text("Jamf Protect (optional)")
             } footer: {
-                Text("Create the API client in the Protect console under Administration → API Clients. You can also add this later in the tenant's Day 0 Setup tab.")
+                Text("Create the API client in the Protect console under Administration › API Clients. You can also add this later in the tenant’s Day 0 Setup tab.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -507,9 +512,9 @@ struct ConnectTenantWizard: View {
                 .foregroundStyle(.secondary)
         }
         if let saveError {
-            Text(saveError)
+            Label(saveError, systemImage: "xmark.circle.fill")
                 .font(.callout)
-                .foregroundStyle(.red)
+                .labelStyle(.tintedIcon(.red))
         }
         Spacer()
         Button("Cancel") { dismiss() }
@@ -539,6 +544,7 @@ struct ConnectTenantWizard: View {
                 Button("Add Tenant") {}
                     .buttonStyle(.borderedProminent)
                     .disabled(true)
+                    .help("Wait for the preflight to finish")
             } else if report == nil {
                 Button("Run Preflight") { runPreflight() }
                     .buttonStyle(.borderedProminent)
@@ -604,7 +610,7 @@ struct ConnectTenantWizard: View {
         guard secrets.platformClientSecret.save(storedSecret),
               protectSecret.isEmpty || secrets.protectClientSecret.save(protectSecret) else {
             secrets.deleteAll()
-            saveError = "The Keychain did not accept the credentials, so the tenant was not added."
+            saveError = "The Keychain refused to save the secret, so the tenant wasn’t added."
             return
         }
 
