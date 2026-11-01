@@ -2119,13 +2119,36 @@ final class TenantDeployService {
 
     /// The name lookup's answer for a candidate; nil when it failed.
     nonisolated static func lookup(_ candidate: CreateFailureRecovery.Candidate, client: JamfPlatformClient) async -> Data? {
-        guard let path = CreateFailureRecovery.lookupPath(for: candidate),
-              let (data, status) = try? await client.get(
-                  path, query: CreateFailureRecovery.lookupQuery(for: candidate), accept: "application/json",
-                  privileges: lookupPrivileges(for: candidate)),
-              status == 200
-        else { return nil }
+        guard let (data, status) = await lookupResponse(candidate, client: client), status == 200 else { return nil }
         return data
+    }
+
+    /// The name lookup's answer and status; nil when it couldn't be made.
+    private nonisolated static func lookupResponse(
+        _ candidate: CreateFailureRecovery.Candidate, client: JamfPlatformClient
+    ) async -> (Data, Int)? {
+        guard let path = CreateFailureRecovery.lookupPath(for: candidate) else { return nil }
+        return try? await client.get(
+            path, query: CreateFailureRecovery.lookupQuery(for: candidate), accept: "application/json",
+            privileges: lookupPrivileges(for: candidate))
+    }
+
+    /// Before an apply: the IDs of objects that already carry a planned
+    /// create's name; nil when that's unknown. A by-name lookup answers 404
+    /// when no object has the name, which is an empty set, not a failure.
+    nonisolated static func existingIDsBeforeApply(
+        _ candidate: CreateFailureRecovery.Candidate, client: JamfPlatformClient
+    ) async -> Set<String>? {
+        guard let (data, status) = await lookupResponse(candidate, client: client) else { return nil }
+        switch status {
+        case 200:
+            return CreateFailureRecovery.matchingIDs(in: data, for: candidate)
+        case 404:
+            guard case .byName = CreateFailureRecovery.lookups[candidate.resourceType] else { return nil }
+            return []
+        default:
+            return nil
+        }
     }
 
     /// Before an apply: per planned create (only types recovery can look
@@ -2140,8 +2163,7 @@ final class TenantDeployService {
         let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
         var existing: [String: Set<String>?] = [:]
         for candidate in creates {
-            let data = await Self.lookup(candidate, client: client)
-            existing[candidate.address] = .some(data.map { CreateFailureRecovery.matchingIDs(in: $0, for: candidate) })
+            existing[candidate.address] = .some(await Self.existingIDsBeforeApply(candidate, client: client))
         }
         return existing
     }
