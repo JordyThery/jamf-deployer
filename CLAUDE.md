@@ -95,7 +95,7 @@ What this app waits for from Apple, Jamf or Microsoft, or must recheck: see WATC
 3. Jordy archives: Distribute App, Direct Distribution, and exports the stapled app to the repo root as `Jamf Deployer.app` (gitignored).
 4. Check the app's `CFBundleShortVersionString` matches the tag. `ditto -c -k --sequesterRsrc --keepParent`, then `spctl -a` and `stapler validate`.
 5. `gh release create vX.Y.Z <zip> --target main` (or a full SHA) on `JordyThery/jamf-deployer`. The in-app updater takes any `.zip` on the latest release; use `gh release list` to see which is latest.
-6. Release notes (local, `build/release-notes-X.Y.Z.md`): professional, concise bullets, no internal detail, never mention incomplete test runs.
+6. Release notes (local, `build/release-notes-X.Y.Z.md`): professional, concise bullets, no internal detail, never mention incomplete test runs. Release notes (CHANGELOG entries and GitHub release notes) are for the end user: professional and concise, saying what changed for them, and never mentioning the release check, reviews, tests, test targets, AI tools, JTKit step numbers or how a problem was found (decided by Jordy on 2026-11-01).
 7. Update `docs/STATUS.md`.
 8. Website: follow ../jordythery.be/CLAUDE.md, section “When an app is released”. Every release checks this app's card on apps.html, and its own page if it has one, against the released README and CHANGELOG, and changes them on a branch with a pull request. Jordy merges, which publishes the site.
 9. If the demo catalog changes block format, release the app first: older apps skip unreadable blocks, but can't use them.
