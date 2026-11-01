@@ -97,7 +97,7 @@ What this app waits for from Apple, Jamf or Microsoft, or must recheck: see WATC
 5. `gh release create vX.Y.Z <zip> --target main` (or a full SHA) on `JordyThery/jamf-deployer`. The in-app updater takes any `.zip` on the latest release; use `gh release list` to see which is latest.
 6. Release notes (local, `build/release-notes-X.Y.Z.md`): professional, concise bullets, no internal detail, never mention incomplete test runs.
 7. Update `docs/STATUS.md`.
-8. Website: only when the app has its own page on jordythery.be and the release changes the app enough to make that page untrue or incomplete, update the page.
+8. Website: follow ../jordythery.be/CLAUDE.md, section “When an app is released”. Every release checks this app's card on apps.html, and its own page if it has one, against the released README and CHANGELOG, and changes them on a branch with a pull request. Jordy merges, which publishes the site.
 9. If the demo catalog changes block format, release the app first: older apps skip unreadable blocks, but can't use them.
 
 Then follow the release gate in JTKit/ROADMAP.md.
