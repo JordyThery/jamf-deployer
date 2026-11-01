@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 — 2026-11-01
+
+- **No more duplicate policies or macOS configuration profiles after a Jamf
+  error.** When Jamf reports an error while creating a policy or macOS
+  configuration profile but creates it anyway, the app recognizes the object
+  again instead of creating a duplicate.
+
 ## 1.1.0 — 2026-11-01
 
 ### Team Mode

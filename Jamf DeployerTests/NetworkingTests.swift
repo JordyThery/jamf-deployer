@@ -260,6 +260,163 @@ struct JamfPlatformClientTests {
     }
 }
 
+/// A create that fails with a 500 while Jamf creates the object anyway,
+/// from the lookup before the apply to the import file the next preview
+/// adopts. The Classic API answers a by-name lookup for a name nobody uses
+/// with 404.
+@MainActor
+@Suite("Failed-create recovery from the lookup before the apply")
+struct FailedCreateRecoveryTests {
+    private let platform = JamfAPIConfiguration(
+        gatewayURL: URL(string: "https://us.api.jamfcloud.com")!, clientID: "client-1",
+        clientSecret: "secret", environmentID: environment1)
+
+    /// Planned creates: a policy and a macOS profile on both connection
+    /// types, a patch title and an App Installer.
+    private static let planJSON = """
+    {"format_version":"1.2","resource_changes":[
+      {"address":"module.a.jamfplatform_pro_policy.p","type":"jamfplatform_pro_policy","name":"p",
+       "change":{"actions":["create"],"before":null,"after":{"name":"JD - Policy"}}},
+      {"address":"module.a.jamfplatform_pro_macos_configuration_profile.m","type":"jamfplatform_pro_macos_configuration_profile","name":"m",
+       "change":{"actions":["create"],"before":null,"after":{"name":"JD - Profile"}}},
+      {"address":"module.b.jamfpro_policy.p","type":"jamfpro_policy","name":"p",
+       "change":{"actions":["create"],"before":null,"after":{"general":{"name":"JD - Pro Policy"}}}},
+      {"address":"module.b.jamfpro_macos_configuration_profile_plist.m","type":"jamfpro_macos_configuration_profile_plist","name":"m",
+       "change":{"actions":["create"],"before":null,"after":{"name":"JD - Pro Profile"}}},
+      {"address":"module.c.jamfplatform_pro_patch_software_title.t","type":"jamfplatform_pro_patch_software_title","name":"t",
+       "change":{"actions":["create"],"before":null,"after":{"name":"JD - Title"}}},
+      {"address":"module.c.jamfplatform_pro_app_installer.i","type":"jamfplatform_pro_app_installer","name":"i",
+       "change":{"actions":["create"],"before":null,"after":{"name":"JD - Installer"}}}
+    ]}
+    """
+
+    /// Jamf's objects by name; empty until the failed apply "creates" them.
+    private static let created: [String: String] = [
+        "JD - Policy": "11", "JD - Profile": "12", "JD - Pro Policy": "13", "JD - Pro Profile": "14",
+        "JD - Title": "15", "JD - Installer": "16",
+    ]
+
+    private func plan() throws -> PlanFile {
+        try JSONDecoder().decode(PlanFile.self, from: Data(Self.planJSON.utf8))
+    }
+
+    /// The 500 the engine reports for every planned create.
+    private func diagnostics(_ plan: PlanFile) throws -> [EngineStreamEvent.Diagnostic] {
+        try (plan.resourceChanges ?? []).map { change in
+            let json = #"{"severity":"error","summary":"Error creating object","detail":"unexpected status 500","address":"\#(change.address)"}"#
+            return try JSONDecoder().decode(EngineStreamEvent.Diagnostic.self, from: Data(json.utf8))
+        }
+    }
+
+    /// A fake Jamf: `exists` says whether the apply has created the objects
+    /// yet; `before` answers lookups made before then when set.
+    private func server(exists: Locked<Bool>, before: (@Sendable (RecordedRequest) throws -> MockResponse)? = nil) -> MockServer {
+        MockServer { request in
+            if request.path == "/auth/token" { return .json(200, tokenJSON("tok")) }
+            if !exists.value, let before { return try before(request) }
+            let objects = exists.value ? Self.created : [:]
+            let path = request.path.removingPercentEncoding ?? request.path
+            for (prefix, root) in [("/proclassic/policies/name/", "policy"),
+                                   ("/proclassic/osxconfigurationprofiles/name/", "os_x_configuration_profile")]
+            where path.hasPrefix(prefix) {
+                let name = String(path.dropFirst(prefix.count))
+                guard let id = objects[name] else { return .json(404, "{}") }
+                return .json(200, #"{"\#(root)":{"general":{"id":\#(id),"name":"\#(name)"}}}"#)
+            }
+            let list = objects.map { #"{"id":"\#($0.value)","name":"\#($0.key)"}"# }.joined(separator: ",")
+            switch path {
+            case "/proclassic/patchsoftwaretitles": return .json(200, #"{"patch_software_titles":[\#(list)]}"#)
+            case "/pro/v1/app-installers/deployments": return .json(200, #"{"results":[\#(list)]}"#)
+            default: return .json(404, "{}")
+            }
+        }
+    }
+
+    /// The deploy's recovery steps: look up before the apply, fail every
+    /// create with a 500 (Jamf creates the objects anyway), then look the
+    /// recoverable ones up again. Returns the import blocks written.
+    private func recover(_ server: MockServer, exists: Locked<Bool>) async throws -> [String: String] {
+        let jamf = JamfPlatformClient(configuration: platform, activityLog: nil, session: server.session)
+        let plan = try plan()
+        var before: [String: Set<String>?] = [:]
+        for candidate in CreateFailureRecovery.plannedCreates(plan: plan) {
+            before[candidate.address] = .some(await TenantDeployService.existingIDsBeforeApply(candidate, client: jamf))
+        }
+        exists.value = true
+        let candidates = TenantDeployService.recoverable(
+            CreateFailureRecovery.candidates(diagnostics: try diagnostics(plan), plan: plan), existingBeforeApply: before)
+        var found: [String: String] = [:]
+        for candidate in candidates {
+            if let id = await TenantDeployService.createdObjectID(
+                for: candidate, client: jamf, excluding: [], existedBefore: (before[candidate.address] ?? nil) ?? []) {
+                found[candidate.address] = id
+            }
+        }
+        // What the next preview reads: an import block per recovered object,
+        // so it adopts them instead of planning a second create.
+        let text = CreateFailureRecovery.importFile(found.map { (address: $0.key, id: $0.value) })
+        var imports: [String: String] = [:]
+        for match in text.matches(of: /to = (\S+)\n\s*id = "([^"]+)"/) {
+            imports[String(match.1)] = String(match.2)
+        }
+        return imports
+    }
+
+    @Test func policiesAndProfilesNotFoundBeforeTheApplyAreRecovered() async throws {
+        let exists = Locked(false)
+        let imports = try await recover(server(exists: exists), exists: exists)
+        #expect(imports == [
+            "module.a.jamfplatform_pro_policy.p": "11",
+            "module.a.jamfplatform_pro_macos_configuration_profile.m": "12",
+            "module.b.jamfpro_policy.p": "13",
+            "module.b.jamfpro_macos_configuration_profile_plist.m": "14",
+            "module.c.jamfplatform_pro_patch_software_title.t": "15",
+            "module.c.jamfplatform_pro_app_installer.i": "16",
+        ])
+    }
+
+    @Test func aByNameLookupAnswering404MeansNoObjectHadTheName() async throws {
+        let server = server(exists: Locked(false))
+        let jamf = JamfPlatformClient(configuration: platform, activityLog: nil, session: server.session)
+        let policy = CreateFailureRecovery.Candidate(
+            address: "module.a.jamfplatform_pro_policy.p", resourceType: "jamfplatform_pro_policy", name: "JD - Policy")
+        #expect(await TenantDeployService.existingIDsBeforeApply(policy, client: jamf) == [])
+        // After a failed apply a 404 still means "not found".
+        #expect(await TenantDeployService.lookup(policy, client: jamf) == nil)
+    }
+
+    @Test(arguments: ["403", "network"])
+    func aRefusedOrFailedLookupBeforeTheApplyIsNeverRecovered(_ failure: String) async throws {
+        let exists = Locked(false)
+        let server = server(exists: exists) { _ in
+            if failure == "network" { throw URLError(.notConnectedToInternet) }
+            return .json(403, #"{"httpStatus":403}"#)
+        }
+        #expect(try await recover(server, exists: exists).isEmpty)
+    }
+
+    @Test func listLookupsBehaveAsBefore() async throws {
+        let jamf = JamfPlatformClient(
+            configuration: platform, activityLog: nil, session: server(exists: Locked(false)).session)
+        let title = CreateFailureRecovery.Candidate(
+            address: "module.c.jamfplatform_pro_patch_software_title.t",
+            resourceType: "jamfplatform_pro_patch_software_title", name: "JD - Title")
+        let installer = CreateFailureRecovery.Candidate(
+            address: "module.c.jamfplatform_pro_app_installer.i",
+            resourceType: "jamfplatform_pro_app_installer", name: "JD - Installer")
+        #expect(await TenantDeployService.existingIDsBeforeApply(title, client: jamf) == [])
+        #expect(await TenantDeployService.existingIDsBeforeApply(installer, client: jamf) == [])
+
+        // A list that answers 404 stays unknown.
+        let missing = MockServer { request in
+            request.path == "/auth/token" ? .json(200, tokenJSON("tok")) : .json(404, "{}")
+        }
+        let lost = JamfPlatformClient(configuration: platform, activityLog: nil, session: missing.session)
+        #expect(await TenantDeployService.existingIDsBeforeApply(title, client: lost) == nil)
+        #expect(await TenantDeployService.existingIDsBeforeApply(installer, client: lost) == nil)
+    }
+}
+
 @MainActor
 @Suite("Platform API from JTKit")
 struct PlatformAdoptionTests {
