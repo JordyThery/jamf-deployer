@@ -1,12 +1,13 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-11-01 (1.1.1; its changes are listed in [CHANGELOG.md](../CHANGELOG.md)). The open items, limits and what is live-verified, in one place.
+As of 2026-11-02 (1.2.0, not yet released; its changes are listed in [CHANGELOG.md](../CHANGELOG.md)). The release check passed on 2026-11-02 against the published JTKit 1.3.2 in about 21 minutes. The open items, limits and what is live-verified, in one place.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - ADE `.p7m` / Apps and Books `.vpptoken` uploads and Protect registration in Day 0 — wired and spec-verified, needing real Apple/Protect artifacts to fire for the first time.
 - Jamf Pro below 11.31 — no such tenant to test the degradation path.
 
 ## Known behavioral gaps
+- **Adopt’s secret settings (1.2.0)** are unit-tested on a real jamformer export; adopting a Wi-Fi, VPN, SCEP or LDAP profile with a real secret isn’t live-verified yet.
 - **terraform-backend-git 0.1.12 and stale locks:** while a lock branch is left behind (a canceled run), a backend process started fresh can’t read that state (“non-fast-forward update”), so even `init` fails, and the engine’s own `force-unlock` can’t run. The exported Force unlock workflow and the app’s **Force Unlock…** therefore delete the lock branch directly; the app also reports such a read failure as the teammate’s lock.
 - **plan.sh** reads credentials with `security`, which macOS asks permission for the first time; automated tests can’t click that prompt, so its Keychain step is verified by hand. Team Mode workspaces get a `plan.sh` that explains why it can’t run there.
 - **“Keep This Change”** adopts the drifted value into the block’s setting when the block declares a drift binding for that field; fields without a binding fall back to acknowledgment (a later deploy reverts them, and the UI says so).
