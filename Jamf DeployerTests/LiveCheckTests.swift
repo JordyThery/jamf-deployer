@@ -254,6 +254,83 @@ struct LiveDeployTests {
         #expect(run.network.refusals.isEmpty, "\(run.network.refusals)")
     }
 
+    /// Review finding 8, on jamfplatform 1.7.2: after a 500-but-created the
+    /// app writes an import block for the object Jamf made anyway, and the
+    /// next preview must adopt it, not stop at the plan-time name check.
+    /// The "left-behind" object is made through the guarded network (so the
+    /// run's ledger has it); the engine then adopts and removes it.
+    @Test func recoveredImportStillPreviews() async throws {
+        let role = "jamf-test-b"
+        let run = try LiveCheckRun.current()
+        guard let target = try LiveTenant.all(run).first(where: { $0.role == role }) else { return }
+        try run.requireEngineTarget(role: role, service: target.service, host: target.entry.host,
+                                    region: target.entry.region, environmentID: target.entry.environmentID)
+        let step = { (name: String) in "\(role): \(name)" }
+
+        DemoSecretVault.keepEverythingInMemory()
+        let root = FileManager.default.temporaryDirectory.appending(path: "jd-live-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appending(path: "store")
+        let tools = ToolDoorway.real(isDemoOn: { false })
+        let tenantStore = TenantStore(rootURL: storeURL.appending(path: "tenants"))
+        let service = TenantDeployService(
+            tenantStore: tenantStore, activityLog: ActivityLog(),
+            catalogSources: CatalogSourceStore(fileURL: storeURL.appending(path: "catalog-sources.json"), tools: tools),
+            storeURL: storeURL, tools: tools)
+        var tenant = try target.tenant(name: "\(run.prefix) Tenant")
+        tenant.namePrefix = "\(run.prefix) – "
+        tenantStore.add(tenant)
+        #expect(TenantSecrets(tenantID: tenant.id).platformClientSecret.save(target.secret))
+
+        // What a create that answered 500 left in Jamf.
+        let name = "\(run.prefix) – Recovered"
+        let body = try JSONSerialization.data(withJSONObject: ["name": name, "priority": 9])
+        let created = try await target.api.send(HTTPRequest(method: "POST", path: "pro/v1/categories",
+                                                             body: body, contentType: "application/json"))
+        let id = try #require((try JSONSerialization.jsonObject(with: created.data) as? [String: Any])?["id"]
+            .flatMap { ($0 as? String) ?? ($0 as? NSNumber)?.stringValue })
+        try run.recordCreated(role: role, service: target.service, resource: "categories", id: id, name: name)
+
+        // The configuration that wanted it, and the import the recovery writes.
+        let adopted = service.adoptedURL(for: tenant)
+        try FileManager.default.createDirectory(at: adopted, withIntermediateDirectories: true)
+        let override = adopted.appending(path: "override-jtktest.tf")
+        try Data("resource \"jamfplatform_pro_category\" \"jtktest\" {\n  name     = \"\(name)\"\n  priority = 9\n}\n".utf8)
+            .write(to: override)
+        let imports = adopted.appending(path: TenantDeployService.recoveredImportsFile)
+        try Data(CreateFailureRecovery.importFile([(address: "jamfplatform_pro_category.jtktest", id: id)]).utf8)
+            .write(to: imports)
+
+        let preview: PreviewSession
+        do {
+            preview = try await service.preview(tenant: current(tenant, tenantStore))
+        } catch {
+            run.record(step: step("a recovered import previews on jamfplatform 1.7.2"), passed: false, note: String(describing: error))
+            throw error
+        }
+        let adopts = preview.summary.counts[.adopt] ?? 0
+        let creates = preview.summary.counts[.create] ?? 0
+        #expect(adopts == 1 && creates == 0, "adopt \(adopts), create \(creates)")
+        run.record(step: step("a recovered import previews on jamfplatform 1.7.2"), passed: adopts == 1 && creates == 0,
+                   note: "\(adopts) adopt, \(creates) create")
+        try Self.requireOnlyTestObjects(preview, run: run)
+        let adopted1 = try await service.deploy(tenant: current(tenant, tenantStore), session: preview)
+        #expect(adopted1.errors.isEmpty, "\(adopted1.errors)")
+
+        // OpenTofu removes it again.
+        try FileManager.default.removeItem(at: override)
+        try? FileManager.default.removeItem(at: imports)
+        let removal = try await service.preview(tenant: current(tenant, tenantStore))
+        try Self.requireOnlyTestObjects(removal, run: run)
+        #expect(removal.summary.counts[.remove] == 1)
+        let removed = try await service.deploy(tenant: current(tenant, tenantStore), session: removal)
+        let gone = try await !target.list("categories").contains { $0.id == id }
+        #expect(removed.errors.isEmpty && gone)
+        run.record(step: step("the adopted category is removed"), passed: removed.errors.isEmpty && gone)
+        try await service.removeTenant(current(tenant, tenantStore))
+        #expect(run.network.refusals.isEmpty, "\(run.network.refusals)")
+    }
+
     private func current(_ tenant: Tenant, _ store: TenantStore) throws -> Tenant {
         try #require(store.tenant(id: tenant.id))
     }

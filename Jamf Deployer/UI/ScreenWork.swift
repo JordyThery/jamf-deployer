@@ -66,3 +66,23 @@ private struct ScreenWorkTracking: ViewModifier {
             }
     }
 }
+
+/// Tells `AppState` while one of the main window's sheets is open, so the
+/// menu bar dims its commands meanwhile.
+struct ReportsSheet: ViewModifier {
+    @Environment(AppState.self) private var appState
+    let id: String
+    let isOpen: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: isOpen, initial: true) { _, open in appState.sheet(id, isOpen: open) }
+            .onDisappear { appState.sheet(id, isOpen: false) }
+    }
+}
+
+extension View {
+    func reportsSheet(_ id: String, isOpen: Bool) -> some View {
+        modifier(ReportsSheet(id: id, isOpen: isOpen))
+    }
+}

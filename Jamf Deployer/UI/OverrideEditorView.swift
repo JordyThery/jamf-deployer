@@ -15,8 +15,7 @@ actor SchemaProvider {
         // Named by plugin versions, so an app update with newer plugins
         // regenerates the schema.
         let versions = [EngineInfo.jamfPlatformProviderVersion, EngineInfo.jamfProtectProviderVersion, EngineInfo.jamfProProviderVersion]
-        let cacheURL = URL.applicationSupportDirectory
-            .appending(path: "Jamf Deployer/engine/providers-schema-\(versions.joined(separator: "-")).json")
+        let cacheURL = AppFiles.url("engine/providers-schema-\(versions.joined(separator: "-")).json")
         if let data = try? Data(contentsOf: cacheURL),
            let parsed = try? ProviderSchemaCatalog.parse(schemaJSON: data) {
             cached = parsed
@@ -24,8 +23,7 @@ actor SchemaProvider {
         }
 
         // One-time generation in a scratch workspace with every plugin.
-        let workspace = URL.applicationSupportDirectory
-            .appending(path: "Jamf Deployer/engine/schema-workspace")
+        let workspace = AppFiles.url("engine/schema-workspace")
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         // Release builds re-sign the plugin archives, so a lock file or
         // plugin cache from another build no longer matches.

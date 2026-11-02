@@ -23,6 +23,19 @@ public nonisolated enum EnrollmentIcons {
         }
     }
 
+    /// The hosts icons may come from for a tenant: Jamf Cloud for a Jamf
+    /// Platform API tenant (no Jamf Pro address); for a Jamf Pro API tenant
+    /// its own host, and Jamf Cloud too when it's hosted there, where Jamf
+    /// serves the icons from its own Jamf Cloud services.
+    public static func allowedHosts(jamfProURL: String?) -> Set<String> {
+        guard let host = jamfProURL.flatMap({ URL(string: $0)?.host()?.lowercased() }), !host.isEmpty else {
+            return [jamfCloud]
+        }
+        return host.hasSuffix(jamfCloud) ? [host, jamfCloud] : [host]
+    }
+
+    static let jamfCloud = ".jamfcloud.com"
+
     /// Downloads each enrollment customization icon through `fetch` (which
     /// returns the body of a 200 answer and throws otherwise) and points the
     /// configuration at the local copy. Returns the icon URLs left in place.

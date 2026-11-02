@@ -7,8 +7,22 @@
 #   Scripts/release-check.sh --local-jtkit --fault break-build|fail-live-step|interrupt-live
 #     (tests the check itself; never part of a release check)
 #
+#   JD_LIVE_FULL=1 Scripts/release-check.sh --only <LiveFullUITests test>
+#     (the full live UI suite, one test at a time; only when Jordy asks)
+#
 # Tenants are roles on the local allow-list (never named here): jamf-test-a
-# over the Jamf Pro API, jamf-test-b over the Jamf Platform API.
+# over the Jamf Pro API (and its Jamf Platform API connection, for the full
+# suite's Platform-to-Platform steps), jamf-test-b over the Jamf Platform
+# API, and jamfpro-production, read only: a building block captured from it
+# and previewed on jamf-test-b, never deployed. Production takes part when
+# the allow-list's productionReads or --include-production lets it.
+#
+# Live steps, in order: the engine checks per tenant (unit tests), then the
+# live UI tests in Jamf DeployerUITests/LiveUITests.swift: Connect a Tenant
+# and Remove Tenant; deploy, Check for Changes, a change made in Jamf
+# restored and another kept, Remove from Tenant; capture from production
+# and preview on jamf-test-b. With JD_LIVE_FULL=1 the full suite
+# (LiveFullUITests.swift) follows; it runs for an hour or more.
 cd "$(dirname "$0")/.." || exit 1
 
 APP_NAME="Jamf Deployer"
@@ -20,16 +34,40 @@ UI_TESTS="Jamf DeployerUITests"
 SMOKE_CLASS="DemoSmokeUITests"
 SMOKE_FILE="$PWD/Jamf DeployerUITests/DemoSmokeUITests.swift"
 SIGNIN_TEST="Jamf DeployerTests/LiveSignInTests"
-# One selection per tenant, so the check stops at the first that fails
-LIVE_TESTS=("Jamf DeployerTests/LiveDeployTests/tenantA()" "Jamf DeployerTests/LiveDeployTests/tenantB()")
+# One selection per step, so the check stops at the first that fails
+LIVE_TESTS=(
+    "Jamf DeployerTests/LiveDeployTests/tenantA()"
+    "Jamf DeployerTests/LiveDeployTests/tenantB()"
+    "Jamf DeployerTests/LiveDeployTests/recoveredImportStillPreviews()"
+    "Jamf DeployerUITests/LiveUITests/testConnect"
+    "Jamf DeployerUITests/LiveUITests/testDeployDriftKeepRestore"
+    "Jamf DeployerUITests/LiveUITests/testCaptureFromProductionPreviewOnTestB"
+)
+if [[ "${JD_LIVE_FULL:-}" == 1 ]]; then
+    LIVE_TESTS+=(
+        "Jamf DeployerUITests/LiveFullUITests/testCustomObjectsOnBothConnections"
+        "Jamf DeployerUITests/LiveFullUITests/testCatalogBlocksOnBothConnections"
+        "Jamf DeployerUITests/LiveFullUITests/testJamfProAPIFlows"
+        "Jamf DeployerUITests/LiveFullUITests/testFunctionsAcrossTwoPlatformTenants"
+        "Jamf DeployerUITests/LiveFullUITests/testRolloutInTwoRings"
+        "Jamf DeployerUITests/LiveFullUITests/testFleetPresetConflictIsFlagged"
+        "Jamf DeployerUITests/LiveFullUITests/testExportAsTerraformForReview"
+    )
+fi
 CLEANUP_TEST="Jamf DeployerTests/LiveCleanupTests"
-ROLES=(jamf-test-a jamf-test-b)
+ROLES=(jamf-test-a jamf-test-b jamfpro-production)
+# whatever the allow-list grants, production is only ever read
+READ_ONLY_ROLES=(jamfpro-production)
 # role:service:item, read from the Keychain service the allow-list names
 CREDENTIALS=(
     "jamf-test-a:jamfPro:jamfpro-username"
     "jamf-test-a:jamfPro:jamfpro-password"
+    "jamf-test-a:jamfPlatform:client-id"
+    "jamf-test-a:jamfPlatform:client-secret"
     "jamf-test-b:jamfPlatform:client-id"
     "jamf-test-b:jamfPlatform:client-secret"
+    "jamfpro-production:jamfPlatform:client-id"
+    "jamfpro-production:jamfPlatform:client-secret"
 )
 STORE="$HOME/Library/Application Support/Jamf Deployer/store"
 FINGERPRINT_PATHS=("$STORE/tenants" "$STORE/.git/HEAD" "$STORE/.git/refs")

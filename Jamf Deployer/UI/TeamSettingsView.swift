@@ -96,6 +96,8 @@ struct TeamSettingsView: View {
                             SecretPasteboard.copy(TeamPassphrase.item.load() ?? "")
                         }
                         .controlSize(.small)
+                        .accessibilityLabel("Copy Team Passphrase")
+                        .accessibilityIdentifier("Copy")
                     }
                     Button(isShowingPassphrase ? "Hide" : "Show") { isShowingPassphrase.toggle() }
                         .controlSize(.small)
@@ -133,6 +135,8 @@ struct TeamSettingsView: View {
                         SecretPasteboard.copy(newPassphrase)
                     }
                     .controlSize(.small)
+                    .accessibilityLabel("Copy Team Passphrase")
+                    .accessibilityIdentifier("Copy")
                 }
                 Toggle("I saved the team passphrase", isOn: $hasSavedPassphrase)
                     .toggleStyle(.checkbox)

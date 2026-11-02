@@ -128,7 +128,8 @@ struct JamfPlatformClientTests {
         let get = try #require(server.requests.last)
         #expect(get.url.absoluteString == "https://us.api.jamfcloud.com/pro/v1/categories?page-size=1")
         #expect(get.header("Authorization") == "Bearer tok-1")
-        #expect(get.header("X-Environment-Id") == environment1)
+        // JTKit 1.1.0 sends an Environment ID lowercased
+        #expect(get.header("X-Environment-Id") == environment1.lowercased())
     }
 
     @Test func anErrorStatusComesBackAsTheStatus() async throws {

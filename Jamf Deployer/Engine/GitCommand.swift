@@ -26,9 +26,10 @@ nonisolated enum GitCommand {
         in directory: URL?,
         input: Data? = nil,
         discardsErrors: Bool = false,
+        extraEnvironment: [String: String] = [:],
         tools: ToolDoorway
     ) throws -> Output {
-        var environment = ProcessInfo.processInfo.environment
+        var environment = ProcessInfo.processInfo.environment.merging(extraEnvironment) { $1 }
         environment["GIT_TERMINAL_PROMPT"] = "0" // never hang on auth prompts
         let process = try tools.process(.git, executable: executableURL, arguments: arguments,
                                         directory: directory, environment: environment)

@@ -26,16 +26,26 @@ nonisolated struct KeychainItem: Sendable {
         KeychainSecretStore(service: service, accessibility: .whenUnlocked)
     }
 
-    func load() -> String? {
+    /// The value, nil when none is stored.
+    /// - Throws: `SecretStoreError` when the Keychain may hold one but can't
+    ///   read it (locked, access refused): never treat that as "no secret".
+    func read() throws -> String? {
         if isCached, let cached = Self.cache.withLock({ $0[cacheKey] }) { return cached }
         let value: String?
         if DemoSecretVault.keepsInMemory(account: account) {
             value = DemoSecretVault.load(service: service, account: account)
         } else {
-            value = store.secret(for: account)
+            value = try store.readSecret(for: account)
         }
         if isCached { Self.cache.withLock { $0[cacheKey] = .some(value) } }
         return value
+    }
+
+    /// Nil also when the Keychain can't be read. Only for screens that
+    /// show whether something is saved; signing in and engine runs use
+    /// `read()`, so a Keychain that can't be read is reported as such.
+    func load() -> String? {
+        try? read()
     }
 
     // MARK: Read cache
@@ -212,7 +222,11 @@ nonisolated struct ReportingSecretStore: SecretStore {
     var clients: TenantClients = .shared
 
     func secret(for account: String) -> String? {
-        base.secret(for: account)
+        try? base.readSecret(for: account)
+    }
+
+    func readSecret(for account: String) throws -> String? {
+        try base.readSecret(for: account)
     }
 
     @discardableResult

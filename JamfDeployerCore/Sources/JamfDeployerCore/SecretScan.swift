@@ -278,6 +278,27 @@ public nonisolated enum SecretScan {
     }
 
     /// Possible secrets in `text`, the contents of the file at `path`.
+    /// The mask written in place of a value the app's own rules flag.
+    public static let mask = "••••••"
+
+    /// `text` with every value the app's own rules flag replaced by `mask`
+    /// (for deploy history, which the engine masks only for what it marks
+    /// sensitive), and how many values were masked. Run again until nothing
+    /// is found, so a value whose rule needs its neighbor is masked too.
+    public static func masked(_ text: String, path: String) -> (text: String, count: Int) {
+        var result = text
+        var count = 0
+        for _ in 0..<3 {
+            let values = Set(matches(in: result, path: path).map(\.value)).filter { !$0.isEmpty }
+            guard !values.isEmpty else { break }
+            for value in values.sorted(by: { $0.count > $1.count }) {
+                count += result.components(separatedBy: value).count - 1
+                result = result.replacingOccurrences(of: value, with: mask)
+            }
+        }
+        return (result, count)
+    }
+
     public static func scan(text: String, path: String) -> [SecretFinding] {
         matches(in: text, path: path).map(\.finding)
     }

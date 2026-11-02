@@ -118,6 +118,7 @@ struct Day0SetupView: View {
                 } else if case .skipped = step.state {
                     Button("Undo Skip") { setSkipped(step.id, false) }
                         .controlSize(.small)
+                        .accessibilityLabel("Undo Skip for \(step.title)")
                 }
             }
             .padding(4)
@@ -130,6 +131,7 @@ struct Day0SetupView: View {
                     Button("Skip for Now") { setSkipped(step.id, true) }
                         .buttonStyle(.borderless)
                         .controlSize(.small)
+                        .accessibilityLabel("Skip \(step.title) for Now")
                 }
             }
         }

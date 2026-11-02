@@ -113,6 +113,27 @@ public nonisolated enum ErrorTranslation {
             "The object is saved in the tenant record. Run Check for Changes; if nothing shows for it, everything is in order."
         ),
         (
+            // jamfplatform 1.7.1's plan-time name check, when the name
+            // belongs to an object this tenant's blocks already manage.
+            "already managed by another resource in this configuration",
+            "Two objects in this baseline would have the same name.",
+            "Another building block (or an adopted object) already uses this name in Jamf. Give one of them a different name, or a different name prefix, and preview again."
+        ),
+        (
+            // jamfplatform 1.7's plan-time name check: "<Type> already in
+            // use … does not allow two with the same name".
+            "does not allow two with the same",
+            "An object with this name already exists in Jamf.",
+            "It was made outside this baseline, so nothing was changed. To manage it with the app, use Adopt Existing Configuration; otherwise give the block a different name or name prefix."
+        ),
+        (
+            // jamfplatform 1.7.0: Jamf Pro refuses preset privilege sets
+            // (Administrator, Auditor, Enrollment Only) from API clients.
+            "Privilege set refused for API clients",
+            "Jamf Pro doesn’t let an API client assign this privilege set.",
+            "Set the account group’s privilege set to Custom and list its privileges instead."
+        ),
+        (
             // Captured live: [DUPLICATE_FIELD] name: duplicate name
             "DUPLICATE_FIELD",
             "An object with this name already exists in Jamf.",

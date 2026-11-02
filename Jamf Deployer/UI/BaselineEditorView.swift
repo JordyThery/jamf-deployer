@@ -7,6 +7,8 @@ import JamfDeployerCore
 struct BaselineEditorView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(TenantDeployService.self) private var deployService
+    @Environment(AppState.self) private var appState
+    @Environment(\.isEnabled) private var isEnabled
 
     let tenant: Tenant
     let catalog: LoadedCatalog
@@ -113,8 +115,14 @@ struct BaselineEditorView: View {
                 .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
             }
         }
+        .reportsSheet("baseline", isOpen: isCheckingUpdates || isSavingPreset)
         .sheet(isPresented: $isCheckingUpdates) {
             BaselineUpdateSheet(tenant: tenant)
+        }
+        // Tenant › Baseline Updates…, dimmed as the button is
+        .onChange(of: appState.menuRequest, initial: true) {
+            guard appState.take([.baselineUpdates], for: tenant.id) != nil else { return }
+            if isEnabled, !deployService.isDemo, !isSavingPreset { isCheckingUpdates = true }
         }
         .task(id: "\(tenant.id)|\(tenant.blockSelections.map(\.blockID).joined(separator: ","))") {
             readFilledSecrets()
@@ -265,6 +273,8 @@ struct BaselineEditorView: View {
                         expandedBlockID = expandedBlockID == block.id ? nil : block.id
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel(expandedBlockID == block.id ? "Hide Settings for \(block.name)" : "Show Settings for \(block.name)")
+                    .accessibilityIdentifier(expandedBlockID == block.id ? "Hide Settings" : "Show Settings")
                 }
             }
 
@@ -708,6 +718,7 @@ struct BlockSettingsForm: View {
                 }
                 appCount(AppCatalogApp.decodeIfReadable(settingValue: binding.wrappedValue)?.count)
             }
+            .reportsSheet("picker-\(block.id)", isOpen: isPickingApps || isPickingStoreApps)
             .sheet(isPresented: $isPickingApps) {
                 AppCatalogPickerView(tenant: tenant, apps: Binding(
                     get: { AppCatalogApp.decode(settingValue: binding.wrappedValue) },
@@ -809,9 +820,8 @@ struct BlockSettingsForm: View {
 /// the field, closing the settings or a second's pause: the Keychain gets
 /// the value once, not every keystroke, and is read once, not on every redraw.
 struct SecretSettingField: View {
-    let tenantID: UUID
-    let blockID: String
-    let setting: BlockSetting
+    let item: KeychainItem
+    let title: String
     var onSave: () -> Void = {}
 
     @State private var value = ""
@@ -820,12 +830,19 @@ struct SecretSettingField: View {
     @State private var hasLoaded = false
     @FocusState private var isFocused: Bool
 
-    private var item: KeychainItem {
-        TenantSecrets(tenantID: tenantID).blockSetting(blockID: blockID, key: setting.key)
+    init(tenantID: UUID, blockID: String, setting: BlockSetting, onSave: @escaping () -> Void = {}) {
+        self.init(item: TenantSecrets(tenantID: tenantID).blockSetting(blockID: blockID, key: setting.key),
+                  title: setting.title, onSave: onSave)
+    }
+
+    init(item: KeychainItem, title: String, onSave: @escaping () -> Void = {}) {
+        self.item = item
+        self.title = title
+        self.onSave = onSave
     }
 
     var body: some View {
-        SecureField(setting.title, text: $value)
+        SecureField(title, text: $value)
             .focused($isFocused)
             .onSubmit(save)
             .onChange(of: isFocused) { _, focused in
@@ -852,6 +869,74 @@ struct SecretSettingField: View {
             stored = value
             onSave()
         }
+    }
+}
+
+/// The adopted configuration's secret settings (values Adopt kept in the
+/// Keychain instead of the tenant record). Each Mac keeps its own copy: in
+/// Team Mode a teammate enters the value here, into the same Keychain item
+/// Adopt uses, before they can preview, check or deploy the tenant.
+struct AdoptedSecretSettingsSection: View {
+    @Environment(TenantDeployService.self) private var deployService
+
+    let tenant: Tenant
+
+    /// Names with a value on this Mac: read when the list changes or a
+    /// value is saved, not on every redraw.
+    @State private var filled: Set<String> = []
+
+    private var names: [String] { deployService.adoptedSensitiveVariables(for: tenant) }
+
+    var body: some View {
+        if !names.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Adopted secret settings")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Values the adopted objects need, kept in this Mac’s Keychain and never in the tenant record. Another Mac (a teammate’s) enters them here once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(names, id: \.self) { name in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(AdoptedSecretSettings.title(name))
+                            .frame(minWidth: 180, alignment: .leading)
+                        SecretSettingField(item: TenantSecrets(tenantID: tenant.id).adoptedVariable(name),
+                                           title: "Value", onSave: readFilled)
+                            .accessibilityLabel("Value of \(AdoptedSecretSettings.title(name))")
+                        if filled.contains(name) {
+                            Label("Saved on this Mac", systemImage: "checkmark.circle.fill")
+                                .symbolRenderingMode(.multicolor)
+                                .font(.caption)
+                        } else {
+                            Label("Needed on this Mac", systemImage: "exclamationmark.triangle.fill")
+                                .symbolRenderingMode(.multicolor)
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+            .task(id: names) { readFilled() }
+        }
+    }
+
+    private func readFilled() {
+        let secrets = TenantSecrets(tenantID: tenant.id)
+        filled = Set(names.filter { !(secrets.adoptedVariable($0).load() ?? "").isEmpty })
+    }
+}
+
+/// How the baseline editor names an adopted secret setting.
+nonisolated enum AdoptedSecretSettings {
+    /// "secret_wifi_office" → "Wifi office".
+    static func title(_ name: String) -> String {
+        var words = name
+        if words.hasPrefix("secret_") { words.removeFirst("secret_".count) }
+        let spaced = words.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
+        guard let first = spaced.first else { return name }
+        return first.uppercased() + spaced.dropFirst()
     }
 }
 

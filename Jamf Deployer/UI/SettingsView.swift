@@ -3,7 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 import JTKit
 
-/// Settings → General, below JTKit's Appearance picker. The daily update
+/// Settings › General. The daily update
 /// check is in JTKit's Updates tab, under the same "checksForUpdates" key.
 struct GeneralSettingsSections: View {
     @AppStorage("showsTechnicalDetails") private var showsTechnicalDetails = false

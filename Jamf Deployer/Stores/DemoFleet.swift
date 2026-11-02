@@ -67,13 +67,13 @@ nonisolated enum DemoTenants {
     /// The client for a demo tenant: JTKit's demo network, its fake secret.
     /// Without a demo source (demo mode never started) every request fails
     /// inside the app; a demo tenant never reaches the network.
-    static func client(for tenant: Tenant, activityLog: ActivityLog?) -> JamfPlatformClient {
+    static func client(for tenant: Tenant, activityLog: ActivityLog?, waits: RequestWaits? = nil) -> JamfPlatformClient {
         guard let source = source(for: tenant) else {
             return JamfPlatformClient(configuration: JamfAPIConfiguration(unreachableDemo: tenant), activityLog: activityLog,
                                       session: DemoNetwork(servers: [:]).session)
         }
         return JamfPlatformClient(configuration: JamfAPIConfiguration(demo: source, tenant: tenant),
-                                  activityLog: activityLog, session: source.session)
+                                  activityLog: activityLog, session: source.session, waits: waits)
     }
 
     /// The environments the wizard lists in demo mode.

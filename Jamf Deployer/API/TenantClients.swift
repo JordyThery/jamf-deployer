@@ -53,6 +53,7 @@ nonisolated final class TenantClients: Sendable {
     }
 
     private let entries = OSAllocatedUnfairLock<[UUID: Entry]>(initialState: [:])
+    private let waits = OSAllocatedUnfairLock<RequestWaits?>(initialState: nil)
     private let session: URLSession
     private let signInID: @Sendable (Tenant) -> String
     private let configure: @Sendable (Tenant, String) -> JamfAPIConfiguration
@@ -71,19 +72,26 @@ nonisolated final class TenantClients: Sendable {
         self.configure = configure
     }
 
+    /// Where every tenant client's waits before a retry show (the main
+    /// window, with Stop). Set once at launch; clients made before keep none.
+    func showWaits(in waits: RequestWaits) {
+        self.waits.withLock { $0 = waits }
+    }
+
     /// The tenant's client: the one already made, unless its connection
     /// changed since.
     func client(for tenant: Tenant, activityLog: ActivityLog?) -> JamfPlatformClient {
         let id = signInID(tenant)
         let fingerprint = Fingerprint(tenant, signInID: id)
+        let waits = waits.withLock { $0 }
         let (client, replaced) = entries.withLock { entries -> (JamfPlatformClient, JamfPlatformClient?) in
             if let entry = entries[tenant.id], entry.fingerprint == fingerprint {
                 return (entry.client, nil)
             }
             // a demo tenant only ever reaches JTKit's demo servers
             let client = DemoTenants.isDemo(tenant)
-                ? DemoTenants.client(for: tenant, activityLog: activityLog)
-                : JamfPlatformClient(configuration: configure(tenant, id), activityLog: activityLog, session: session)
+                ? DemoTenants.client(for: tenant, activityLog: activityLog, waits: waits)
+                : JamfPlatformClient(configuration: configure(tenant, id), activityLog: activityLog, session: session, waits: waits)
             let old = entries.updateValue(Entry(fingerprint: fingerprint, client: client), forKey: tenant.id)
             return (client, old?.client)
         }

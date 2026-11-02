@@ -31,6 +31,8 @@ final class AppWorld: Identifiable {
         let catalogSources = CatalogSourceStore(fileURL: storeURL.appending(path: "catalog-sources.json"), tools: .app)
         let deployService = TenantDeployService(tenantStore: tenantStore, activityLog: activityLog,
                                                 catalogSources: catalogSources, storeURL: storeURL, tools: .app)
+        // a live UI test may start with the run's tenants connected
+        LiveRun.seedTenants(into: tenantStore)
         return AppWorld(tenantStore: tenantStore, catalogSources: catalogSources, deployService: deployService,
                         isDemo: false)
     }
@@ -71,9 +73,11 @@ final class AppWorlds {
     }
 
     /// Where the "real" world keeps its store when it must not be the real
-    /// one: a sandbox launch's temporary folder, or, in the host of the unit
+    /// one: a live UI test's run folder, a sandbox launch's temporary folder, or, in the host of the unit
     /// tests (which may run beside the installed app), a folder of its own.
     static func sandboxFolder(demo: DemoMode, isUnitTestHost: Bool = TestRun.isUnitTestHost) -> URL? {
+        // under JTKit's live-check switch: the run's own folder
+        if LiveLaunch.isSwitched { return AppFiles.root }
         if demo.isSandbox { return demo.scratchDirectory }
         if isUnitTestHost { return unitTestHostFolder }
         return nil

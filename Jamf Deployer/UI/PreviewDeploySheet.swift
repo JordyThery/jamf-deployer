@@ -65,11 +65,18 @@ struct PreviewDeploySheet: View {
         } footer: {
             footer
         }
-        .frame(width: 700, height: 580)
+        // resizable: long plans, generated configuration and error lists get room
+        .frame(minWidth: 700, idealWidth: 700, maxWidth: .infinity, minHeight: 580, idealHeight: 580, maxHeight: .infinity)
         // Esc mustn't hide a running apply: its result and errors would never show
         .interactiveDismissDisabled(isDeploying)
         .task {
             await runPreview()
+        }
+        // VoiceOver hears when the long waits end.
+        .onChange(of: stageName) { old, new in
+            if let announcement = announcement(from: old, to: new) {
+                AccessibilityNotification.Announcement(announcement).post()
+            }
         }
         .onDisappear {
             retryTask?.cancel()
@@ -112,6 +119,45 @@ struct PreviewDeploySheet: View {
         return false
     }
 
+    /// The stage without its values, to notice changes.
+    private var stageName: String {
+        switch stage {
+        case .previewing: "previewing"
+        case .reviewing: "reviewing"
+        case .needsRecovery: "needsRecovery"
+        case .confirmingProduction: "confirmingProduction"
+        case .deploying: "deploying"
+        case .finished: "finished"
+        case .failed: "failed"
+        case .deployFailed: "deployFailed"
+        }
+    }
+
+    private func announcement(from old: String, to new: String) -> String? {
+        switch stage {
+        case .reviewing(let session), .needsRecovery(let session):
+            // not when coming back from the production confirmation
+            guard old == "previewing" else { return nil }
+            return session.summary.isEmpty ? "Preview ready. Nothing to change." : "Preview ready."
+        case .failed:
+            return "Preview failed."
+        case .finished(let outcome):
+            return outcome.failed == 0
+                ? "Deployed."
+                : "Deployed with problems. \(outcome.failed) failed."
+        case .deployFailed:
+            return "Deploy failed."
+        default:
+            return nil
+        }
+    }
+
+    /// Return deploys only a plan that removes and replaces nothing.
+    private func removesNothing(_ session: PreviewSession) -> Bool {
+        let counts = session.summary.counts
+        return (counts[.remove] ?? 0) == 0 && (counts[.replace] ?? 0) == 0
+    }
+
     // MARK: Content
 
     @ViewBuilder
@@ -146,10 +192,13 @@ struct PreviewDeploySheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     (outcome.failed == 0 ? StatusIndicator.success : .warning).icon
-                        .font(.system(size: 28))
+                        .font(.largeTitle)
+                        // the title says it
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading) {
                         Text(outcome.failed == 0 ? "Deployed" : "Deployed with problems")
                             .font(.title3.bold())
+                            .accessibilityAddTraits(.isHeader)
                         Text("\(outcome.succeeded) succeeded · \(outcome.failed) failed")
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -384,7 +433,8 @@ struct PreviewDeploySheet: View {
                 .keyboardShortcut(.cancelAction)
             Button("Deploy") { startDeploy(session) }
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
+                // a plan that removes or replaces objects is never one keypress away
+                .keyboardShortcut(removesNothing(session) ? .defaultAction : nil)
                 .disabled(session.summary.isEmpty)
                 .help(session.summary.isEmpty ? "There is nothing to deploy" : "Write these changes to the tenant")
 
@@ -454,6 +504,7 @@ struct PreviewDeploySheet: View {
                 retryTask = Task { await runPreview() }
             }
             .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
 
         case .previewing:
             Spacer()

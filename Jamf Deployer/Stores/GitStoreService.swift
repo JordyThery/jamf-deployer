@@ -13,7 +13,7 @@ import os
 /// at every `await`.
 actor GitStoreService {
     nonisolated static var storeURL: URL {
-        URL.applicationSupportDirectory.appending(path: "Jamf Deployer/store")
+        AppFiles.url("store")
     }
 
     enum GitError: LocalizedError {
@@ -149,8 +149,9 @@ actor GitStoreService {
 
     /// Stages everything and commits when there are changes. First the
     /// whole store is checked for possible secrets; any not marked "not a
-    /// secret" stop the commit. A store with an unfinished merge is never
-    /// staged: that would commit the conflict markers.
+    /// secret" stop the commit, except those in a tenant's deploy history
+    /// (`blocksCommit`). A store with an unfinished merge is never staged:
+    /// that would commit the conflict markers.
     @discardableResult
     func commitAll(message: String) async throws -> Bool {
         try await exclusively { try await commitUnlocked(message: message) }
@@ -158,7 +159,7 @@ actor GitStoreService {
 
     private func commitUnlocked(message: String) async throws -> Bool {
         try await requireNoUnfinishedMerge()
-        let findings = try await unacknowledgedFindingsUnlocked()
+        let findings = try await unacknowledgedFindingsUnlocked().filter(Self.blocksCommit)
         guard findings.isEmpty else { throw GitError.possibleSecrets(findings) }
         try await run("add", "-A")
         let status = try await run("status", "--porcelain")
@@ -249,11 +250,36 @@ actor GitStoreService {
         }.value
     }
 
+    /// Whether a finding stops a commit. A deploy's plan in a tenant's
+    /// history (`tenants/<id>/history/<entry>/plan.json`) is the app's own
+    /// record of what was approved and can't be fixed afterwards: the engine
+    /// masks what it marks sensitive and the app masks what its own rules
+    /// find before writing it, so a finding left there never stops a
+    /// commit (and so never a preview, check or deploy). It is shown as a
+    /// notice instead (`TenantDeployService.historyNotice`). Every other
+    /// file, the run's log included, stops the commit as before.
+    nonisolated static func blocksCommit(_ finding: SecretFinding) -> Bool {
+        !isDeployHistoryPlan(finding.path)
+    }
+
+    nonisolated static func isDeployHistoryPlan(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 5 && parts[0] == "tenants" && UUID(uuidString: String(parts[1])) != nil
+            && parts[2] == "history" && !parts[3].isEmpty && parts[4] == "plan.json"
+    }
+
     /// Marks a finding as not a secret; the next commit records it.
     func acknowledge(_ finding: SecretFinding) throws {
+        try acknowledge([finding])
+    }
+
+    /// Marks several findings as not a secret at once (the review's "Mark
+    /// All as Not a Secret"); the next commit records them.
+    func acknowledge(_ findings: [SecretFinding]) throws {
         var current = acknowledgements()
-        guard !current.notSecrets.contains(finding) else { return }
-        current.notSecrets.append(finding)
+        let new = findings.filter { !current.notSecrets.contains($0) }
+        guard !new.isEmpty else { return }
+        current.notSecrets.append(contentsOf: Set(new))
         current.notSecrets.sort { ($0.path, $0.line, $0.rule) < ($1.path, $1.line, $1.rule) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

@@ -362,7 +362,9 @@ struct SecretScanTests {
         #expect(!readme.contains("profile"))
     }
 
-    @Test func captureStopsWhenAValueCannotBeFound() throws {
+    /// As before 1.1.0: a finding whose value can't be found (a fully
+    /// masked short value) keeps the object, with a warning to review it.
+    @Test func captureKeepsTheObjectAndWarnsWhenAValueCannotBeFound() throws {
         let export = try Self.copyExport()
         let root = FileManager.default.temporaryDirectory.appending(path: "secret-catalog-\(UUID().uuidString)")
         defer {
@@ -372,9 +374,28 @@ struct SecretScanTests {
         let lost = JamformerSecretFinding(
             location: SecretFinding(path: Self.scriptPath, line: 3, rule: "Password value in HCL attribute"),
             maskedText: "NOPE*****-999")
-        #expect(throws: BlockCapture.CaptureError.self) {
-            try Self.capture(export: export, findings: [lost], root: root)
+        let result = try Self.capture(export: export, findings: [lost], root: root)
+        let scripts = try String(contentsOf: result.blockFolderURL.appending(path: "pro_script.tf"), encoding: .utf8)
+        #expect(scripts.contains("ZZ Secret Scan Test"), "the script is captured")
+        #expect(result.warnings.contains { $0.contains("Script “ZZ Secret Scan Test” keeps a value that looks like a secret") })
+        #expect(!result.warnings.joined().contains("NOPE"), "the warning never shows the scanned text")
+    }
+
+    @Test func captureKeepsASupportFileItCannotTemplate() throws {
+        let export = try Self.copyExport()
+        let root = FileManager.default.temporaryDirectory.appending(path: "secret-catalog-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: export)
+            try? FileManager.default.removeItem(at: root)
         }
+        // The script loads its file another way than file("${path.module}/files/…").
+        let tf = export.appending(path: "pro_script.tf")
+        let text = try String(contentsOf: tf, encoding: .utf8)
+        try Data(text.replacingOccurrences(of: "file(\"${path.module}/", with: "file(\"./").utf8).write(to: tf)
+        let findings = SecretScan.parseJamformerReport(try Self.reportLines())
+            .filter { $0.location.path.hasSuffix(".zsh") }
+        let result = try Self.capture(export: export, findings: findings, root: root)
+        #expect(result.warnings.contains { $0.contains("keeps a value that looks like a secret") })
     }
 
     @Test func captureNeverGivesASensitiveVariableADefault() throws {
@@ -426,5 +447,74 @@ struct ShippedFilesScanTests {
         }
         #expect(scanned > 0)
         #expect(findings.isEmpty, "\(findings)")
+    }
+}
+
+@Suite("Adopt: possible secrets")
+struct AdoptSecretsTests {
+    static let script = "jamfplatform_pro_script.zz_secret_scan_test"
+    static let profile = "jamfplatform_pro_macos_configuration_profile.zz_secret_scan_test"
+
+    /// Adopt no longer refuses an object with a flagged value: the value
+    /// becomes a sensitive variable for the Keychain, and nothing in the
+    /// staged configuration holds it.
+    @Test func flaggedValuesBecomeSensitiveVariables() throws {
+        let export = try SecretScanTests.copyExport()
+        defer { try? FileManager.default.removeItem(at: export) }
+        let findings = SecretScan.parseJamformerReport(try SecretScanTests.reportLines())
+        let located = AdoptSecrets.locate(in: export, jamformerFindings: findings,
+                                          selected: [Self.script, Self.profile], notSecret: [])
+        #expect(located.notLocated.isEmpty)
+        let replaced = try AdoptSecrets.replace(in: export, values: located.values, taken: [])
+        #expect(replaced.notReplaced.isEmpty)
+        #expect(replaced.variables.count == 2)
+        #expect(replaced.variables.allSatisfy { $0.name.hasPrefix("secret_") && $0.value.hasPrefix("FAKE") })
+        #expect(replaced.variables.allSatisfy { $0.declaration.contains("sensitive = true") && !$0.declaration.contains("default") })
+
+        // Nothing staged holds a value, and the store check passes on it.
+        let everything = SecretScanTests.allText(in: export)
+            .replacingOccurrences(of: try String(contentsOf: export.appending(path: "terraform.tfvars"), encoding: .utf8), with: "")
+        #expect(!everything.contains("FAKE-NotARealSecret"))
+        let scripts = try String(contentsOf: export.appending(path: "pro_script.tf"), encoding: .utf8)
+        #expect(scripts.contains("templatefile(\"${path.module}/support_files/scripts/ZZ Secret Scan Test.zsh\""))
+        let script = try String(contentsOf: export.appending(path: SecretScanTests.scriptPath), encoding: .utf8)
+        #expect(script.contains("${secret_"))
+        #expect(SecretScan.scan(text: script, path: SecretScanTests.scriptPath).isEmpty)
+    }
+
+    @Test func notASecretKeepsTheValueAndNamesAvoidTakenOnes() throws {
+        let export = try SecretScanTests.copyExport()
+        defer { try? FileManager.default.removeItem(at: export) }
+        let findings = SecretScan.parseJamformerReport(try SecretScanTests.reportLines())
+        let all = AdoptSecrets.locate(in: export, jamformerFindings: findings, selected: [Self.script], notSecret: [])
+        let scriptFinding = try #require(all.values.first?.object)
+        let kept = AdoptSecrets.locate(in: export, jamformerFindings: findings, selected: [Self.script],
+                                       notSecret: [scriptFinding.id])
+        #expect(kept.values.isEmpty, "marked not a secret: nothing to replace")
+
+        let replaced = try AdoptSecrets.replace(in: export, values: all.values, taken: ["secret_zz_secret_scan_test"])
+        #expect(replaced.variables.map(\.name) == ["secret_zz_secret_scan_test_2"])
+    }
+}
+
+extension AdoptSecretsTests {
+    /// Review finding 11: a value the replacement leaves in place (on a
+    /// name line) is reported, so staging stops instead of saving it.
+    @Test func aValueLeftInPlaceIsReported() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "adopt-left-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let value = "FAKE-NotARealSecret-123"
+        try Data("""
+        resource "jamfplatform_pro_script" "bind" {
+          name            = "Bind \(value)"
+          script_contents = "PASSWORD=\\"\(value)\\""
+        }
+
+        """.utf8).write(to: folder.appending(path: "pro_script.tf"))
+        let object = SecretObjectFinding(address: "jamfplatform_pro_script.bind", objectType: "Script",
+                                         objectName: "Bind", rule: "Password value in HCL attribute")
+        let replaced = try AdoptSecrets.replace(in: folder, values: [.init(value: value, object: object)], taken: [])
+        #expect(replaced.notReplaced.map(\.address) == ["jamfplatform_pro_script.bind"])
     }
 }

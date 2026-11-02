@@ -10,17 +10,29 @@ struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(DemoMode.self) private var demo
 
-    @State private var selection: SidebarSelection? = .fleet
     @State private var isConnectingTenant = false
+
+    /// The sidebar's selection lives in `AppState`, so the View menu can
+    /// change it.
+    private var selection: Binding<SidebarSelection?> {
+        Bindable(appState).selection
+    }
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: $selection, isConnectingTenant: $isConnectingTenant)
+            SidebarView(selection: selection, isConnectingTenant: $isConnectingTenant)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             detail
         }
         .frame(minWidth: 900, minHeight: 560)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                HistoryNoticeBar()
+                RequestWaitsBar()
+            }
+        }
+        .reportsSheet("window", isOpen: isConnectingTenant || updates.isPresented || deployService.storeSecretReview != nil)
         .sheet(isPresented: $isConnectingTenant) {
             ConnectTenantWizard()
         }
@@ -37,13 +49,14 @@ struct ContentView: View {
             StoreSecretsSheet(review: review)
         }
         .guidedTour(tour)
-        .onChange(of: selection) {
-            appState.selection = selection
+        // File › Connect a Tenant… (⌘N)
+        .onChange(of: appState.menuRequest) {
+            if appState.take([.connectTenant]) != nil { isConnectingTenant = true }
         }
-        .onChange(of: tenantStore.tenants) {
+        .onChange(of: tenantStore.tenants, initial: true) {
             // a tenant removed in Settings › Connections leaves the detail
-            if case .tenant(let id) = selection, tenantStore.tenant(id: id) == nil {
-                selection = .fleet
+            if case .tenant(let id) = appState.selection, tenantStore.tenant(id: id) == nil {
+                appState.selection = .fleet
             }
         }
         .task {
@@ -58,9 +71,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch selection {
+        switch appState.selection {
         case .fleet, nil:
-            FleetDashboardView(selection: $selection, isConnectingTenant: $isConnectingTenant)
+            FleetDashboardView(selection: selection, isConnectingTenant: $isConnectingTenant)
         case .tenant(let id):
             // A fresh view per tenant: no form state carries over.
             TenantDetailView(tenantID: id)
@@ -69,6 +82,61 @@ struct ContentView: View {
             CatalogView()
         case .history:
             HistoryView()
+        }
+    }
+}
+
+/// A wait before Jamf is asked again ("Jamf asked to wait 40 s"), with Stop,
+/// which ends every wait at once; those requests aren't sent again.
+private struct RequestWaitsBar: View {
+    @Environment(RequestWaits.self) private var waits
+
+    var body: some View {
+        if let text = waits.statusText {
+            HStack(spacing: 8) {
+                Label(text, systemImage: "hourglass")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Stop") { waits.cancelAll() }
+                    .help("Ends the wait now; the request isn’t sent again.")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+            .accessibilityElement(children: .contain)
+        }
+    }
+}
+
+/// Something that looks like a secret in a deploy record the store just
+/// saved: deploy history never stops saving, so this says so instead, with
+/// a way to review it. Nothing waits for it.
+private struct HistoryNoticeBar: View {
+    @Environment(TenantDeployService.self) private var deployService
+
+    var body: some View {
+        if let findings = deployService.historyNotice, !findings.isEmpty {
+            HStack(spacing: 8) {
+                Label {
+                    Text(deployService.isTeamMode
+                         ? "A deploy record holds something that looks like a secret, and it’s shared with your team."
+                         : "A deploy record holds something that looks like a secret, and it’s saved in the store.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                }
+                .font(.callout)
+                Spacer()
+                Button("Review…") { deployService.reviewHistoryNotice() }
+                Button("Dismiss") { deployService.dismissHistoryNotice() }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+            .accessibilityElement(children: .contain)
         }
     }
 }

@@ -9,13 +9,17 @@ nonisolated extension BlockCapture {
         /// Support files (path inside `files/`) that became templates, with
         /// their templated text.
         var templatedSupportFiles: [String: String]
+        /// Findings that couldn't become a secret setting: the object is
+        /// captured as it is, with this warning (as before 1.1.0).
+        var warnings: [String] = []
     }
 
     /// Finds the values behind jamformer's findings and the app's own scan,
     /// keeps the ones in captured objects, and replaces each with a secret
     /// setting: `.tf` values become `var.<key>`, support files become
     /// `templatefile()` templates. A finding in a captured object whose
-    /// value cannot be found or replaced stops the capture.
+    /// value can't be found or replaced keeps the object as it is, with a
+    /// warning to review it.
     static func planSecretSettings(
         request: Request,
         fileTexts: [(name: String, text: String)],
@@ -27,6 +31,7 @@ nonisolated extension BlockCapture {
         }
 
         var found: [(value: String, object: SecretObjectFinding)] = []
+        var warnings: [String] = []
         for finding in request.secretFindings {
             let object = SecretScan.objectFindings([finding.location], in: reportDirectory).first
                 ?? fallbackObject(finding.location)
@@ -34,7 +39,7 @@ nonisolated extension BlockCapture {
             // never captured.
             let captured = object.address.map(localAddresses.contains) ?? false
             guard let value = SecretScan.value(of: finding, in: reportDirectory) else {
-                if captured { throw CaptureError.secretNotLocated(object: object.objectDescription, rule: object.rule) }
+                if captured { warnings.append(notTemplatedWarning(object.objectDescription, rule: object.rule)) }
                 continue
             }
             found.append((value, object))
@@ -90,7 +95,8 @@ nonisolated extension BlockCapture {
         for (file, replacements) in supportReplacements.sorted(by: { $0.key < $1.key }) {
             let call = "file(\"${path.module}/files/\(file)\")"
             guard texts.contains(where: { $0.1.contains(call) }), let text = supportTexts[file] else {
-                throw CaptureError.secretNotReplaceable(object: supportObjects[file] ?? file)
+                warnings.append(notTemplatedWarning(supportObjects[file] ?? file, rule: nil))
+                continue
             }
             let variables = replacements.map { "\($0.key) = var.\($0.key)" }.joined(separator: ", ")
             let template = "templatefile(\"${path.module}/files/\(file)\", { \(variables) })"
@@ -99,7 +105,12 @@ nonisolated extension BlockCapture {
         }
         return SecretPlan(
             fileTexts: texts.map { (name: $0.0, text: $0.1) },
-            settings: settings, templatedSupportFiles: templated)
+            settings: settings, templatedSupportFiles: templated, warnings: warnings)
+    }
+
+    /// The warning for a possible secret left in place.
+    static func notTemplatedWarning(_ object: String, rule: String?) -> String {
+        "\(object) keeps a value that looks like a secret\(rule.map { " (\($0))" } ?? ""): it couldn’t be turned into a secret setting. Review the block before sharing or deploying it, or remove the secret in Jamf and export again."
     }
 
     /// `secret_<object name>`, lower case, unique within the block.

@@ -5,7 +5,7 @@ import Foundation
 /// test keeps these equal to it.
 nonisolated enum EngineInfo {
     static let openTofuVersion = "1.13.2"
-    static let jamfPlatformProviderVersion = "1.6.0"
+    static let jamfPlatformProviderVersion = "1.7.2"
     static let jamfProtectProviderVersion = "0.12.0"
     static let jamfProProviderVersion = "0.42.0"
     static let jamformerVersion = "0.6.1"

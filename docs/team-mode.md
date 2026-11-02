@@ -31,7 +31,7 @@ Without the team passphrase, nobody can read the engine state, including the app
 | --- | --- |
 | Tenant records (names, selected blocks, settings, scope) | API client secrets and Jamf Pro passwords |
 | Engine state, **encrypted** with the team passphrase (state branch) | The team passphrase |
-| History, including a readable copy of each applied plan with every sensitive value masked | Secret-typed block settings |
+| History, including a readable copy of each applied plan: values the engine marks sensitive and values that look like secrets are masked | Secret-typed block settings and adopted secret settings |
 | Adopted configuration, the list of catalog sources | Engineers’ own client IDs and usernames |
 
 Anyone with repository access can see tenant names, structure and encrypted state, so limit who can access the repository.
@@ -43,6 +43,10 @@ Credentials are never shared through the repository. Each engineer signs in to e
 - On a Mac that doesn’t have a tenant’s credentials yet, use **Update Client Secret…** on the tenant page.
 - In Team Mode the same sheet also takes your own **Client ID** (or **Username**). It is kept in this Mac’s Keychain and overrides the one in the shared record, for this Mac only.
 - Jamf’s audit logs then show which engineer made each change.
+
+**Adopted secret settings.** When Adopt finds a value that looks like a secret (a Wi-Fi password, a VPN shared secret, a password in a script), the value stays in the Keychain of the Mac that adopted it; the team repository holds only its name. Before another Mac can preview, check or deploy that tenant, its engineer enters the value once on the tenant page, under **Adopted secret settings**. Until then, those actions stop with a message that says which value is missing.
+
+**Deploy history.** A finding the store check makes in a deploy’s plan never stops a sync: the app masks what looks like a secret before writing the plan and log, and if something is still found the main window shows a notice with **Review…**. The deploy’s log is checked like any other file.
 
 ## Setting up
 
@@ -62,7 +66,7 @@ What happens to this Mac’s data:
 - The team’s settings, including its list of catalog sources, replace this Mac’s. A backup is kept.
 
 **Leave**: open Settings, go to **Team** and click **Leave Team Mode…**. What happens:
-- Each tenant’s state is copied back to this Mac and re-encrypted with that tenant’s own passphrase. Save a new recovery sheet for each tenant before its next deploy.
+- Each deployed tenant’s state is copied back to this Mac and re-encrypted with that tenant’s own passphrase. Save a new recovery sheet for each tenant before its next deploy. Tenants that were never deployed have no state to move.
 - This Mac keeps a full local copy with history and stops syncing.
 - The team space itself is untouched.
 
@@ -76,7 +80,7 @@ Only use Force Unlock when you know the other run has stopped. Unlocking a live 
 
 ## Requirements and caveats
 
-- Each Mac needs push access to the repository, with Git credentials already set up: an SSH key, or HTTPS credentials in Git’s credential helper (for example after `gh auth login`). The app never asks for Git passwords. It hands those credentials only to its own state backend process.
+- Each Mac needs push access to the repository, with Git credentials already set up: an SSH key (one protected by a passphrase must be in your SSH agent: `ssh-add --apple-use-keychain <key>`), or HTTPS credentials in Git’s credential helper (for example after `gh auth login`). The app never asks for Git passwords. It hands those credentials only to its own state backend process.
 - Locks don’t expire on their own. Force Unlock is the manual way out.
 - A tenant runs one engine operation at a time on a Mac (preview, check or deploy). A second request is refused with a message.
 - When joining, tenants whose ID already exists in the team space are skipped, not merged.

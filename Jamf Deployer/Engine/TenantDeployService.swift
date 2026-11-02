@@ -116,6 +116,34 @@ final class TenantDeployService {
     }
     var storeSecretReview: StoreSecretReview?
 
+    /// Possible secrets in deploy history that a commit just took along (a
+    /// history plan never stops a commit): shown as a notice that doesn't
+    /// block anything, with a way to review them. Nil once dismissed.
+    private(set) var historyNotice: [SecretFinding]?
+    /// History findings already shown this launch.
+    private var notifiedHistoryFindings: Set<SecretFinding> = []
+
+    func dismissHistoryNotice() {
+        historyNotice = nil
+    }
+
+    /// Opens the review sheet with the history findings of the notice.
+    func reviewHistoryNotice() {
+        guard let findings = historyNotice else { return }
+        historyNotice = nil
+        storeSecretReview = StoreSecretReview(
+            kind: .commitStopped, findings: findings.map { .init(finding: $0, inEarlierVersion: false) })
+    }
+
+    /// After a commit: history findings not acknowledged and not shown yet.
+    func noteHistoryFindings() async {
+        guard !isDemo, let findings = try? await gitStore.unacknowledgedFindings() else { return }
+        let new = findings.filter { !GitStoreService.blocksCommit($0) && !notifiedHistoryFindings.contains($0) }
+        guard !new.isEmpty else { return }
+        notifiedHistoryFindings.formUnion(new)
+        historyNotice = (historyNotice ?? []) + new
+    }
+
     /// Set once every store on this Mac has had the one-time check.
     static let storeSecretCheckDefaultsKey = "storeSecretCheckDone"
 
@@ -249,6 +277,7 @@ final class TenantDeployService {
             }
             lastSync = .now
             syncMessage = nil
+            await noteHistoryFindings()
         } catch {
             syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -378,14 +407,20 @@ final class TenantDeployService {
 
     /// Moves every tenant's state from the team space back into its
     /// workspace, encrypted with the tenant's own passphrase (a new one when
-    /// the tenant was created in the team space). Runs before leaving. Every
-    /// tenant with state in the team space moves, deployed or not; a
-    /// handed-over tenant's never does. Returns the tenants whose state moved.
+    /// the tenant was created in the team space). Runs before leaving. Only
+    /// tenants with state on the team's state branch move, deployed or not;
+    /// a handed-over tenant's never does. Each state moves through a
+    /// throwaway workspace, so a tenant's baseline, catalogs and this Mac's
+    /// credentials for it play no part. Returns the tenants whose state moved.
     @discardableResult
     func moveStateToLocal() async throws -> [Tenant] {
         guard !isDemo else { throw DeployError.notInDemoMode }
         try guardNoEngineWork()
-        let candidates = tenantStore.tenants.filter { !$0.isHandedOver }
+        guard let remote = teamRemoteURL else { throw DeployError.noTeamSpace }
+        let candidates = Self.tenantsToMoveToLocal(
+            tenantStore.tenants, withTeamState: try await gitStore.teamStateContents().tenantIDs)
+        guard !candidates.isEmpty else { return [] }
+        guard let team = try TeamPassphrase.item.read(), !team.isEmpty else { throw DeployError.missingTeamPassphrase }
         isMovingState = true
         busyTenants.formUnion(candidates.map(\.id))
         defer {
@@ -394,26 +429,38 @@ final class TenantDeployService {
         }
         var moved: [Tenant] = []
         for tenant in candidates {
-            let catalog = try loadCatalog(for: tenant)
-            try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .http)
-            let team = try await makeRunner(for: tenant, stateBackend: .http)
-            try await runEngine(team, ["init", "-input=false"])
-            let state = try await team.checkedOutput(arguments: ["state", "pull"])
+            let state = try await pullTeamState(
+                path: StateBackendService.statePath(tenantID: tenant.id), remote: remote, passphrase: team)
             guard Self.holdsState(state) else { continue }
 
-            let hadPassphrase = TenantSecrets(tenantID: tenant.id).statePassphrase.load() != nil
+            let hadPassphrase = try TenantSecrets(tenantID: tenant.id).statePassphrase.read() != nil
             let passphrase = try ownStatePassphrase(for: tenant)
             if !hadPassphrase {
                 // A new passphrase needs a new recovery sheet.
                 flags.remove(recoveryEscrowKey(tenant))
             }
-            try generateWorkspace(for: tenant, catalog: catalog, stateBackend: .local)
-            let local = try await makeRunner(for: tenant, stateBackend: .local, passphrase: passphrase)
-            try await runEngine(local, ["init", "-input=false"])
-            _ = try await local.checkedOutput(arguments: ["state", "push", "-"], input: state)
+            try await pushLocalState(state, to: localStateURL(for: tenant), passphrase: passphrase)
             moved.append(tenant)
         }
         return moved
+    }
+
+    /// The tenants whose state leaves the team space: those with state on
+    /// the state branch, except handed-over ones. A tenant that was never
+    /// deployed has none, whatever its baseline.
+    nonisolated static func tenantsToMoveToLocal(_ tenants: [Tenant], withTeamState: Set<UUID>) -> [Tenant] {
+        tenants.filter { !$0.isHandedOver && withTeamState.contains($0.id) }
+    }
+
+    /// Writes a state into a tenant's local state file, encrypted with
+    /// `passphrase`, from a throwaway workspace.
+    private func pushLocalState(_ state: Data, to stateURL: URL, passphrase: String) async throws {
+        try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let backend = "terraform {\n  backend \"local\" {\n    path = \"\(Self.hclEscaped(stateURL.path))\"\n  }\n}\n"
+        let environment = ["TF_ENCRYPTION": Self.encryptionConfiguration(passphrase: passphrase)]
+        try await withScratchRunner(mainTF: backend, environment: environment) { runner in
+            _ = try await runner.checkedOutput(arguments: ["state", "push", "-"], input: state)
+        }
     }
 
     // MARK: Export as Terraform
@@ -675,7 +722,7 @@ final class TenantDeployService {
         let contents = try await gitStore.teamStateContents()
         let plan = Self.passphraseCheckPlan(contents)
         guard plan != .nothingToCompare else { return true }
-        guard let passphrase = TeamPassphrase.item.load(), !passphrase.isEmpty else {
+        guard let passphrase = try TeamPassphrase.item.read(), !passphrase.isEmpty else {
             throw DeployError.missingTeamPassphrase
         }
         if plan == .passphraseCheck {
@@ -733,7 +780,7 @@ final class TenantDeployService {
     func ensurePassphraseCheck(replacing: Bool = false) async throws {
         guard !isDemo else { throw DeployError.notInDemoMode }
         guard let remote = teamRemoteURL else { throw DeployError.noTeamSpace }
-        guard let passphrase = TeamPassphrase.item.load(), !passphrase.isEmpty else {
+        guard let passphrase = try TeamPassphrase.item.read(), !passphrase.isEmpty else {
             throw DeployError.missingTeamPassphrase
         }
         if !replacing, try await gitStore.teamStateContents().hasPassphraseCheck { return }
@@ -769,13 +816,22 @@ final class TenantDeployService {
     private func withTeamStateRunner<T>(
         path: String, remote: String, passphrase: String, _ body: (EngineRunner) async throws -> T
     ) async throws -> T {
+        var environment = try await stateBackend.environment(statePath: path, remote: remote)
+        environment["TF_ENCRYPTION"] = Self.encryptionConfiguration(passphrase: passphrase)
+        return try await withScratchRunner(mainTF: "terraform {\n  backend \"http\" {}\n}\n",
+                                           environment: environment, body)
+    }
+
+    /// An engine in a temporary workspace holding only `mainTF`, removed
+    /// afterwards.
+    private func withScratchRunner<T>(
+        mainTF: String, environment: [String: String], _ body: (EngineRunner) async throws -> T
+    ) async throws -> T {
         let folder = FileManager.default.temporaryDirectory
             .appending(path: "jamf-deployer-passphrase-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        try Data("terraform {\n  backend \"http\" {}\n}\n".utf8).write(to: folder.appending(path: "main.tf"))
-        var environment = try await stateBackend.environment(statePath: path, remote: remote)
-        environment["TF_ENCRYPTION"] = Self.encryptionConfiguration(passphrase: passphrase)
+        try Data(mainTF.utf8).write(to: folder.appending(path: "main.tf"))
         let runner = EngineRunner(configuration: EngineRunner.Configuration(
             engineURL: EngineLocator.tofuURL,
             workingDirectory: folder,
@@ -892,6 +948,7 @@ final class TenantDeployService {
             } else {
                 _ = try await gitStore.commitAll(message: message)
             }
+            await noteHistoryFindings()
         } catch GitStoreService.GitError.possibleSecrets(let findings) {
             storeSecretReview = StoreSecretReview(
                 kind: .commitBlocked(message: message),
@@ -919,8 +976,32 @@ final class TenantDeployService {
 
     /// Marks a finding in the review sheet as not a secret.
     func acknowledgeStoreFinding(_ finding: SecretFinding) async throws {
-        try await gitStore.acknowledge(finding)
-        storeSecretReview?.acknowledged.insert(finding)
+        try await acknowledgeStoreFindings([finding])
+    }
+
+    /// Marks several findings in the review sheet as not a secret at once.
+    func acknowledgeStoreFindings(_ findings: [SecretFinding]) async throws {
+        try await gitStore.acknowledge(findings)
+        storeSecretReview?.acknowledged.formUnion(findings)
+    }
+
+    /// Adopt's "not a secret" choices: every store-check finding in a
+    /// tenant's adopted configuration (`folder`) that belongs to one of
+    /// those objects (`addresses`), by its lines or the support file it
+    /// loads, is acknowledged, whatever the rule's name (jamformer's and the
+    /// app's differ), so the values adopted as they are don't stop the next
+    /// commit. Their other flagged values became variables and are gone.
+    func acknowledgeNotSecrets(in folder: URL, objects addresses: Set<String>) async throws {
+        guard !isDemo, !addresses.isEmpty else { return }
+        let store = storeURL.resolvingSymlinksInPath().path + "/"
+        let resolved = folder.resolvingSymlinksInPath().path
+        guard resolved.hasPrefix(store) else { return }
+        let prefix = String(resolved.dropFirst(store.count)) + "/"
+        let acknowledged = SecretScan.scanExport(folder).filter { finding in
+            SecretScan.objectFindings([finding], in: folder).contains { $0.address.map(addresses.contains) ?? false }
+        }.map { SecretFinding(path: prefix + $0.path, line: $0.line, rule: $0.rule) }
+        guard !acknowledged.isEmpty else { return }
+        try await gitStore.acknowledge(acknowledged)
     }
 
     /// Closes the review sheet; a stopped commit is tried again when asked.
@@ -1308,16 +1389,16 @@ final class TenantDeployService {
         for (reference, variableName) in output.secretVariableNames {
             let parts = reference.split(separator: "/").map(String.init)
             guard parts.count == 2 else { continue }
-            guard let value = TenantSecrets(tenantID: tenant.id)
+            guard let value = try TenantSecrets(tenantID: tenant.id)
                 .blockSetting(blockID: parts[0], key: parts[1])
-                .load()
+                .read()
             else {
                 throw DeployError.missingSecretSetting(block: parts[0], setting: parts[1])
             }
             environment["TF_VAR_\(variableName)"] = value
         }
         for name in adoptedSensitiveVariables(for: tenant) {
-            guard let value = TenantSecrets(tenantID: tenant.id).adoptedVariable(name).load() else {
+            guard let value = try TenantSecrets(tenantID: tenant.id).adoptedVariable(name).read() else {
                 throw DeployError.missingAdoptedSecret(name)
             }
             environment["TF_VAR_\(name)"] = value
@@ -1407,6 +1488,18 @@ final class TenantDeployService {
         !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
     }
 
+    /// Whether the tenant has anything a preview would show: selected
+    /// blocks, blocks to remove, or adopted objects.
+    func hasAnythingToPreview(_ tenant: Tenant) -> Bool {
+        !tenant.blockSelections.isEmpty || !tenant.pendingRemovals.isEmpty || hasAdoptedConfig(for: tenant)
+    }
+
+    /// Whether Preview Changes can start for the tenant now (the menu and the
+    /// tenant's toolbar button agree).
+    func canPreview(_ tenant: Tenant) -> Bool {
+        hasAnythingToPreview(tenant) && !isBusy && !tenant.isHandedOver
+    }
+
     /// Whether a rollout can include the tenant: it has a baseline, adopted or
     /// staged objects, and is not being handed over.
     func canRollOut(_ tenant: Tenant) -> Bool {
@@ -1439,7 +1532,7 @@ final class TenantDeployService {
     /// a new one could never decrypt it.
     func statePassphrase(for tenant: Tenant) throws -> String {
         if isTeamMode {
-            guard let team = TeamPassphrase.item.load(), !team.isEmpty else { throw DeployError.missingTeamPassphrase }
+            guard let team = try TeamPassphrase.item.read(), !team.isEmpty else { throw DeployError.missingTeamPassphrase }
             return team
         }
         return try ownStatePassphrase(for: tenant)
@@ -1448,7 +1541,7 @@ final class TenantDeployService {
     /// The tenant's own passphrase, used outside Team Mode.
     private func ownStatePassphrase(for tenant: Tenant) throws -> String {
         let item = TenantSecrets(tenantID: tenant.id).statePassphrase
-        if let existing = item.load() {
+        if let existing = try item.read() {
             return existing
         }
         let stateURL = tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
@@ -1591,7 +1684,7 @@ final class TenantDeployService {
         guard needsProtect else { return [:] }
         guard let protectURL = tenant.protectURL,
               let protectClientID = tenant.protectClientID,
-              let protectSecret = TenantSecrets(tenantID: tenant.id).protectClientSecret.load()
+              let protectSecret = try TenantSecrets(tenantID: tenant.id).protectClientSecret.read()
         else {
             throw DeployError.missingProtectConnection
         }
@@ -1603,7 +1696,7 @@ final class TenantDeployService {
     }
 
     private func environment(for tenant: Tenant) throws -> [String: String] {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
+        guard let secret = try TenantSecrets(tenantID: tenant.id).platformClientSecret.read() else {
             throw DeployError.missingCredentials(usesPassword: tenant.usesPassword)
         }
         if tenant.isJamfPro {
@@ -1773,6 +1866,11 @@ final class TenantDeployService {
         guard !(tenantStore.tenant(id: tenant.id) ?? tenant).isHandedOver else { throw DeployError.handedOver }
         guard let runner = runners[tenant.id] else { throw DeployError.planExpired }
         guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
+        if LiveLaunch.isSwitched {
+            // a release check's live run changes only its own test objects
+            try LiveRun.requireOnlyTestObjects(
+                session.summary.groups.flatMap(\.changes).filter { $0.kind != .unchanged })
+        }
         busyTenants.insert(tenant.id)
 
         phases[tenant.id] = .applying
@@ -1882,13 +1980,14 @@ final class TenantDeployService {
         // what the engine printed during the run, sensitive values masked.
         if let planData = try? await runner.showPlanData(planFileName: session.planFileName),
            let redacted = PlanRedactor.redact(planData) {
-            try? redacted.write(to: entryURL.appending(path: "plan.json"))
+            try? Self.historyText(String(decoding: redacted, as: UTF8.self), path: "plan.json")
+                .write(to: entryURL.appending(path: "plan.json"))
         }
         // The engine's own masking misses secrets inside a server's answer
         // (a provider error can quote what it sent), so every line is
         // cleaned before it reaches the team repository.
         let logText = EngineOutputCleaner.cleanedLog(result.rawLines)
-        try? Data(logText.utf8).write(to: entryURL.appending(path: "log.jsonl"))
+        try? Self.historyText(logText, path: "log.jsonl").write(to: entryURL.appending(path: "log.jsonl"))
 
         let entry = DeployHistoryEntry(
             id: entryID,
@@ -2095,6 +2194,14 @@ final class TenantDeployService {
         let text = CreateFailureRecovery.importFile(found.map { (address: $0.key, id: $0.value) })
         try? Data(text.utf8).write(to: fileURL)
         return candidates.count { found[$0.address] != nil }
+    }
+
+    /// A deploy history file's text with what the app's own secret rules
+    /// find masked. The engine masks only what it marks sensitive; a value
+    /// it doesn't (a profile payload, a script literal adopted as "not a
+    /// secret") is masked here before the file reaches the store.
+    nonisolated static func historyText(_ text: String, path: String) -> Data {
+        Data(SecretScan.masked(text, path: path).text.utf8)
     }
 
     /// Whether `show -json` printed a state: an object with a format version.
@@ -2538,7 +2645,7 @@ final class TenantDeployService {
             case .missingSecretSetting(let block, let setting):
                 "The “\(block)” block needs its “\(setting)” secret on this Mac. Enter it in the block’s settings — secrets stay in each engineer’s Keychain."
             case .missingAdoptedSecret(let name):
-                "The adopted configuration needs its sensitive value “\(name)”, which is kept in the Keychain of the Mac that adopted it. Adopt the object again on this Mac to store the value here."
+                "The adopted configuration needs the secret setting “\(AdoptedSecretSettings.title(name))”, which is kept in the Keychain of the Mac that adopted it. Enter it on this Mac in the tenant’s Overview, under Adopted secret settings."
             case .previewInProgress:
                 "A preview is open for this tenant. Finish or close it before checking for changes."
             case .missingStatePassphrase:

@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.2.0 — 2026-11-02
+
+### Adopt, Capture and the store
+
+- **Adopt takes objects that hold a secret again.** A Wi-Fi password, a VPN
+  shared secret, a SCEP challenge or a password in a script is kept in this
+  Mac’s Keychain as a secret setting, never in the tenant record. If a
+  flagged value isn’t a secret, mark it “Not a secret” to adopt it as it is.
+- **Adopted secret settings** are listed on the tenant page, under the
+  building blocks. Another Mac (in Team Mode, a teammate’s) enters each
+  value there once before it can preview, check or deploy that tenant;
+  until then those actions say which value is missing and where to enter it.
+- **Capture keeps an object it can’t turn into a secret setting**, with a
+  warning to review the block, instead of stopping.
+- **The store’s secret review can mark every finding at once** with “Mark
+  All as Not a Secret…”. In Team Mode it says that the files are then shared
+  with your team on the next sync.
+- **Deploy history masks what looks like a secret** before it’s saved, on
+  top of what the engine already masks. A finding left in a deploy’s plan
+  never stops saving, previews, checks or deploys; the main window shows a
+  notice with Review… instead. A deploy’s log is checked like any other file.
+
+### Team Mode
+
+- **Leave Team Mode works with tenants that were never deployed.** Only
+  tenants with a deployment record in the team space are moved back; an
+  unfinished baseline or a missing client secret no longer stops it.
+- **SSH sign-in for the team space** first tries the keys in your SSH agent.
+  If they don’t give access to the team repository (an agent holding only a
+  work key, for example), it signs in with your SSH key file without a
+  passphrase (`~/.ssh/id_ed25519`, `id_ecdsa` or `id_rsa`) instead. A key
+  file with a passphrase still needs to be added to the agent.
+
+### Deploys
+
+- **Preview stops when a new object would take a name that’s already used
+  in Jamf** (Jamf Platform API tenants), and says so, instead of Jamf
+  refusing it during the deploy. Use Adopt Existing Configuration to manage
+  the existing object, or choose another name or prefix.
+- **Packages upload straight to Jamf Cloud’s storage** on Jamf Cloud
+  tenants. A block that uploads a package needs the
+  `jamf-cloud-distribution-service-files:create` permission: captured
+  blocks with a package list it, and Run Preflight names it.
+- **Enrollment customization icons** are downloaded again for Jamf Pro API
+  tenants hosted on Jamf Cloud.
+- **When Jamf asks the app to wait** before trying again, the main window
+  shows it, with Stop to end the wait.
+- **A Keychain that can’t be read is reported as such**, instead of as a
+  missing client secret.
+
+### Menus and accessibility
+
+- **Every action is in the menu bar:** File (Connect a Tenant… ⌘N, Export as
+  Terraform… ⇧⌘E), View (Dashboard ⌘1, Building Blocks ⌘2, History ⌘3, a
+  tenant’s sections, Show Technical Details), Tenant (Check All Tenants ⇧⌘R,
+  Adopt, Add a Custom Object, Baseline Updates, Run Preflight, Update Client
+  Secret, Hand Over, Remove Tenant, Roll Out) and Catalog (Manage Sources…,
+  Add Git Catalog…). Preview Changes… stays on ⌘P and is dimmed when there’s
+  nothing to preview. Deploy… is gone from the Tenant menu: every deploy
+  starts from Preview Changes…. Menu commands are dimmed while a sheet is
+  open.
+- **The Preview and Roll Out sheets can be resized**, and **Cancel
+  Hand-Over…** asks before it restores the baseline.
+- **Demo Mode is marked at the top of the sidebar,** with Turn Off.
+- **VoiceOver** announces finished previews, deploys, checks and preflights,
+  and repeated buttons name their row. The fleet table can be used from the
+  keyboard. When a plan removes objects, Return no longer starts the deploy.
+
+### Under the hood
+
+- The Jamf Platform API engine plugin is 1.7.2.
+- Settings no longer has an Appearance choice: the app follows the Mac’s
+  own setting.
+
 ## 1.1.1 — 2026-11-01
 
 - **No more duplicate policies or macOS configuration profiles after a Jamf

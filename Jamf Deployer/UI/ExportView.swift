@@ -151,7 +151,11 @@ struct ExportView: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 220)
                         Button("All") { selectedTypes = Set(resourceTypes.map(\.filterKey)) }
+                            .accessibilityLabel("Select All Types")
+                            .accessibilityIdentifier("All")
                         Button("None") { selectedTypes = [] }
+                            .accessibilityLabel("Deselect All Types")
+                            .accessibilityIdentifier("None")
                         Spacer()
                         Text("\(selectedTypes.count) of \(resourceTypes.count) types")
                             .font(.caption)
@@ -244,6 +248,9 @@ struct ExportView: View {
             contentType: .plainText,
             defaultFilename: "AsBuilt-\(tenant.name)-\(Date.now.formatted(.iso8601.year().month().day())).md"
         ) { _ in }
+        .onChange(of: errorMessage) { _, message in
+            if let message { AccessibilityNotification.Announcement("Export problem: \(message)").post() }
+        }
     }
 
     private var filteredTypes: [JamformerRunner.ResourceType] {
@@ -340,9 +347,8 @@ struct ExportView: View {
                     return
                 }
                 // Captured blocks carry their own copy of enrollment icons,
-                // downloaded only from the tenant's Jamf Cloud host, and logged.
-                let iconHosts: Set<String> = tenant.jamfProURL
-                    .flatMap { URL(string: $0)?.host()?.lowercased() }.map { [$0] } ?? [".jamfcloud.com"]
+                // downloaded only from the tenant's own host or Jamf Cloud, and logged.
+                let iconHosts = EnrollmentIcons.allowedHosts(jamfProURL: tenant.jamfProURL)
                 let log = activityLog
                 await EnrollmentIcons.localize(directory: result.outputURL, allowedHosts: iconHosts) { url in
                     let started = Date()
@@ -435,7 +441,11 @@ struct ExportView: View {
                         .font(.callout.weight(.medium))
                     Spacer()
                     Button("All") { selectedObjects = Set(exportedObjects.map(\.address)) }
+                        .accessibilityLabel("Select All Objects")
+                        .accessibilityIdentifier("All")
                     Button("None") { selectedObjects = [] }
+                        .accessibilityLabel("Deselect All Objects")
+                        .accessibilityIdentifier("None")
                 }
                 .controlSize(.small)
                 ScrollView {
@@ -509,7 +519,7 @@ struct ExportView: View {
             let staging = try prunedCopy(of: result, keeping: selectedObjects)
             defer { try? FileManager.default.removeItem(at: staging) }
             // Clones live in an app-managed source, one block per clone.
-            let cloneRoot = URL.applicationSupportDirectory.appending(path: "Jamf Deployer/cloned-blocks")
+            let cloneRoot = AppFiles.url("cloned-blocks")
             let source: CatalogSourceStore.CustomSource
             if let existing = catalogSources.customSources.first(where: { $0.path == cloneRoot.path }) {
                 source = existing

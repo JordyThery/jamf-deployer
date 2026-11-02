@@ -59,7 +59,9 @@ tenant’s Apps and Books locations and their licensed content with
 Captured blocks list the privileges recorded at export, narrowed to their
 own object types, plus read access for the lookups capture adds: the
 Automated Device Enrollment instance, Jamf’s built-in groups and the Apps
-and Books location.
+and Books location. A captured block that uploads a package file to a
+tenant on Jamf Cloud also needs `jamf-cloud-distribution-service-files:create`:
+the file goes straight to Jamf Cloud’s storage.
 
 ### Per feature
 
@@ -138,9 +140,10 @@ Protect deployment sync, under the Platform client above.
 
 - Secrets are stored in the **login Keychain** under the app’s own items;
   nothing is shared with other apps.
-- The app talks only to your Jamf tenants, your Git remotes (Team Mode and
-  Git catalog sources), GitHub’s public API (release and component-update
-  checks) and HashiCorp’s release server when you agree to the Terraform
-  download for capturing blocks and adoption.
+- The app talks only to your Jamf tenants (including Jamf Cloud’s file
+  storage when a block uploads a package), your Git remotes (Team Mode and
+  Git catalog sources), GitHub (release and component-update checks, and
+  update downloads) and HashiCorp’s release server when you agree to the
+  Terraform download for capturing blocks and adoption.
 - No admin rights, no configuration profiles, no system extensions — it is
   an ordinary signed and notarized app.

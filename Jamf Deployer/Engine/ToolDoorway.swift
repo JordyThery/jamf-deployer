@@ -17,6 +17,9 @@ nonisolated enum ExternalTool: String, Sendable, CaseIterable {
 /// - The app's doorway (`.app`) refuses everything while demo mode is on,
 ///   and always refuses a launch that points at demo mode: its folder, a
 ///   demo address or a demo tenant's ID.
+/// - Under JTKit's live-check switch, the app's doorway also applies the
+///   live run's rules (`LiveRun`): only the run's tenants, writes only to
+///   the disposable ones.
 /// - Demo mode's doorway (`.demo`) refuses everything.
 /// - A test's doorway (`trap(_:)`) reports every attempt and refuses it.
 nonisolated final class ToolDoorway: Sendable {
@@ -87,6 +90,10 @@ nonisolated final class ToolDoorway: Sendable {
         case .real(let isDemoOn):
             if isDemoOn() || Self.pointsAtDemo(directory: directory, arguments: arguments, environment: environment) {
                 throw Refused(tool: tool)
+            }
+            // A release check's live run: only its own tenants (`LiveRun`).
+            if LiveLaunch.isSwitched {
+                try LiveRun.check(tool, arguments: arguments, environment: environment)
             }
         }
         let process = Process()

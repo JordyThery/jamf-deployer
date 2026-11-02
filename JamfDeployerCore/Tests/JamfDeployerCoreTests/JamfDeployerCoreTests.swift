@@ -1252,6 +1252,24 @@ struct ErrorTranslationTests {
         #expect(translated.hint?.contains("Connect this Jamf Pro tenant") == true)
     }
 
+    @Test func translatesPlanTimeNameCheck() {
+        // jamfplatform 1.7's wording: an unmanaged object holds the name.
+        let unmanaged = "Error: Category name already in use: The category with the name \"JD - Apps\" already exists in Jamf Pro (ID 12), and Jamf Pro does not allow two with the same name. Check whether this configuration or its state already manages the existing category under another address."
+        let translated = ErrorTranslation.translate(unmanaged)
+        #expect(translated.message == "An object with this name already exists in Jamf.")
+        #expect(translated.hint?.contains("Adopt Existing Configuration") == true)
+        #expect(translated.hint?.contains("import") == false)
+
+        // The same check when another block already manages the object.
+        let managed = unmanaged + "\n\nThe existing category is already managed by another resource in this configuration's state. Choose a different name."
+        #expect(ErrorTranslation.translate(managed).message == "Two objects in this baseline would have the same name.")
+    }
+
+    @Test func translatesPresetPrivilegeSetRefusal() {
+        let raw = "Error: Privilege set refused for API clients: Only an administrator can assign the Administrator privilege level"
+        #expect(ErrorTranslation.translate(raw).hint?.contains("Custom") == true)
+    }
+
     @Test func fallsBackGracefully() {
         let translated = ErrorTranslation.translate("some entirely novel failure")
         #expect(!translated.message.isEmpty)
