@@ -39,7 +39,7 @@ Deliberate exceptions to the JTKit standards: no connection picker, no Connectio
 
 ## Rules
 
-- **Naming:** this is a personal project. Never name an employer, and never use "MSP" or "customer" wording anywhere: UI, code, comments, docs, presets, name prefixes. Use "engineer", "admin", "organization", "tenant", "fleet". Prefix `JD - `, preset "Standard", catalog source "Official".
+- **Naming:** this is a personal project. Never name an employer, and never use "MSP" or "customer" wording anywhere: UI, code, comments, docs, presets, name prefixes. Use "engineer", "admin", "organization", "tenant", "fleet". Prefix `JD - `, preset "Standard", built-in catalog source "Built-in" (ID `official`).
 - **Never auto-apply.** The app applies only the exact plan the user approved.
 - **Never show the word "provider" in the UI.** A tenant's connection type ("Jamf Platform API" or "Jamf Pro API") is chosen in the Connect wizard and fixed per tenant: its state is bound to one provider's resource addresses. One dialect per tenant; jamfpro never goes through the Platform gateway.
 - Jamf Pro API tenants deploy blocks through each block's `jamfpro/` module (`BlockModule` picks it). Capture, clone, Software Updates, CIS Level 1, Security Cloud and App Store blocks stay Platform-only. Moving to the Platform API is Hand Over, connect again, Adopt.

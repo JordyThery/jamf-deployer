@@ -9,6 +9,6 @@ Pick apps with the built-in picker. Per app you choose how it arrives
 
 Notes:
 - Needs a Jamf-cloud-hosted tenant with the Cloud Services Connection
-  established (the preflight checks this).
+  established (the preflight checks this on Jamf Platform API tenants).
 - App Installers can only be scoped to smart groups, so the static Pilot
   group isn’t offered for this block.

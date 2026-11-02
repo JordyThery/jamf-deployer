@@ -66,7 +66,7 @@ What happens to this Mac’s data:
 - The team’s settings, including its list of catalog sources, replace this Mac’s. A backup is kept.
 
 **Leave**: open Settings, go to **Team** and click **Leave Team Mode…**. What happens:
-- Each tenant’s state is copied back to this Mac and re-encrypted with that tenant’s own passphrase. Save a new recovery sheet for each tenant before its next deploy.
+- Each deployed tenant’s state is copied back to this Mac and re-encrypted with that tenant’s own passphrase. Save a new recovery sheet for each tenant before its next deploy. Tenants that were never deployed have no state to move.
 - This Mac keeps a full local copy with history and stops syncing.
 - The team space itself is untouched.
 
@@ -80,7 +80,7 @@ Only use Force Unlock when you know the other run has stopped. Unlocking a live 
 
 ## Requirements and caveats
 
-- Each Mac needs push access to the repository, with Git credentials already set up: an SSH key, or HTTPS credentials in Git’s credential helper (for example after `gh auth login`). The app never asks for Git passwords. It hands those credentials only to its own state backend process.
+- Each Mac needs push access to the repository, with Git credentials already set up: an SSH key (one protected by a passphrase must be in your SSH agent: `ssh-add --apple-use-keychain <key>`), or HTTPS credentials in Git’s credential helper (for example after `gh auth login`). The app never asks for Git passwords. It hands those credentials only to its own state backend process.
 - Locks don’t expire on their own. Force Unlock is the manual way out.
 - A tenant runs one engine operation at a time on a Mac (preview, check or deploy). A second request is refused with a message.
 - When joining, tenants whose ID already exists in the team space are skipped, not merged.

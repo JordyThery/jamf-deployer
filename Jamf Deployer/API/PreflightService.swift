@@ -135,8 +135,10 @@ nonisolated enum PreflightService {
         await readTokenExpiry(client: client, ade: allowed.contains(adePath), vpp: allowed.contains(vppPath),
                               into: &snapshot)
 
-        // 3. Cloud Services Connection (needed for the App Catalog block,
-        //    which Jamf Pro API connections cannot use).
+        // 3. Cloud Services Connection (needed for the App Catalog block).
+        //    Checked on Jamf Platform API tenants only: App Catalog also
+        //    deploys over the Jamf Pro API (its jamfpro/ module), but the
+        //    check's endpoint needs the Platform gateway.
         if !isJamfPro { do {
             // Platform API only: no Jamf Pro privilege.
             let (_, status) = try await client.get(
