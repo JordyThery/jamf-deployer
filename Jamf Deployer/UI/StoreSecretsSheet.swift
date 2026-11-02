@@ -40,8 +40,17 @@ struct StoreSecretsSheet: View {
             Button("Mark All as Not a Secret") { markAll() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Only do this when you’ve checked them: they’re no longer asked about. Only their locations and rules are saved, never the values.")
+            Text(StoreSecretsSheet.markAllMessage(isTeamMode: deployService.isTeamMode))
         }
+    }
+
+    /// The bulk confirmation's text. In Team Mode, what it unblocks goes to
+    /// the team repository with the next sync.
+    static func markAllMessage(isTeamMode: Bool) -> String {
+        let base = "Only do this when you’ve checked them: they’re no longer asked about. Only their locations and rules are saved, never the values."
+        return isTeamMode
+            ? base + " The files they’re in are then shared with your team on the next sync."
+            : base
     }
 
     /// Current findings still waiting for a choice; earlier versions and

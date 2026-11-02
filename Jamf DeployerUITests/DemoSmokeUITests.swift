@@ -464,7 +464,16 @@ final class DemoSmokeUITests: DeployerUITestCase {
         // (Belgian, French), XCTest's typed "2" doesn't arrive as ⌘2.
 
         openDemoTenant(contoso)
+        // Deploys always start from Preview: there's no Deploy… item.
+        tap(app.menuBars.menuBarItems["Tenant"])
+        XCTAssertFalse(app.menuBars.menuItems["Deploy…"].exists, "Tenant › Deploy… is still there")
+        app.typeKey(.escape, modifierFlags: [])
         app.typeKey("p", modifierFlags: .command)
+        // while the preview sheet is open, the menus are dimmed
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 20), "⌘P didn’t open the preview")
+        tap(app.menuBars.menuBarItems["Tenant"])
+        XCTAssertFalse(app.menuBars.menuItems["Preview Changes…"].isEnabled, "Preview Changes… isn’t dimmed under the sheet")
+        app.typeKey(.escape, modifierFlags: [])
         checkDemoPreviewAndClose()
         tap(app.menuBars.menuBarItems["Tenant"])
         tap(app.menuBars.menuItems["Preview Changes…"], timeout: 10)

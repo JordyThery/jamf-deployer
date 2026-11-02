@@ -128,6 +128,26 @@ struct DeployServiceGuardTests {
         #expect(chosen.map(\.id) == [deployed.id])
     }
 
+    @Test("A secret-looking value in a deploy record shows a notice once, and blocks nothing")
+    func historyFindingShowsANotice() async throws {
+        let fixture = Self.make()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let tenant = Self.tenant()
+        fixture.tenantStore.add(tenant)
+        let plan = fixture.tenantStore.workspaceURL(for: tenant).appending(path: "history/20261102-120000/plan.json")
+        try FileManager.default.createDirectory(at: plan.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("PASSWORD=\"FAKE-NotARealSecret-123\"\n".utf8).write(to: plan)
+
+        await fixture.service.syncTeamState()
+        #expect(fixture.service.syncMessage == nil, "nothing was stopped")
+        #expect(fixture.service.storeSecretReview == nil, "no blocking review")
+        #expect(fixture.service.historyNotice?.map(\.path).first?.hasSuffix("history/20261102-120000/plan.json") == true)
+
+        fixture.service.dismissHistoryNotice()
+        await fixture.service.syncTeamState()
+        #expect(fixture.service.historyNotice == nil, "shown once per launch")
+    }
+
     @Test("Only state that was moved into the team space is retired")
     func onlyMovedStateIsRetired() throws {
         let fixture = Self.make()
@@ -318,5 +338,39 @@ struct DeployServiceGuardTests {
     func decisionsLogIsPrivate() {
         #expect(!TenantDeployService.decisionsLogURL.path.hasPrefix("/tmp/"))
         #expect(TenantDeployService.decisionsLogURL.path.hasPrefix(FileManager.default.temporaryDirectory.path))
+    }
+}
+
+/// Review finding 5: "Not a secret" in Adopt acknowledges every finding of
+/// that object, whatever the rule's name.
+@MainActor
+@Suite("Adopt: not a secret")
+struct AdoptNotASecretTests {
+    @Test func acknowledgesTheObjectsFindingsByLinesNotRuleName() async throws {
+        let fixture = DeployServiceGuardTests.make()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let tenant = DeployServiceGuardTests.tenant()
+        fixture.tenantStore.add(tenant)
+        try await fixture.service.gitStore.ensureRepo()
+        let adopted = fixture.service.adoptedURL(for: tenant)
+        try FileManager.default.createDirectory(at: adopted, withIntermediateDirectories: true)
+        try Data("""
+        resource "jamfplatform_pro_script" "bind" {
+          name            = "Bind"
+          script_contents = "PASSWORD=\\"FAKE-NotARealSecret-123\\""
+        }
+
+        resource "jamfplatform_pro_category" "other" {
+          name = "Other"
+        }
+
+        """.utf8).write(to: adopted.appending(path: "pro_script.tf"))
+        #expect(try await fixture.service.gitStore.unacknowledgedFindings().count == 1)
+
+        // The toggle was jamformer's finding (another rule name): only the address counts.
+        try await fixture.service.acknowledgeNotSecrets(in: adopted, objects: ["jamfplatform_pro_category.other"])
+        #expect(try await fixture.service.gitStore.unacknowledgedFindings().count == 1, "another object's finding stays")
+        try await fixture.service.acknowledgeNotSecrets(in: adopted, objects: ["jamfplatform_pro_script.bind"])
+        #expect(try await fixture.service.gitStore.unacknowledgedFindings().isEmpty)
     }
 }

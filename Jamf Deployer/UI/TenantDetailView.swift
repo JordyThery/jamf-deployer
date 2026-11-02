@@ -24,6 +24,7 @@ struct TenantDetailView: View {
     @State private var isAdopting = false
     @State private var isAddingCustomObject = false
     @State private var isCheckingDrift = false
+    @State private var isConfirmingCancelHandOver = false
     @State private var isConfirmingHandOver = false
     @State private var handOverTypedName = ""
     @State private var keepOutcomes: [String: String] = [:]
@@ -270,6 +271,8 @@ struct TenantDetailView: View {
                                     .font(.callout)
                                     .foregroundStyle(.secondary)
                             }
+                            // also without a catalog: a teammate may need to enter these first
+                            AdoptedSecretSettingsSection(tenant: tenant)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(4)
@@ -299,8 +302,15 @@ struct TenantDetailView: View {
                                 HStack {
                                     Button("Preview Hand-Over…") { isPreviewing = true }
                                         .buttonStyle(.borderedProminent)
-                                    Button("Cancel Hand-Over") { deployService.cancelHandOver(tenant: tenant) }
+                                    Button("Cancel Hand-Over…") { isConfirmingCancelHandOver = true }
                                         .help("Restores the baseline as it was; nothing has changed in Jamf")
+                                        .confirmationDialog("Cancel the hand-over of “\(tenant.name)”?",
+                                                            isPresented: $isConfirmingCancelHandOver, titleVisibility: .visible) {
+                                            Button("Cancel Hand-Over") { deployService.cancelHandOver(tenant: tenant) }
+                                            Button("Keep Preparing", role: .cancel) {}
+                                        } message: {
+                                            Text("The baseline goes back to what it was before the hand-over was prepared. Nothing in Jamf changes.")
+                                        }
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -349,6 +359,7 @@ struct TenantDetailView: View {
                     ? "Select building blocks or adopt existing configuration first"
                     : "See exactly what would change before anything is deployed (⌘P)")
             }
+            .reportsSheet("tenant", isOpen: isPresentingSheet)
             .sheet(isPresented: $isPreviewing) {
                 PreviewDeploySheet(tenantID: tenant.id)
             }
@@ -608,9 +619,7 @@ struct TenantDetailView: View {
     }
 
     private func hasAnythingToPreview(_ tenant: Tenant) -> Bool {
-        !tenant.blockSelections.isEmpty
-            || !tenant.pendingRemovals.isEmpty
-            || deployService.hasAdoptedConfig(for: tenant)
+        deployService.hasAnythingToPreview(tenant)
     }
 
     private func checkDrift(_ tenant: Tenant) {
@@ -637,14 +646,14 @@ struct TenantDetailView: View {
     /// Runs a menu command for this tenant as its button on this page would.
     private func handleMenuRequest(_ tenant: Tenant) {
         // Baseline Updates… is the baseline editor's, on the Overview tab.
-        if appState.menuRequest?.command == .baselineUpdates {
+        if appState.isWaiting(.baselineUpdates, for: tenant.id) {
             tab = .overview
             return
         }
         guard let command = appState.take([
             .showOverview, .showSetup, .showExport, .checkForChanges, .adopt,
             .addCustomObject, .runPreflight, .updateSecret, .handOver, .forceUnlock,
-        ]) else { return }
+        ], for: tenant.id) else { return }
         let canChange = !deployService.isDemo && !tenant.isHandedOver && !tenant.handOverPending
         switch command {
         case .showOverview: tab = .overview
@@ -692,8 +701,11 @@ struct TenantDetailView: View {
         isRunningPreflight = true
         checks = []
         let client = TenantClients.shared.client(for: tenant, activityLog: activityLog)
+        let selected = Set(tenant.blockSelections.map(\.blockID))
+        let blockPermissions = Set((catalog?.blocks ?? []).filter { selected.contains($0.id) }.flatMap(\.permissions))
         Task {
-            let report = await PreflightService.run(client: client, connection: tenant.connection) { progress in
+            let report = await PreflightService.run(client: client, connection: tenant.connection,
+                                                    blockPermissions: blockPermissions) { progress in
                 checks = progress
             }
             checks = report.checks

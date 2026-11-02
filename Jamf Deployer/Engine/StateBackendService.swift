@@ -367,27 +367,46 @@ final class StateBackendService {
                 .map { (path: $0.path, text: (try? String(contentsOf: $0, encoding: .utf8)) ?? "") }
             environment = try sshEnvironment(
                 agentSocket: agent, agentHasKeys: agent != nil && !tools.refusesEverything && agentHasKeys(),
-                keys: keys)
+                keys: keys,
+                agentReachesRemote: { agent.map { agentReaches(remote, socket: $0, tools: tools) } ?? false })
         }
         return environment
     }
 
-    /// SSH sign-in for the backend: the engineer's agent, and alongside it
-    /// the first default key file without a passphrase (which the backend
-    /// can't ask for), so a key in the agent that this remote doesn't take
-    /// (a work key, say) doesn't hide the one it does. Only locked key files
-    /// and an empty agent: the engineer is asked to add a key to the agent.
+    /// SSH sign-in for the backend. terraform-backend-git uses the SSH agent
+    /// whenever `SSH_AUTH_SOCK` is set, and a key file (`SSH_PRIVATE_KEY`)
+    /// only without one, so the two are never passed together:
+    /// - an agent with keys that reach the remote: the agent;
+    /// - otherwise the first default key file without a passphrase (which
+    ///   the backend can't ask for), without the agent, so a key in the agent
+    ///   this remote doesn't take (a work key, say) doesn't hide it;
+    /// - only locked key files, and no agent key that works: the engineer is
+    ///   asked to add a key to the agent.
+    /// `agentReachesRemote` is asked only when there's a key file to fall back to.
     nonisolated static func sshEnvironment(
-        agentSocket: String?, agentHasKeys: Bool, keys: [(path: String, text: String)]
+        agentSocket: String?, agentHasKeys: Bool, keys: [(path: String, text: String)],
+        agentReachesRemote: () -> Bool = { false }
     ) throws -> [String: String] {
-        var environment: [String: String] = [:]
-        if let agentSocket { environment["SSH_AUTH_SOCK"] = agentSocket }
-        if let key = keys.first(where: { !isPassphraseProtected(keyText: $0.text) }) {
-            environment["SSH_PRIVATE_KEY"] = key.path
-        } else if !keys.isEmpty && !(agentSocket != nil && agentHasKeys) {
-            throw BackendError.sshKeyNeedsAgent
+        let unlocked = keys.first { !isPassphraseProtected(keyText: $0.text) }
+        if let agentSocket, agentHasKeys, unlocked == nil || agentReachesRemote() {
+            return ["SSH_AUTH_SOCK": agentSocket]
         }
-        return environment
+        if let unlocked { return ["SSH_PRIVATE_KEY": unlocked.path] }
+        if !keys.isEmpty, !(agentSocket != nil && agentHasKeys) { throw BackendError.sshKeyNeedsAgent }
+        return agentSocket.map { ["SSH_AUTH_SOCK": $0] } ?? [:]
+    }
+
+    /// Whether the agent's keys alone sign in to the remote: `git ls-remote`
+    /// with no key files (as the backend would sign in with the agent).
+    private nonisolated static func agentReaches(_ remote: String, socket: String, tools: ToolDoorway) -> Bool {
+        let output = try? GitCommand.run(
+            ["ls-remote", "--heads", remote], in: nil, discardsErrors: true,
+            extraEnvironment: [
+                "SSH_AUTH_SOCK": socket,
+                "GIT_SSH_COMMAND": "ssh -o IdentityFile=none -o BatchMode=yes -o ConnectTimeout=15",
+            ],
+            tools: tools)
+        return output?.status == 0
     }
 
     /// Whether a private key file is encrypted: a PEM key says so in its

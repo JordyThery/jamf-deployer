@@ -185,6 +185,9 @@ public nonisolated enum BlockCapture {
         }
     }
 
+    /// What a package upload to a Jamf Cloud tenant needs (jamfplatform 1.7.2).
+    public static let jamfCloudUploadPermission = "jamf-cloud-distribution-service-files:create"
+
     public static func capture(_ request: Request) throws -> Result {
         guard request.blockID.range(of: "^[a-z0-9][a-z0-9-]*$", options: .regularExpression) != nil else {
             throw CaptureError.invalidBlockID
@@ -1064,6 +1067,8 @@ public nonisolated enum BlockCapture {
         if adeReferenced { lookups.append("device-enrollment-program-instances:read") }
         if !builtinGroupNames.isEmpty { lookups.append("device-groups:read") }
         if vppReferenced { lookups.append("volume-purchasing-locations:read") }
+        // jamfplatform 1.7.2 uploads a package's file straight to Jamf Cloud's storage.
+        if terraformTypes.contains("jamfplatform_pro_package") { lookups.append(Self.jamfCloudUploadPermission) }
         permissions = Array(Set(permissions + lookups)).sorted()
         if !recordedAny {
             warnings.append("No PERMISSIONS.md found in the export — the block lists no permissions.")

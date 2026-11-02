@@ -48,7 +48,7 @@ The fleet dashboard keeps every tenant’s sync state, baseline size and Apple t
 
 ## Security
 
-- **Credentials never touch disk.** API secrets live in your Mac’s Keychain and are handed to the deployment engine as environment variables for the duration of a run — never written to configuration, logs or state. Deploy history keeps a copy of each applied plan with every sensitive value masked.
+- **Credentials never touch disk.** API secrets live in your Mac’s Keychain and are handed to the deployment engine as environment variables for the duration of a run — never written to configuration, logs or state. Deploy history keeps a copy of each applied plan, with what the engine marks sensitive and what looks like a secret masked.
 - **Deployment state is encrypted.** The engine’s state and plan files are encrypted with a per-tenant passphrase (PBKDF2 + AES-GCM); a recovery sheet is saved before the first deploy. Without the passphrase the state is unreadable, including by the app.
 - **Nothing deploys without a preview.** The app only ever applies the exact plan you approved; there is no auto-apply.
 - **Team spaces share no credentials.** Each engineer signs in with their own Jamf API client or account, kept in their Keychain. Engine state is encrypted on each Mac with the team passphrase before it reaches the repository.

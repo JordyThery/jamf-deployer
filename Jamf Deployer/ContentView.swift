@@ -27,8 +27,12 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 560)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            RequestWaitsBar()
+            VStack(spacing: 0) {
+                HistoryNoticeBar()
+                RequestWaitsBar()
+            }
         }
+        .reportsSheet("window", isOpen: isConnectingTenant || updates.isPresented || deployService.storeSecretReview != nil)
         .sheet(isPresented: $isConnectingTenant) {
             ConnectTenantWizard()
         }
@@ -96,6 +100,37 @@ private struct RequestWaitsBar: View {
                 Spacer()
                 Button("Stop") { waits.cancelAll() }
                     .help("Ends the wait now; the request isn’t sent again.")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+            .accessibilityElement(children: .contain)
+        }
+    }
+}
+
+/// Something that looks like a secret in a deploy record the store just
+/// saved: deploy history never stops saving, so this says so instead, with
+/// a way to review it. Nothing waits for it.
+private struct HistoryNoticeBar: View {
+    @Environment(TenantDeployService.self) private var deployService
+
+    var body: some View {
+        if let findings = deployService.historyNotice, !findings.isEmpty {
+            HStack(spacing: 8) {
+                Label {
+                    Text(deployService.isTeamMode
+                         ? "A deploy record holds something that looks like a secret, and it’s shared with your team."
+                         : "A deploy record holds something that looks like a secret, and it’s saved in the store.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                }
+                .font(.callout)
+                Spacer()
+                Button("Review…") { deployService.reviewHistoryNotice() }
+                Button("Dismiss") { deployService.dismissHistoryNotice() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

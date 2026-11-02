@@ -18,22 +18,52 @@ final class AppState {
     private(set) var menuRequest: MenuRequest?
     private var menuRequestSerial = 0
 
+    /// The main window's sheets that are open now: menu commands are dimmed
+    /// while one is, so a second sheet never stacks on it.
+    private(set) var openSheets: Set<String> = []
+
+    var isSheetOpen: Bool { !openSheets.isEmpty }
+
+    func sheet(_ id: String, isOpen: Bool) {
+        if isOpen { openSheets.insert(id) } else { openSheets.remove(id) }
+    }
+
     var selectedTenantID: UUID? {
         if case .tenant(let id) = selection { return id }
         return nil
     }
 
+    /// Records the command with the tenant selected now: a tenant's command
+    /// runs only for the tenant it was issued for.
     func request(_ command: MenuCommand) {
         menuRequestSerial += 1
-        menuRequest = MenuRequest(command: command, serial: menuRequestSerial)
+        menuRequest = MenuRequest(command: command, serial: menuRequestSerial, tenantID: selectedTenantID)
     }
 
     /// The waiting command when it is one of `commands`, cleared so it runs
-    /// once.
-    func take(_ commands: Set<MenuCommand>) -> MenuCommand? {
-        guard let command = menuRequest?.command, commands.contains(command) else { return nil }
+    /// once. With `tenantID` (a tenant's page taking it), a command issued
+    /// for another tenant, or with none selected, is dropped instead.
+    func take(_ commands: Set<MenuCommand>, for tenantID: UUID? = nil) -> MenuCommand? {
+        takeRequest(commands, for: tenantID)?.command
+    }
+
+    /// The same, with the tenant the command was issued for.
+    func takeRequest(_ commands: Set<MenuCommand>, for tenantID: UUID? = nil) -> MenuRequest? {
+        guard let request = menuRequest, commands.contains(request.command) else { return nil }
         menuRequest = nil
-        return command
+        if let tenantID, request.tenantID != tenantID { return nil }
+        return request
+    }
+
+    /// Whether the waiting command is `command`, issued for `tenantID`. One
+    /// issued for another tenant is dropped.
+    func isWaiting(_ command: MenuCommand, for tenantID: UUID) -> Bool {
+        guard let request = menuRequest, request.command == command else { return false }
+        guard request.tenantID == tenantID else {
+            menuRequest = nil
+            return false
+        }
+        return true
     }
 }
 
@@ -60,4 +90,6 @@ nonisolated struct MenuRequest: Equatable, Sendable {
     let command: MenuCommand
     /// Tells two requests for the same command apart.
     let serial: Int
+    /// The tenant selected when it was issued.
+    var tenantID: UUID? = nil
 }

@@ -110,7 +110,8 @@ struct RolloutView: View {
         } footer: {
             footer
         }
-        .frame(width: 640, height: 540)
+        // resizable: long rings and their messages get room
+        .frame(minWidth: 640, idealWidth: 640, maxWidth: .infinity, minHeight: 540, idealHeight: 540, maxHeight: .infinity)
     }
 
     private var isPreparing: Bool {

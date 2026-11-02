@@ -437,3 +437,27 @@ struct EnrollmentIconTests {
         #expect(FileManager.default.fileExists(atPath: directory.appending(path: "support_files/enrollment_customization_icons/ours.png").path))
     }
 }
+
+/// Review finding 6: a captured package block lists the permission a direct
+/// upload to Jamf Cloud's storage needs (jamfplatform 1.7.2).
+@Suite("Captured packages")
+struct CapturedPackageTests {
+    @Test func aPackageBlockListsTheJamfCloudUploadPermission() throws {
+        let export = try temporaryFolder("capture-package")
+        let root = try temporaryFolder("capture-package-dst")
+        defer { try? FileManager.default.removeItem(at: export); try? FileManager.default.removeItem(at: root) }
+        try Data("""
+        resource "jamfplatform_pro_package" "tool" {
+          display_name = "Tool"
+          file_name    = "Tool.pkg"
+        }
+
+        """.utf8).write(to: export.appending(path: "pro_package.tf"))
+        let result = try BlockCapture.capture(BlockCapture.Request(
+            blockID: "tool-package", name: "Tool", summary: "A package.", namePrefix: "",
+            sourceDirectory: export, catalogRootDirectory: root))
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: result.blockFolderURL.appending(path: "block.json"))) as? [String: Any]
+        let permissions = (json?["permissions"] as? [String]) ?? []
+        #expect(permissions.contains(BlockCapture.jamfCloudUploadPermission))
+    }
+}

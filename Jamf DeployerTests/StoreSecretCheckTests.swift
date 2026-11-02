@@ -118,21 +118,42 @@ struct StoreSecretCheckTests {
             inEarlierVersion: true)])
     }
 
-    @discardableResult
-    @Test("A finding in a tenant's deploy history never stops a commit")
-    func deployHistoryDoesNotStopCommits() async throws {
+    static let historyFolder = "tenants/00000000-0000-4000-9000-000000000001/history/20261101-120000"
+
+    @Test("A finding in a deploy's history plan never stops a commit, but its log still does")
+    func deployHistoryPlanDoesNotStopCommits() async throws {
         let (store, url) = try await Self.makeStore()
         defer { try? FileManager.default.removeItem(at: url) }
-        let history = "tenants/00000000-0000-4000-9000-000000000001/history/20261101-120000/plan.json"
-        try Self.write("PASSWORD=\"\(Self.fakeScriptSecret)\"\n", to: history, in: url)
-        #expect(try await store.unacknowledgedFindings().count == 1, "it's still found, for the review")
+        try Self.write("PASSWORD=\"\(Self.fakeScriptSecret)\"\n", to: "\(Self.historyFolder)/plan.json", in: url)
+        #expect(try await store.unacknowledgedFindings().count == 1, "it's still found, for the notice")
         #expect(try await store.commitAll(message: "Deploy") == true)
         #expect(try Self.git(["ls-files"], in: url).contains("history/20261101-120000/plan.json"))
 
-        #expect(GitStoreService.isDeployHistory(history))
-        #expect(!GitStoreService.isDeployHistory(Self.scriptPath))
-        #expect(!GitStoreService.isDeployHistory("history/plan.json"))
-        #expect(!GitStoreService.isDeployHistory("tenants/not-a-tenant/history/plan.json"))
+        // The run's log is checked like any other file (review finding 1).
+        try Self.write("PASSWORD=\"\(Self.fakeScriptSecret)\"\n", to: "\(Self.historyFolder)/log.jsonl", in: url)
+        await #expect { try await store.commitAll(message: "Deploy") } throws: { error in
+            guard case GitStoreService.GitError.possibleSecrets(let findings) = error else { return false }
+            return findings.map(\.path) == ["\(Self.historyFolder)/log.jsonl"]
+        }
+
+        #expect(GitStoreService.isDeployHistoryPlan("\(Self.historyFolder)/plan.json"))
+        #expect(!GitStoreService.isDeployHistoryPlan("\(Self.historyFolder)/log.jsonl"))
+        #expect(!GitStoreService.isDeployHistoryPlan("\(Self.historyFolder)/tenant-snapshot.json"))
+        #expect(!GitStoreService.isDeployHistoryPlan(Self.scriptPath))
+        #expect(!GitStoreService.isDeployHistoryPlan("history/plan.json"))
+        #expect(!GitStoreService.isDeployHistoryPlan("tenants/not-a-tenant/history/x/plan.json"))
+    }
+
+    @Test("Deploy history is masked by the app's own rules before it's written")
+    func historyIsMaskedWhenWritten() throws {
+        let plan = #"{"after":{"payloads":"<key>Password</key>\n<string>\#(Self.fakeScriptSecret)</string>","script":"PASSWORD=\"\#(Self.fakeScriptSecret)\""}}"#
+        let masked = String(decoding: TenantDeployService.historyText(plan, path: "plan.json"), as: UTF8.self)
+        #expect(!masked.contains("FAKE"))
+        #expect(masked.contains(SecretScan.mask))
+        #expect(SecretScan.scan(text: masked, path: "plan.json").isEmpty, "nothing left for the store check")
+        #expect((try? JSONSerialization.jsonObject(with: Data(masked.utf8))) != nil, "still JSON")
+        let log = "{\"@message\":\"curl -u admin:\(Self.fakeScriptSecret) https://example.com\"}\n"
+        #expect(!String(decoding: TenantDeployService.historyText(log, path: "log.jsonl"), as: UTF8.self).contains("FAKE"))
     }
 
     @Test("The review marks several findings as not a secret at once")

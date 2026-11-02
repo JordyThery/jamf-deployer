@@ -180,6 +180,7 @@ struct FleetDashboardView: View {
             if failed > 0 { message += " \(failed) check\(failed == 1 ? "" : "s") failed." }
             AccessibilityNotification.Announcement(message).post()
         }
+        .reportsSheet("fleet", isOpen: isRollingOut || isExporting)
         .sheet(isPresented: $isRollingOut) {
             RolloutView()
         }

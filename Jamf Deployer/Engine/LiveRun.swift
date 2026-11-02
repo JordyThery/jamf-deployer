@@ -60,11 +60,17 @@ nonisolated enum LiveRun {
             guard let entry = entries.first(where: { matches($0, target) }) else {
                 throw Refused(reason: "\(tool.rawValue) would reach a tenant that isn’t part of this run")
             }
-            if tool == .openTofu, let command = arguments.first, ["apply", "destroy", "import"].contains(command),
+            if tool == .openTofu, let command = Self.command(arguments), ["apply", "destroy", "import"].contains(command),
                !writableRoles.contains(entry.role) {
                 throw Refused(reason: "\(entry.role) is read only")
             }
         }
+    }
+
+    /// OpenTofu's command: the first argument that isn't a global flag
+    /// (`-chdir=…` comes before it).
+    static func command(_ arguments: [String]) -> String? {
+        arguments.first { !$0.hasPrefix("-") }
     }
 
     /// The tenant a launch's environment points at; nil when it reaches none.
@@ -104,12 +110,20 @@ nonisolated enum LiveRun {
     // MARK: Deploys
 
     /// Before an apply: every object the approved plan touches carries the
-    /// run's prefix.
-    static func requireOnlyTestObjects(_ names: [String]) throws {
+    /// run's prefix, except tenant-wide settings (`…_settings` types), which
+    /// have no name; the doorway lets an apply reach only the disposable
+    /// test tenants, so those are theirs.
+    static func requireOnlyTestObjects(_ changes: [ObjectChange]) throws {
         let prefix = prefix
-        if let other = names.first(where: { !$0.hasPrefix(prefix) }) {
-            throw Refused(reason: "the plan touches “\(other)”, which isn’t named with \(prefix)")
+        if let other = changes.first(where: { !$0.displayName.hasPrefix(prefix) && !isTenantSetting($0.resourceType) }) {
+            throw Refused(reason: "the plan touches “\(other.displayName)”, which isn’t named with \(prefix)")
         }
+    }
+
+    /// A tenant-wide settings resource (check-in, inventory collection,
+    /// local admin passwords, re-enrollment, Self Service): one per tenant, no name.
+    static func isTenantSetting(_ resourceType: String) -> Bool {
+        resourceType.hasSuffix("_settings")
     }
 
     // MARK: The run's tenants

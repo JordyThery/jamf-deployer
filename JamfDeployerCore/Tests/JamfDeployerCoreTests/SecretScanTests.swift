@@ -496,3 +496,25 @@ struct AdoptSecretsTests {
         #expect(replaced.variables.map(\.name) == ["secret_zz_secret_scan_test_2"])
     }
 }
+
+extension AdoptSecretsTests {
+    /// Review finding 11: a value the replacement leaves in place (on a
+    /// name line) is reported, so staging stops instead of saving it.
+    @Test func aValueLeftInPlaceIsReported() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "adopt-left-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let value = "FAKE-NotARealSecret-123"
+        try Data("""
+        resource "jamfplatform_pro_script" "bind" {
+          name            = "Bind \(value)"
+          script_contents = "PASSWORD=\\"\(value)\\""
+        }
+
+        """.utf8).write(to: folder.appending(path: "pro_script.tf"))
+        let object = SecretObjectFinding(address: "jamfplatform_pro_script.bind", objectType: "Script",
+                                         objectName: "Bind", rule: "Password value in HCL attribute")
+        let replaced = try AdoptSecrets.replace(in: folder, values: [.init(value: value, object: object)], taken: [])
+        #expect(replaced.notReplaced.map(\.address) == ["jamfplatform_pro_script.bind"])
+    }
+}

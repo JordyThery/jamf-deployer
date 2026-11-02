@@ -147,8 +147,9 @@ struct SidebarView: View {
         }
         // Tenant › Remove Tenant…: the same confirmation, for the selected tenant
         .onChange(of: appState.menuRequest) {
-            guard appState.take([.removeTenant]) != nil,
-                  let id = appState.selectedTenantID, let tenant = tenantStore.tenant(id: id),
+            // the tenant selected when the command was issued, still selected
+            guard let request = appState.takeRequest([.removeTenant]),
+                  let id = request.tenantID, id == appState.selectedTenantID, let tenant = tenantStore.tenant(id: id),
                   !deployService.isRemoving(id), !deployService.isEngineWorkRunning else { return }
             confirmRemoval(of: tenant)
         }

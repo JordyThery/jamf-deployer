@@ -10,6 +10,8 @@ struct AdoptView: View {
         case pickTypes
         case discovering
         case pickObjects
+        /// Staged; the "not a secret" choices are being saved.
+        case staging
         case ready(count: Int)
         case failed(String)
     }
@@ -79,8 +81,10 @@ struct AdoptView: View {
     }
 
     private var isBusy: Bool {
-        if case .discovering = step { return true }
-        return false
+        switch step {
+        case .discovering, .staging: return true
+        default: return false
+        }
     }
 
     private var isFinished: Bool {
@@ -136,6 +140,10 @@ struct AdoptView: View {
                 }
             }
             .padding()
+
+        case .staging:
+            ProgressView("Staging…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .discovering:
             VStack(spacing: 10) {
@@ -275,7 +283,7 @@ struct AdoptView: View {
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
-        case .discovering, .failed:
+        case .discovering, .staging, .failed:
             EmptyView()
         }
     }
@@ -455,14 +463,25 @@ struct AdoptView: View {
             try ExportedObjectInventory.mergeSensitiveDeclarations(
                 sensitive, into: destination.appending(path: TenantDeployService.adoptedSensitiveVariablesFile))
             // Values marked not a secret are adopted as they are; the store
-            // check is told, by location and rule only.
-            let overridden = notSecret
-            Task { try? await deployService.acknowledgeNotSecrets(in: destination, objects: overridden) }
-            step = .ready(count: kept.count)
-            activityLog.append(ActivityLogEntry(
-                category: "Adopt", operation: "stage", detail: tenant.name,
-                status: 200, duration: nil, note: "\(kept.count) objects"
-            ))
+            // check is told (location and rule only) before staging counts
+            // as done, so Preview Changes… right after it isn't stopped.
+            let overridden = Set(secretObjects.filter { notSecret.contains($0.id) }.compactMap(\.address))
+                .intersection(kept)
+            let count = kept.count
+            step = .staging
+            Task {
+                do {
+                    try await deployService.acknowledgeNotSecrets(in: destination, objects: overridden)
+                } catch {
+                    step = .failed("The objects were staged, but the “not a secret” choices couldn’t be saved: \(error.localizedDescription) The store’s secret review will ask about them.")
+                    return
+                }
+                step = .ready(count: count)
+                activityLog.append(ActivityLogEntry(
+                    category: "Adopt", operation: "stage", detail: tenant.name,
+                    status: 200, duration: nil, note: "\(count) objects"
+                ))
+            }
         } catch {
             step = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }

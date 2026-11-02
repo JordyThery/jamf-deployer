@@ -65,7 +65,8 @@ struct PreviewDeploySheet: View {
         } footer: {
             footer
         }
-        .frame(width: 700, height: 580)
+        // resizable: long plans, generated configuration and error lists get room
+        .frame(minWidth: 700, idealWidth: 700, maxWidth: .infinity, minHeight: 580, idealHeight: 580, maxHeight: .infinity)
         // Esc mustn't hide a running apply: its result and errors would never show
         .interactiveDismissDisabled(isDeploying)
         .task {

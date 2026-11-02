@@ -116,6 +116,34 @@ final class TenantDeployService {
     }
     var storeSecretReview: StoreSecretReview?
 
+    /// Possible secrets in deploy history that a commit just took along (a
+    /// history plan never stops a commit): shown as a notice that doesn't
+    /// block anything, with a way to review them. Nil once dismissed.
+    private(set) var historyNotice: [SecretFinding]?
+    /// History findings already shown this launch.
+    private var notifiedHistoryFindings: Set<SecretFinding> = []
+
+    func dismissHistoryNotice() {
+        historyNotice = nil
+    }
+
+    /// Opens the review sheet with the history findings of the notice.
+    func reviewHistoryNotice() {
+        guard let findings = historyNotice else { return }
+        historyNotice = nil
+        storeSecretReview = StoreSecretReview(
+            kind: .commitStopped, findings: findings.map { .init(finding: $0, inEarlierVersion: false) })
+    }
+
+    /// After a commit: history findings not acknowledged and not shown yet.
+    func noteHistoryFindings() async {
+        guard !isDemo, let findings = try? await gitStore.unacknowledgedFindings() else { return }
+        let new = findings.filter { !GitStoreService.blocksCommit($0) && !notifiedHistoryFindings.contains($0) }
+        guard !new.isEmpty else { return }
+        notifiedHistoryFindings.formUnion(new)
+        historyNotice = (historyNotice ?? []) + new
+    }
+
     /// Set once every store on this Mac has had the one-time check.
     static let storeSecretCheckDefaultsKey = "storeSecretCheckDone"
 
@@ -249,6 +277,7 @@ final class TenantDeployService {
             }
             lastSync = .now
             syncMessage = nil
+            await noteHistoryFindings()
         } catch {
             syncMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -919,6 +948,7 @@ final class TenantDeployService {
             } else {
                 _ = try await gitStore.commitAll(message: message)
             }
+            await noteHistoryFindings()
         } catch GitStoreService.GitError.possibleSecrets(let findings) {
             storeSecretReview = StoreSecretReview(
                 kind: .commitBlocked(message: message),
@@ -955,18 +985,20 @@ final class TenantDeployService {
         storeSecretReview?.acknowledged.formUnion(findings)
     }
 
-    /// Adopt's "not a secret" choices: the store check's findings in a
-    /// tenant's adopted configuration (`folder`) that belong to those
-    /// objects and rules (`SecretObjectFinding.id`) are acknowledged, so the
-    /// values adopted as they are don't stop the next commit.
-    func acknowledgeNotSecrets(in folder: URL, objects ids: Set<String>) async throws {
-        guard !isDemo, !ids.isEmpty else { return }
+    /// Adopt's "not a secret" choices: every store-check finding in a
+    /// tenant's adopted configuration (`folder`) that belongs to one of
+    /// those objects (`addresses`), by its lines or the support file it
+    /// loads, is acknowledged, whatever the rule's name (jamformer's and the
+    /// app's differ), so the values adopted as they are don't stop the next
+    /// commit. Their other flagged values became variables and are gone.
+    func acknowledgeNotSecrets(in folder: URL, objects addresses: Set<String>) async throws {
+        guard !isDemo, !addresses.isEmpty else { return }
         let store = storeURL.resolvingSymlinksInPath().path + "/"
         let resolved = folder.resolvingSymlinksInPath().path
         guard resolved.hasPrefix(store) else { return }
         let prefix = String(resolved.dropFirst(store.count)) + "/"
         let acknowledged = SecretScan.scanExport(folder).filter { finding in
-            SecretScan.objectFindings([finding], in: folder).contains { ids.contains($0.id) }
+            SecretScan.objectFindings([finding], in: folder).contains { $0.address.map(addresses.contains) ?? false }
         }.map { SecretFinding(path: prefix + $0.path, line: $0.line, rule: $0.rule) }
         guard !acknowledged.isEmpty else { return }
         try await gitStore.acknowledge(acknowledged)
@@ -1456,6 +1488,18 @@ final class TenantDeployService {
         !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
     }
 
+    /// Whether the tenant has anything a preview would show: selected
+    /// blocks, blocks to remove, or adopted objects.
+    func hasAnythingToPreview(_ tenant: Tenant) -> Bool {
+        !tenant.blockSelections.isEmpty || !tenant.pendingRemovals.isEmpty || hasAdoptedConfig(for: tenant)
+    }
+
+    /// Whether Preview Changes can start for the tenant now (the menu and the
+    /// tenant's toolbar button agree).
+    func canPreview(_ tenant: Tenant) -> Bool {
+        hasAnythingToPreview(tenant) && !isBusy && !tenant.isHandedOver
+    }
+
     /// Whether a rollout can include the tenant: it has a baseline, adopted or
     /// staged objects, and is not being handed over.
     func canRollOut(_ tenant: Tenant) -> Bool {
@@ -1825,7 +1869,7 @@ final class TenantDeployService {
         if LiveLaunch.isSwitched {
             // a release check's live run changes only its own test objects
             try LiveRun.requireOnlyTestObjects(
-                session.summary.groups.flatMap(\.changes).filter { $0.kind != .unchanged }.map(\.displayName))
+                session.summary.groups.flatMap(\.changes).filter { $0.kind != .unchanged })
         }
         busyTenants.insert(tenant.id)
 
@@ -1936,13 +1980,14 @@ final class TenantDeployService {
         // what the engine printed during the run, sensitive values masked.
         if let planData = try? await runner.showPlanData(planFileName: session.planFileName),
            let redacted = PlanRedactor.redact(planData) {
-            try? redacted.write(to: entryURL.appending(path: "plan.json"))
+            try? Self.historyText(String(decoding: redacted, as: UTF8.self), path: "plan.json")
+                .write(to: entryURL.appending(path: "plan.json"))
         }
         // The engine's own masking misses secrets inside a server's answer
         // (a provider error can quote what it sent), so every line is
         // cleaned before it reaches the team repository.
         let logText = EngineOutputCleaner.cleanedLog(result.rawLines)
-        try? Data(logText.utf8).write(to: entryURL.appending(path: "log.jsonl"))
+        try? Self.historyText(logText, path: "log.jsonl").write(to: entryURL.appending(path: "log.jsonl"))
 
         let entry = DeployHistoryEntry(
             id: entryID,
@@ -2149,6 +2194,14 @@ final class TenantDeployService {
         let text = CreateFailureRecovery.importFile(found.map { (address: $0.key, id: $0.value) })
         try? Data(text.utf8).write(to: fileURL)
         return candidates.count { found[$0.address] != nil }
+    }
+
+    /// A deploy history file's text with what the app's own secret rules
+    /// find masked. The engine masks only what it marks sensitive; a value
+    /// it doesn't (a profile payload, a script literal adopted as "not a
+    /// secret") is masked here before the file reaches the store.
+    nonisolated static func historyText(_ text: String, path: String) -> Data {
+        Data(SecretScan.masked(text, path: path).text.utf8)
     }
 
     /// Whether `show -json` printed a state: an object with a format version.
@@ -2592,7 +2645,7 @@ final class TenantDeployService {
             case .missingSecretSetting(let block, let setting):
                 "The “\(block)” block needs its “\(setting)” secret on this Mac. Enter it in the block’s settings — secrets stay in each engineer’s Keychain."
             case .missingAdoptedSecret(let name):
-                "The adopted configuration needs its sensitive value “\(name)”, which is kept in the Keychain of the Mac that adopted it. Adopt the object again on this Mac to store the value here."
+                "The adopted configuration needs the secret setting “\(AdoptedSecretSettings.title(name))”, which is kept in the Keychain of the Mac that adopted it. Enter it on this Mac in the tenant’s Overview, under Adopted secret settings."
             case .previewInProgress:
                 "A preview is open for this tenant. Finish or close it before checking for changes."
             case .missingStatePassphrase:

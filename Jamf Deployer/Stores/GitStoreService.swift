@@ -250,19 +250,22 @@ actor GitStoreService {
         }.value
     }
 
-    /// Whether a finding stops a commit. A tenant's deploy history
-    /// (`tenants/<id>/history/…`) is the app's own record of what was
-    /// deployed, already redacted, and can't be fixed afterwards: a finding
-    /// there is shown in the one-time review but never stops a commit, so
-    /// it never stops a preview, check or deploy either.
+    /// Whether a finding stops a commit. A deploy's plan in a tenant's
+    /// history (`tenants/<id>/history/<entry>/plan.json`) is the app's own
+    /// record of what was approved and can't be fixed afterwards: the engine
+    /// masks what it marks sensitive and the app masks what its own rules
+    /// find before writing it, so a finding left there never stops a
+    /// commit (and so never a preview, check or deploy). It is shown as a
+    /// notice instead (`TenantDeployService.historyNotice`). Every other
+    /// file, the run's log included, stops the commit as before.
     nonisolated static func blocksCommit(_ finding: SecretFinding) -> Bool {
-        !isDeployHistory(finding.path)
+        !isDeployHistoryPlan(finding.path)
     }
 
-    nonisolated static func isDeployHistory(_ path: String) -> Bool {
-        let parts = path.split(separator: "/", maxSplits: 3, omittingEmptySubsequences: false)
-        return parts.count >= 4 && parts[0] == "tenants" && UUID(uuidString: String(parts[1])) != nil
-            && parts[2] == "history"
+    nonisolated static func isDeployHistoryPlan(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 5 && parts[0] == "tenants" && UUID(uuidString: String(parts[1])) != nil
+            && parts[2] == "history" && !parts[3].isEmpty && parts[4] == "plan.json"
     }
 
     /// Marks a finding as not a secret; the next commit records it.

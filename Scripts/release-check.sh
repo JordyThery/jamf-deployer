@@ -38,6 +38,7 @@ SIGNIN_TEST="Jamf DeployerTests/LiveSignInTests"
 LIVE_TESTS=(
     "Jamf DeployerTests/LiveDeployTests/tenantA()"
     "Jamf DeployerTests/LiveDeployTests/tenantB()"
+    "Jamf DeployerTests/LiveDeployTests/recoveredImportStillPreviews()"
     "Jamf DeployerUITests/LiveUITests/testConnect"
     "Jamf DeployerUITests/LiveUITests/testDeployDriftKeepRestore"
     "Jamf DeployerUITests/LiveUITests/testCaptureFromProductionPreviewOnTestB"

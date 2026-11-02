@@ -76,21 +76,29 @@ struct StateBackendHousekeepingTests {
             keyText: "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n"))
     }
 
-    @Test("SSH sign-in passes the agent and an unlocked key file, never a locked key")
+    @Test("SSH sign-in: the agent when it reaches the remote, else the unlocked key file alone")
     func sshEnvironment() throws {
         let plain = (path: "/Users/example/.ssh/id_ed25519", text: Self.openSSHKey(cipher: "none"))
         let locked = (path: "/Users/example/.ssh/id_rsa", text: Self.openSSHKey(cipher: "aes256-ctr"))
 
-        // An agent with keys (maybe ones this remote doesn't take): the
-        // unlocked key file goes alongside it, as before 1.1.0.
-        #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: true, keys: [plain])
-            == ["SSH_AUTH_SOCK": "/tmp/agent", "SSH_PRIVATE_KEY": plain.path])
-        // An agent with keys and only a locked key file: the agent alone.
-        #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: true, keys: [locked])
+        // terraform-backend-git takes the agent whenever SSH_AUTH_SOCK is set:
+        // the two are never passed together.
+        // An agent whose keys reach the remote: the agent.
+        #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: true, keys: [plain],
+                                                       agentReachesRemote: { true })
             == ["SSH_AUTH_SOCK": "/tmp/agent"])
-        // An empty agent: the first key without a passphrase.
+        // An agent holding only a key this remote doesn't take (a work key):
+        // the unlocked key file, without the agent (R6).
+        #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: true, keys: [plain],
+                                                       agentReachesRemote: { false })
+            == ["SSH_PRIVATE_KEY": plain.path])
+        // An agent with keys and only a locked key file: the agent alone, never probed.
+        #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: true, keys: [locked],
+                                                       agentReachesRemote: { Issue.record("probed"); return false })
+            == ["SSH_AUTH_SOCK": "/tmp/agent"])
+        // An empty agent: the first key without a passphrase, without the agent.
         #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: false, keys: [locked, plain])
-            == ["SSH_AUTH_SOCK": "/tmp/agent", "SSH_PRIVATE_KEY": plain.path])
+            == ["SSH_PRIVATE_KEY": plain.path])
         // Only locked keys and no agent keys: asked to add one to the agent.
         #expect(throws: StateBackendService.BackendError.self) {
             _ = try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: false, keys: [locked])

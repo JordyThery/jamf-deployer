@@ -24,3 +24,4 @@ Vendor/terraform-backend-git/
 Jamf Deployer.app/
 Jamf.Deployer.*.zip
 __pycache__/
+*.profraw

@@ -59,6 +59,16 @@ public nonisolated struct ObjectChange: Sendable, Identifiable {
     public var fieldDiffs: [FieldDiff]
     /// Impact alerts and other diagnostics attached to this object.
     public var notes: [String]
+
+    public init(address: String, resourceType: String, displayName: String, kind: ChangeKind,
+                fieldDiffs: [FieldDiff] = [], notes: [String] = []) {
+        self.address = address
+        self.resourceType = resourceType
+        self.displayName = displayName
+        self.kind = kind
+        self.fieldDiffs = fieldDiffs
+        self.notes = notes
+    }
 }
 
 /// Changes grouped by building block for the Preview screen.

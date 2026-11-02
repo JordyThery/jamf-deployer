@@ -113,123 +113,132 @@ struct MyApp: App {
             // exactly as the button on screen; the checks below dim them as
             // those buttons are dimmed.
             CommandGroup(replacing: .newItem) {
-                Button("Connect a Tenant…") {
-                    appState.request(.connectTenant)
+                Group {
+                    Button("Connect a Tenant…") {
+                        appState.request(.connectTenant)
+                    }
+                    .keyboardShortcut("n")
+                    Button("Export as Terraform…") {
+                        appState.selection = .fleet
+                        appState.request(.exportTerraform)
+                    }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .disabled(deployService.isDemo || deployService.isBusy || !tenantStore.tenants.contains { !$0.isHandedOver })
                 }
-                .keyboardShortcut("n")
-                Button("Export as Terraform…") {
-                    appState.selection = .fleet
-                    appState.request(.exportTerraform)
-                }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(deployService.isDemo || deployService.isBusy || !tenantStore.tenants.contains { !$0.isHandedOver })
+                // one sheet at a time: nothing here opens another over it
+                .disabled(appState.isSheetOpen)
             }
             SidebarCommands()
             CommandGroup(before: .sidebar) {
-                Button("Dashboard") { appState.selection = .fleet }
-                    .keyboardShortcut("1")
-                Button("Building Blocks") { appState.selection = .catalog }
-                    .keyboardShortcut("2")
-                Button("History") { appState.selection = .history }
-                    .keyboardShortcut("3")
-                Divider()
-                // the selected tenant's sections
-                Button("Overview") { appState.request(.showOverview) }
-                    .keyboardShortcut("1", modifiers: [.command, .option])
-                    .disabled(selectedTenant == nil)
-                Button("Day 0 Setup") { appState.request(.showSetup) }
-                    .keyboardShortcut("2", modifiers: [.command, .option])
-                    .disabled(selectedTenant == nil)
-                Button("Export") { appState.request(.showExport) }
-                    .keyboardShortcut("3", modifiers: [.command, .option])
-                    .disabled(selectedTenant == nil)
-                Divider()
-                Toggle("Show Technical Details", isOn: $showsTechnicalDetails)
-                Button("Reload History") {
-                    appState.selection = .history
-                    appState.request(.reloadHistory)
+                Group {
+                    Button("Dashboard") { appState.selection = .fleet }
+                        .keyboardShortcut("1")
+                    Button("Building Blocks") { appState.selection = .catalog }
+                        .keyboardShortcut("2")
+                    Button("History") { appState.selection = .history }
+                        .keyboardShortcut("3")
+                    Divider()
+                    // the selected tenant's sections
+                    Button("Overview") { appState.request(.showOverview) }
+                        .keyboardShortcut("1", modifiers: [.command, .option])
+                        .disabled(selectedTenant == nil)
+                    Button("Day 0 Setup") { appState.request(.showSetup) }
+                        .keyboardShortcut("2", modifiers: [.command, .option])
+                        .disabled(selectedTenant == nil)
+                    Button("Export") { appState.request(.showExport) }
+                        .keyboardShortcut("3", modifiers: [.command, .option])
+                        .disabled(selectedTenant == nil)
+                    Divider()
+                    Toggle("Show Technical Details", isOn: $showsTechnicalDetails)
+                    Button("Reload History") {
+                        appState.selection = .history
+                        appState.request(.reloadHistory)
+                    }
+                    Divider()
                 }
-                Divider()
+                // one sheet at a time: nothing here opens another over it
+                .disabled(appState.isSheetOpen)
             }
             CommandMenu("Tenant") {
-                // No connection picker in this app: the switch lives here.
-                DemoModeToggle(demo: worlds.demo)
-                    .disabled(worlds.isBusy)
-                Divider()
-                Button("Check for Changes", systemImage: "arrow.clockwise") {
-                    appState.request(.checkForChanges)
-                }
-                .keyboardShortcut("r")
-                .disabled(!selectedTenantCanCheck)
-
-                Button("Check All Tenants", systemImage: "arrow.clockwise") {
-                    Task { await deployService.checkAllTenants() }
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(deployService.isBusy || deployService.fleetCheckProgress != nil
-                    || !tenantStore.tenants.contains { deployService.isManaged($0) })
-
-                Button("Preview Changes…", systemImage: "list.bullet.clipboard") {
-                    appState.previewRequestCount += 1
-                }
-                .keyboardShortcut("p")
-                .disabled(appState.selectedTenantID == nil || deployService.isBusy)
-
-                // Deploying always goes through a preview; ⌘D opens the same
-                // sheet, whose flow ends in the confirmed Deploy.
-                Button("Deploy…", systemImage: "paperplane") {
-                    appState.previewRequestCount += 1
-                }
-                .keyboardShortcut("d")
-                .disabled(appState.selectedTenantID == nil || deployService.isBusy)
-                Divider()
-                Button("Adopt Existing Configuration…") { appState.request(.adopt) }
-                    .disabled(!selectedTenantCanChange)
-                Button("Add a Custom Object…") { appState.request(.addCustomObject) }
-                    .disabled(!selectedTenantCanChange)
-                Button("Baseline Updates…") { appState.request(.baselineUpdates) }
-                    .disabled(selectedTenant.map { $0.handOverPending || deployService.isDemo || deployService.isBusy } ?? true)
-                Button("Run Preflight") { appState.request(.runPreflight) }
-                    .disabled(selectedTenant == nil || deployService.isBusy)
-                Divider()
-                Button(selectedTenant?.jamfProAuth == .userAccount ? "Update Password…" : "Update Client Secret…") {
-                    appState.request(.updateSecret)
-                }
-                .disabled(selectedTenant == nil)
-                Button("Hand Over Tenant…") { appState.request(.handOver) }
-                    .disabled(!(selectedTenant.map { deployService.isManaged($0) } ?? false) || !selectedTenantCanChange)
-                Button("Remove Tenant…") { appState.request(.removeTenant) }
-                    // engine work would lose its folder and state halfway
-                    .disabled(selectedTenant.map { deployService.isRemoving($0.id) } ?? true
-                        || deployService.isEngineWorkRunning)
-                Divider()
-                Button("Roll Out…") {
-                    appState.selection = .fleet
-                    appState.request(.rollOut)
-                }
-                .disabled(deployService.isDemo || deployService.isBusy
-                    || tenantStore.tenants.filter(deployService.canRollOut).count < 2)
-                if deployService.isTeamMode {
-                    Button("Sync Now") {
-                        Task { await deployService.syncTeamState() }
+                Group {
+                    // No connection picker in this app: the switch lives here.
+                    DemoModeToggle(demo: worlds.demo)
+                        .disabled(worlds.isBusy)
+                    Divider()
+                    Button("Check for Changes", systemImage: "arrow.clockwise") {
+                        appState.request(.checkForChanges)
                     }
-                    .disabled(deployService.isBusy)
-                    Button("Force Unlock…") { appState.request(.forceUnlock) }
-                        .disabled(selectedTenant.map { deployService.lock(for: $0.id) == nil } ?? true
+                    .keyboardShortcut("r")
+                    .disabled(!selectedTenantCanCheck)
+
+                    Button("Check All Tenants", systemImage: "arrow.clockwise") {
+                        Task { await deployService.checkAllTenants() }
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(deployService.isBusy || deployService.fleetCheckProgress != nil
+                        || !tenantStore.tenants.contains { deployService.isManaged($0) })
+
+                    // Deploys always start here: the preview ends in the confirmed Deploy.
+                    Button("Preview Changes…", systemImage: "list.bullet.clipboard") {
+                        appState.previewRequestCount += 1
+                    }
+                    .keyboardShortcut("p")
+                    .disabled(!(selectedTenant.map { deployService.canPreview($0) } ?? false))
+                    Divider()
+                    Button("Adopt Existing Configuration…") { appState.request(.adopt) }
+                        .disabled(!selectedTenantCanChange)
+                    Button("Add a Custom Object…") { appState.request(.addCustomObject) }
+                        .disabled(!selectedTenantCanChange)
+                    Button("Baseline Updates…") { appState.request(.baselineUpdates) }
+                        .disabled(selectedTenant.map { $0.handOverPending || deployService.isDemo || deployService.isBusy } ?? true)
+                    Button("Run Preflight") { appState.request(.runPreflight) }
+                        .disabled(selectedTenant == nil || deployService.isBusy)
+                    Divider()
+                    Button(selectedTenant?.jamfProAuth == .userAccount ? "Update Password…" : "Update Client Secret…") {
+                        appState.request(.updateSecret)
+                    }
+                    .disabled(selectedTenant == nil)
+                    Button("Hand Over Tenant…") { appState.request(.handOver) }
+                        .disabled(!(selectedTenant.map { deployService.isManaged($0) } ?? false) || !selectedTenantCanChange)
+                    Button("Remove Tenant…") { appState.request(.removeTenant) }
+                        // engine work would lose its folder and state halfway
+                        .disabled(selectedTenant.map { deployService.isRemoving($0.id) } ?? true
                             || deployService.isEngineWorkRunning)
+                    Divider()
+                    Button("Roll Out…") {
+                        appState.selection = .fleet
+                        appState.request(.rollOut)
+                    }
+                    .disabled(deployService.isDemo || deployService.isBusy
+                        || tenantStore.tenants.filter(deployService.canRollOut).count < 2)
+                    if deployService.isTeamMode {
+                        Button("Sync Now") {
+                            Task { await deployService.syncTeamState() }
+                        }
+                        .disabled(deployService.isBusy)
+                        Button("Force Unlock…") { appState.request(.forceUnlock) }
+                            .disabled(selectedTenant.map { deployService.lock(for: $0.id) == nil } ?? true
+                                || deployService.isEngineWorkRunning)
+                    }
                 }
+                // one sheet at a time: nothing here opens another over it
+                .disabled(appState.isSheetOpen)
             }
             CommandMenu("Catalog") {
-                Button("Manage Sources…") {
-                    appState.selection = .catalog
-                    appState.request(.manageSources)
+                Group {
+                    Button("Manage Sources…") {
+                        appState.selection = .catalog
+                        appState.request(.manageSources)
+                    }
+                    .disabled(deployService.isDemo)
+                    Button("Add Git Catalog…") {
+                        appState.selection = .catalog
+                        appState.request(.addGitCatalog)
+                    }
+                    .disabled(deployService.isDemo)
                 }
-                .disabled(deployService.isDemo)
-                Button("Add Git Catalog…") {
-                    appState.selection = .catalog
-                    appState.request(.addGitCatalog)
-                }
-                .disabled(deployService.isDemo)
+                // one sheet at a time: nothing here opens another over it
+                .disabled(appState.isSheetOpen)
             }
             CommandGroup(after: .help) {
                 Button("Guided Tour") {

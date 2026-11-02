@@ -98,6 +98,7 @@ struct CatalogView: View {
                   !deployService.isDemo, !isManagingSources, !isAddingGitSource, selectedBlock == nil else { return }
             if command == .manageSources { isManagingSources = true } else { isAddingGitSource = true }
         }
+        .reportsSheet("catalog", isOpen: isAddingGitSource || isManagingSources || selectedBlock != nil)
         .sheet(isPresented: $isAddingGitSource) {
             AddGitCatalogSheet { 
                 catalog = try? deployService.loadCatalog()

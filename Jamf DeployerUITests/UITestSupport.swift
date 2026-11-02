@@ -154,25 +154,6 @@ class DeployerUITestCase: JTKitUITestCase {
         tap(app.menuItems[group].firstMatch, timeout: 5, file: file, line: line)
     }
 
-    /// Removes every catalog source with this name (Manage Sources rows are
-    /// matched by the row that shows the name, never by position).
-    func removeCatalogSources(named name: String) {
-        openSidebar("Building Blocks")
-        tap(app.toolbars.buttons["Manage Sources…"], timeout: 10)
-        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10))
-        for _ in 0..<5 {
-            let label = app.sheets.staticTexts.matching(NSPredicate(format: "value == %@ OR label == %@", name, name)).firstMatch
-            guard label.waitForExistence(timeout: 2) else { break }
-            let row = app.sheets.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remove…' OR identifier == 'Remove…'")).allElementsBoundByIndex
-                .min { abs($0.frame.midY - label.frame.midY) < abs($1.frame.midY - label.frame.midY) }
-            guard let remove = row, abs(remove.frame.midY - label.frame.midY) < 30 else { break }
-            remove.click()
-            tap(dialogButton("Remove Source"), timeout: 10)
-            sleep(1)
-        }
-        tap(app.sheets.buttons["Done"].exists ? app.sheets.buttons["Done"] : app.sheets.buttons["Close"], timeout: 5)
-    }
-
     /// Stages an object through Add a Custom Object, filling the form's
     /// fields by attribute name (number fields show "0").
     func stageCustomObject(on tenantName: String, type typeName: String, objectName: String,
@@ -285,11 +266,6 @@ class DeployerUITestCase: JTKitUITestCase {
         XCTAssertTrue(panel.waitForExistence(timeout: 15), "No save panel")
         goToFolder(testFolder.path)
         saveInChosenFolder()
-    }
-
-    /// Kept for older call sites: the folder is always the test's own.
-    func saveInDocuments() {
-        saveInTestFolder()
     }
 
     /// Waits for a deploy to finish and closes the sheet; returns whether

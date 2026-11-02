@@ -66,7 +66,8 @@ public nonisolated enum AdoptSecrets {
     public struct Replaced: Sendable {
         public var variables: [Variable]
         /// Objects whose value is neither in the configuration nor in a
-        /// support file it loads with `file()`: still in place.
+        /// support file it loads with `file()`, or still in a staged file
+        /// after the replacement: staging must stop.
         public var notReplaced: [SecretObjectFinding]
     }
 
@@ -100,6 +101,7 @@ public nonisolated enum AdoptSecrets {
         var hclReplacements: [(value: String, key: String)] = []
         var supportReplacements: [String: [(value: String, key: String)]] = [:]
         var seenValues: Set<String> = []
+        var objectByName: [String: SecretObjectFinding] = [:]
         let ordered = values.sorted {
             ($0.object.objectName, $0.object.rule, $0.value) < ($1.object.objectName, $1.object.rule, $1.value)
         }
@@ -113,6 +115,7 @@ public nonisolated enum AdoptSecrets {
                 continue
             }
             let name = BlockCapture.uniqueSecretKey(for: entry.object.objectName, taken: &usedNames)
+            objectByName[name] = entry.object
             variables.append(Variable(name: name, value: entry.value,
                                       objectDescription: entry.object.objectDescription, rule: entry.object.rule))
             if inConfiguration { hclReplacements.append((entry.value, name)) }
@@ -131,6 +134,20 @@ public nonisolated enum AdoptSecrets {
         }
         for (url, text) in texts {
             try Data(text.utf8).write(to: url, options: .atomic)
+        }
+
+        // Read the staged files back: a value on a line the replacement
+        // leaves alone (an object's name) or outside a string is still
+        // there, and the staging must not go on as if it weren't.
+        var staged = texts.map(\.1)
+        let supportEnumerator = fileManager.enumerator(at: supportURL, includingPropertiesForKeys: [.isRegularFileKey])
+        while let item = supportEnumerator?.nextObject() as? URL {
+            guard (try? item.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+                  let data = try? Data(contentsOf: item), let text = SecretScan.scannableText(data) else { continue }
+            staged.append(text)
+        }
+        for variable in variables where staged.contains(where: { $0.contains(variable.value) }) {
+            if let object = objectByName[variable.name] { notReplaced.append(object) }
         }
         return Replaced(variables: variables, notReplaced: notReplaced)
     }
