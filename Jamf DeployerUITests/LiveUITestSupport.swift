@@ -60,23 +60,25 @@ class LiveDeployerUITestCase: DeployerUITestCase {
 
     // MARK: Launch
 
-    /// The app's run store (throwaway, in the release check's live folder).
+    /// The app's run stores: one folder per launch (`AppFiles.root`) in the
+    /// release check's live folder. The UI test runner may read them but not
+    /// write them.
     func runStoreURL() throws -> URL {
-        try liveGateway().appRunFolder.appending(path: "app-files/Jamf Deployer/store", directoryHint: .isDirectory)
+        let files = try liveGateway().appRunFolder.appending(path: "app-files", directoryHint: .isDirectory)
+        let launches = (try? FileManager.default.contentsOfDirectory(
+            at: files, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        let newest = launches.filter { $0.lastPathComponent.hasPrefix("Jamf Deployer") }.max {
+            ((try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast)
+                < ((try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast)
+        }
+        return (newest ?? files.appending(path: "Jamf Deployer")).appending(path: "store", directoryHint: .isDirectory)
     }
 
     /// Launches the app under the switch with these roles' connections.
-    /// `seed` starts it with them as tenants. Each launch starts from an
-    /// empty store: tenant secrets and state passphrases live in memory for
-    /// one launch only, so a tenant record left by an earlier test of the
-    /// run couldn't sign in or read its state.
-    func launchDeployer(roles: [String], seed: Bool = true, freshStore: Bool = true) throws {
-        if freshStore {
-            let store = try runStoreURL()
-            if FileManager.default.fileExists(atPath: store.path) {
-                try FileManager.default.removeItem(at: store)
-            }
-        }
+    /// `seed` starts it with them as tenants. Every launch gets a store of
+    /// its own (the app's side), since secrets and state passphrases live in
+    /// memory for one launch only.
+    func launchDeployer(roles: [String], seed: Bool = true) throws {
         var arguments = ["-hasSeenGuidedTour", "YES", "-JDLivePrefix", runPrefix, "-NSNavLastRootDirectory", testFolder.path]
         if seed { arguments += ["-JDLiveSeedTenants", "YES"] }
         try launchLive(roles: roles, arguments: arguments)
