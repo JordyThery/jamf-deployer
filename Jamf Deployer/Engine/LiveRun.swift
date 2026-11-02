@@ -119,11 +119,12 @@ nonisolated enum LiveRun {
     @MainActor
     static func seedTenants(into store: TenantStore) {
         guard let entries, UserDefaults.standard.bool(forKey: seedTenantsKey) else { return }
-        for entry in entries where store.tenant(id: entry.connection.id) == nil {
+        for entry in entries {
             guard let tenant = tenant(for: entry),
                   let secret = LiveLaunch.secrets.secret(for: entry.connection.id.uuidString), !secret.isEmpty
             else { continue }
-            store.add(tenant)
+            // secrets live in memory per launch: one seeded earlier in the run gets its secret again
+            if store.tenant(id: tenant.id) == nil { store.add(tenant) }
             TenantSecrets(tenantID: tenant.id).platformClientSecret.save(secret)
         }
     }
