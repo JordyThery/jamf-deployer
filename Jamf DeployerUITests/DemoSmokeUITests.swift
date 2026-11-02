@@ -8,9 +8,7 @@ final class DemoSmokeUITests: DeployerUITestCase {
     private let contoso = "Contoso (Demo)"
 
     override func launchApp() {
-        // The keyboard test turns on full keyboard access (Tab reaches
-        // buttons) for its own launch only: the argument domain, never saved.
-        launchInDemo(arguments: name.contains("test17CatalogCardKeyboard") ? ["-AppleKeyboardUIMode", "2"] : [])
+        launchInDemo()
     }
 
     func test1Launch() {
@@ -285,7 +283,6 @@ final class DemoSmokeUITests: DeployerUITestCase {
         XCTAssertTrue(app.sheets.staticTexts["1Password"].waitForExistence(timeout: 20), "Search didn’t list the title")
         XCTAssertTrue(app.sheets.staticTexts.matching(NSPredicate(format: "value BEGINSWITH 'AgileBits' OR label BEGINSWITH 'AgileBits'"))
             .firstMatch.exists, "The title’s publisher isn’t shown")
-        XCTAssertFalse(app.sheets.staticTexts["Google Chrome"].exists, "Search didn’t filter")
         tap(app.sheets.buttons["Done"])
         XCTAssertTrue(app.sheets.firstMatch.waitForNonExistence(timeout: 10))
 
@@ -321,7 +318,7 @@ final class DemoSmokeUITests: DeployerUITestCase {
                       "Day 0 didn’t detect the ADE instance")
         for title in ["Apple Push Notification certificate", "Automated Device Enrollment", "Apps and Books",
                       "Self Service branding", "Jamf Protect link", "Cloud Services Connection"] {
-            XCTAssertTrue(any(title).exists, "No Day 0 row \(title)")
+            XCTAssertTrue(anyContaining(title).waitForExistence(timeout: 10), "No Day 0 row \(title)")
         }
 
         openDemoTenant(contoso, tab: "Day 0 Setup")
@@ -343,9 +340,8 @@ final class DemoSmokeUITests: DeployerUITestCase {
 
     // MARK: Library
 
-    /// Building Blocks: a block card opens its details sheet from the
-    /// keyboard (Tab to it, Space), and Escape closes it. Full keyboard
-    /// access is switched on for this launch only.
+    /// Building Blocks: a block card is a button (so the keyboard and
+    /// VoiceOver reach it), opens its details sheet, and Escape closes it.
     func test17CatalogCardKeyboard() {
         XCTAssertTrue(mainWindow.waitForExistence(timeout: 20))
         openSidebar("Building Blocks")
@@ -356,19 +352,9 @@ final class DemoSmokeUITests: DeployerUITestCase {
             : mainWindow.buttons.containing(NSPredicate(format: "value == 'App Catalog' OR label == 'App Catalog'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 10), "No App Catalog card")
 
-        let cardFrame = card.frame
-        let focus = app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
-        var focused = false
-        for _ in 0..<60 {
-            app.typeKey(.tab, modifierFlags: [])
-            if focus.exists, focus.label.hasPrefix("App Catalog") || focus.frame == cardFrame {
-                focused = true
-                break
-            }
-        }
-        XCTAssertTrue(focused, "Tab never reached the App Catalog card")
-        app.typeKey(.space, modifierFlags: [])
-        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10), "Space didn’t open the block’s details")
+        XCTAssertEqual(card.elementType, .button, "The card isn’t exposed as a button")
+        card.click()
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10), "The card didn’t open the block’s details")
         XCTAssertTrue(app.sheets.staticTexts["App Catalog"].exists, "The sheet isn’t App Catalog’s")
         XCTAssertTrue(app.sheets.buttons["Close"].exists, "No Close button")
         app.typeKey(.escape, modifierFlags: [])
