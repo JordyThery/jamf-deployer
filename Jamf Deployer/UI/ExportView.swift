@@ -340,9 +340,8 @@ struct ExportView: View {
                     return
                 }
                 // Captured blocks carry their own copy of enrollment icons,
-                // downloaded only from the tenant's Jamf Cloud host, and logged.
-                let iconHosts: Set<String> = tenant.jamfProURL
-                    .flatMap { URL(string: $0)?.host()?.lowercased() }.map { [$0] } ?? [".jamfcloud.com"]
+                // downloaded only from the tenant's own host or Jamf Cloud, and logged.
+                let iconHosts = EnrollmentIcons.allowedHosts(jamfProURL: tenant.jamfProURL)
                 let log = activityLog
                 await EnrollmentIcons.localize(directory: result.outputURL, allowedHosts: iconHosts) { url in
                     let started = Date()
@@ -509,7 +508,7 @@ struct ExportView: View {
             let staging = try prunedCopy(of: result, keeping: selectedObjects)
             defer { try? FileManager.default.removeItem(at: staging) }
             // Clones live in an app-managed source, one block per clone.
-            let cloneRoot = URL.applicationSupportDirectory.appending(path: "Jamf Deployer/cloned-blocks")
+            let cloneRoot = AppFiles.url("cloned-blocks")
             let source: CatalogSourceStore.CustomSource
             if let existing = catalogSources.customSources.first(where: { $0.path == cloneRoot.path }) {
                 source = existing

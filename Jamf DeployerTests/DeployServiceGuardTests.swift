@@ -99,6 +99,35 @@ struct DeployServiceGuardTests {
         await #expect { try await fixture.service.moveStateToLocal() } throws: { Self.isError($0, "engineWorkInProgress") }
     }
 
+    @Test("Leaving Team Mode skips tenants without state on the state branch")
+    func leaveSkipsTenantsWithoutTeamState() async throws {
+        let fixture = Self.make()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let remote = fixture.root.appending(path: "remote.git")
+        try FileManager.default.createDirectory(at: remote, withIntermediateDirectories: true)
+        try TestGit.run(["init", "--bare", "--initial-branch", "main"], in: remote)
+        try await fixture.service.gitStore.ensureRepo()
+        try await fixture.service.gitStore.attachRemote(remote.path)
+        try await fixture.service.gitStore.ensureStateBranch()
+        await fixture.service.syncTeamState()
+        #expect(fixture.service.isTeamMode)
+
+        // Never deployed: a block from a catalog this Mac doesn't follow, and
+        // no client secret on this Mac. It has no state, so it can't block leaving.
+        var unfinished = Self.tenant("Unfinished")
+        unfinished.blockSelections = [BlockSelection(blockID: "not-in-any-catalog", sourceID: "elsewhere")]
+        fixture.tenantStore.add(unfinished)
+
+        let moved = try await fixture.service.moveStateToLocal()
+        #expect(moved.isEmpty)
+        #expect(!fixture.service.isBusy)
+
+        let deployed = Self.tenant("Deployed"), handedOver = { var t = Self.tenant("Handed over"); t.mode = .handedOver; return t }()
+        let chosen = TenantDeployService.tenantsToMoveToLocal(
+            [unfinished, deployed, handedOver], withTeamState: [deployed.id, handedOver.id])
+        #expect(chosen.map(\.id) == [deployed.id])
+    }
+
     @Test("Only state that was moved into the team space is retired")
     func onlyMovedStateIsRetired() throws {
         let fixture = Self.make()

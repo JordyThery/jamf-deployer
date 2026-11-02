@@ -45,9 +45,15 @@ struct AdoptView: View {
     @State private var logTail: [String] = []
     /// Possible secrets, by object: from jamformer's scan and the app's own.
     @State private var secretObjects: [SecretObjectFinding] = []
-    /// Objects holding a possible secret: they cannot be staged, because
+    /// Objects holding a possible secret: each flagged value becomes a
+    /// sensitive variable whose value stays in this Mac's Keychain, since
     /// adopted objects are saved in the store (and in Team Mode shared).
     @State private var secretAddresses: Set<String> = []
+    /// jamformer's own findings, to find their values when staging.
+    @State private var jamformerFindings: [JamformerSecretFinding] = []
+    /// Findings (`SecretObjectFinding.id`) marked "not a secret": their
+    /// values are adopted as they are.
+    @State private var notSecret: Set<String> = []
 
     private var runner: JamformerRunner { JamformerRunner(tools: deployService.tools) }
 
@@ -145,7 +151,7 @@ struct AdoptView: View {
                     TextField("Filter objects", text: $objectFilter)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 180)
-                    Button("All") { selectedObjects.formUnion(filteredObjects.map(\.address).filter { !secretAddresses.contains($0) }) }
+                    Button("All") { selectedObjects.formUnion(filteredObjects.map(\.address)) }
                         .help("Selects every object the filter shows")
                     Button("None") { selectedObjects.subtract(filteredObjects.map(\.address)) }
                         .help("Deselects every object the filter shows")
@@ -154,7 +160,7 @@ struct AdoptView: View {
                 if !secretObjects.isEmpty {
                     SecretObjectsNotice(
                         findings: secretObjects,
-                        message: "These may contain a secret, so they can’t be adopted: adopted objects are saved in the tenant record. Remove the secret in Jamf (a script parameter, for example), then discover again.")
+                        message: "These may contain a secret. Adopting one keeps each flagged value in this Mac’s Keychain as a secret setting, never in the tenant record. Mark a finding as not a secret to adopt the value as it is.")
                 }
                 if !unmanageableNotes.isEmpty {
                     Text("Left out — the app can’t manage these: " + unmanageableNotes.joined(separator: "; ") + ". They stay in Jamf unchanged.")
@@ -183,13 +189,9 @@ struct AdoptView: View {
                             }
                         }
                         .toggleStyle(.checkbox)
-                        .disabled(secretAddresses.contains(object.address))
                         Spacer()
                         if secretAddresses.contains(object.address) {
-                            let rules = secretObjects.filter { $0.address == object.address }.map(\.rule).joined(separator: ", ")
-                            StatusBadge("Possible secret", style: .warning)
-                                .help(rules)
-                                .accessibilityLabel("Possible secret: \(rules)")
+                            secretChoices(for: object)
                         } else if object.hasProvenanceTag {
                             StatusBadge("Created by a building block", style: .warning)
                                 .help("Tagged by Jamf Deployer, so it likely belongs to a building block")
@@ -320,7 +322,9 @@ struct AdoptView: View {
                 secretObjects = (result.secretObjects + own).filter { seen.insert($0.id).inserted }
                 secretAddresses = Set(secretObjects.compactMap(\.address))
 
-                selectedObjects = Set(objects.filter { !$0.hasProvenanceTag && !secretAddresses.contains($0.address) }.map(\.address))
+                jamformerFindings = result.secretFindings
+                notSecret = []
+                selectedObjects = Set(objects.filter { !$0.hasProvenanceTag }.map(\.address))
                 step = objects.isEmpty
                     ? .failed(alreadyAdopted.isEmpty
                         ? "No objects of the chosen types were found."
@@ -336,21 +340,52 @@ struct AdoptView: View {
         }
     }
 
+    /// A flagged object's findings, each with its "not a secret" choice.
+    private func secretChoices(for object: ExportedObject) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            StatusBadge("Secret → Keychain", style: .info)
+                .help("Each flagged value becomes a secret setting kept in this Mac’s Keychain, never in the tenant record.")
+            ForEach(secretObjects.filter { $0.address == object.address }) { finding in
+                Toggle("Not a secret: \(finding.rule)", isOn: Binding(
+                    get: { notSecret.contains(finding.id) },
+                    set: { on in
+                        if on { notSecret.insert(finding.id) } else { notSecret.remove(finding.id) }
+                    }
+                ))
+                .toggleStyle(.checkbox)
+                .font(.caption)
+                .help("Adopts this value as it is, in the tenant record, and stops the store check asking about it.")
+            }
+        }
+        .controlSize(.small)
+    }
+
     private func stage() {
         guard let exportURL else { return }
         do {
             // Objects a block already manages, and those the app cannot
             // manage, cannot be pulled in for an object that needs them.
             let blockManaged = Set(objects.filter(\.hasProvenanceTag).map(\.address)).subtracting(selectedObjects)
-            // Objects holding a possible secret never reach the store, and
-            // neither does anything that needs them.
+            // Possible secrets never reach the store: their values are found
+            // now (jamformer's lines are those of the whole export). A value
+            // that can't be found leaves its object out, and anything that
+            // needs it, unless it's marked not a secret.
+            let located = AdoptSecrets.locate(in: exportURL, jamformerFindings: jamformerFindings,
+                                              selected: selectedObjects, notSecret: notSecret)
+            let unlocatable = Set(located.notLocated.compactMap(\.address))
             let selection = ExportedObjectInventory.adoptableSelection(
-                directory: exportURL, kept: selectedObjects.subtracting(secretAddresses), alreadyManaged: alreadyAdopted,
-                unavailable: unmanageableAddresses.union(blockManaged).union(secretAddresses))
+                directory: exportURL, kept: selectedObjects.subtracting(unlocatable), alreadyManaged: alreadyAdopted,
+                unavailable: unmanageableAddresses.union(blockManaged).union(unlocatable))
             let kept = selection.kept
             let leftOutNames = objects.filter { selection.leftOut.contains($0.address) }.map(\.displayName).sorted()
-            stagingNote = leftOutNames.isEmpty ? nil
-                : "Not staged — they depend on objects the app can’t adopt: \(leftOutNames.joined(separator: ", "))."
+            let unlocatableNames = objects.filter { unlocatable.contains($0.address) }.map(\.displayName).sorted()
+            let notes = [
+                unlocatableNames.isEmpty ? nil
+                    : "Not staged — a possible secret couldn’t be moved to the Keychain: \(unlocatableNames.joined(separator: ", ")). Mark it as not a secret to adopt it as it is.",
+                leftOutNames.isEmpty ? nil
+                    : "Not staged — they depend on objects the app can’t adopt: \(leftOutNames.joined(separator: ", "))."
+            ].compactMap(\.self)
+            stagingNote = notes.isEmpty ? nil : notes.joined(separator: " ")
             guard !kept.isEmpty else {
                 step = .failed(stagingNote ?? "Nothing was selected to adopt.")
                 return
@@ -361,9 +396,23 @@ struct AdoptView: View {
             try ExportedObjectInventory.inlineVariables(directory: exportURL)
             try ExportedObjectInventory.protectOmittedSections(directory: exportURL)
 
+            // Each flagged value becomes a sensitive variable too.
+            let destinationVariables = deployService.adoptedURL(for: tenant)
+                .appending(path: TenantDeployService.adoptedSensitiveVariablesFile)
+            let taken = Set(ExportedObjectInventory.declaredVariableNames(in: destinationVariables))
+                .union(ExportedObjectInventory.declaredVariableNames(in: exportURL.appending(path: "variables.tf")))
+            let replaced = try AdoptSecrets.replace(
+                in: exportURL, values: located.values.filter { $0.object.address.map(kept.contains) ?? false }, taken: taken)
+            guard replaced.notReplaced.isEmpty else {
+                let names = replaced.notReplaced.map { $0.objectDescription }.sorted().joined(separator: ", ")
+                step = .failed("A possible secret in \(names) couldn’t be moved to the Keychain, so nothing was staged. Mark it as not a secret to adopt it as it is, or leave the object out.")
+                return
+            }
+
             // Sensitive values are never written into the configuration:
             // they stay variables, with their values in this Mac's Keychain.
             let sensitive = ExportedObjectInventory.sensitiveVariables(directory: exportURL)
+                + replaced.variables.map { .init(name: $0.name, declaration: $0.declaration, value: $0.value) }
             let secrets = TenantSecrets(tenantID: tenant.id)
             for variable in sensitive {
                 guard let value = variable.value else {
@@ -395,6 +444,10 @@ struct AdoptView: View {
             }
             try ExportedObjectInventory.mergeSensitiveDeclarations(
                 sensitive, into: destination.appending(path: TenantDeployService.adoptedSensitiveVariablesFile))
+            // Values marked not a secret are adopted as they are; the store
+            // check is told, by location and rule only.
+            let overridden = notSecret
+            Task { try? await deployService.acknowledgeNotSecrets(in: destination, objects: overridden) }
             step = .ready(count: kept.count)
             activityLog.append(ActivityLogEntry(
                 category: "Adopt", operation: "stage", detail: tenant.name,

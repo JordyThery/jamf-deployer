@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import JTKit
 
 /// Downloads and manages the Terraform binary jamformer needs for exports.
 ///
@@ -21,13 +22,17 @@ final class TerraformManager {
     private(set) var status: Status = .notInstalled
 
     private var installURL: URL {
-        URL.applicationSupportDirectory
-            .appending(path: "Jamf Deployer/terraform/\(Self.pinnedVersion)/terraform")
+        AppFiles.url("terraform/\(Self.pinnedVersion)/terraform")
     }
 
     init() {
+        // Under the live-check switch a copy downloaded earlier is only
+        // read from its usual place; a new download goes to the run's folder.
+        let usual = AppFiles.usualURL("terraform/\(Self.pinnedVersion)/terraform")
         if FileManager.default.isExecutableFile(atPath: installURL.path) {
             status = .installed(installURL)
+        } else if LiveLaunch.isSwitched, FileManager.default.isExecutableFile(atPath: usual.path) {
+            status = .installed(usual)
         }
     }
 

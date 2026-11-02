@@ -57,7 +57,7 @@ final class CatalogSourceStore {
         }
 
         static func cacheRoot(for id: UUID) -> URL {
-            URL.applicationSupportDirectory.appending(path: "Jamf Deployer/catalog-cache/\(id.uuidString)")
+            AppFiles.url("catalog-cache/\(id.uuidString)")
         }
     }
 

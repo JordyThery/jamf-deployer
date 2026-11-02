@@ -181,13 +181,16 @@ struct PrefixAllNamesTests {
 struct CaptureSafetyTests {
     @Test func aStoppedCaptureLeavesNoFolderBehind() throws {
         let export = try SecretScanTests.copyExport()
+        let empty = try temporaryFolder("capture-empty")
         let root = try temporaryFolder("capture-cleanup")
-        defer { try? FileManager.default.removeItem(at: export); try? FileManager.default.removeItem(at: root) }
-        let lost = JamformerSecretFinding(
-            location: SecretFinding(path: SecretScanTests.scriptPath, line: 3, rule: "Password value in HCL attribute"),
-            maskedText: "NOPE*****-999")
+        defer {
+            try? FileManager.default.removeItem(at: export)
+            try? FileManager.default.removeItem(at: empty)
+            try? FileManager.default.removeItem(at: root)
+        }
+        // An export with nothing in it stops after the block folder was made.
         #expect(throws: BlockCapture.CaptureError.self) {
-            try SecretScanTests.capture(export: export, findings: [lost], root: root, id: "retry-me")
+            try SecretScanTests.capture(export: empty, findings: [], root: root, id: "retry-me")
         }
         #expect(!FileManager.default.fileExists(atPath: root.appending(path: "blocks/retry-me").path))
         // The same ID can be captured again.
@@ -387,6 +390,20 @@ struct EnrollmentIconTests {
         #expect(!EnrollmentIcons.mayDownload(URL(string: "https://user:pass@origin.example.com/icon")!, allowedHosts: hosts))
         #expect(EnrollmentIcons.mayDownload(URL(string: "https://a.jamfcloud.com/i")!, allowedHosts: [".jamfcloud.com"]))
         #expect(!EnrollmentIcons.mayDownload(URL(string: "https://jamfcloud.com.example/i")!, allowedHosts: [".jamfcloud.com"]))
+    }
+
+    @Test func jamfProTenantsOnJamfCloudAlsoGetJamfCloudIcons() {
+        // Jamf serves icons from its own Jamf Cloud services, not the tenant's host.
+        let icon = URL(string: "https://ics.services.jamfcloud.com/icon/hash_1")!
+        let hosted = EnrollmentIcons.allowedHosts(jamfProURL: "https://example.jamfcloud.com")
+        #expect(EnrollmentIcons.mayDownload(icon, allowedHosts: hosted))
+        #expect(EnrollmentIcons.mayDownload(URL(string: "https://example.jamfcloud.com/icon/1")!, allowedHosts: hosted))
+        // A server of its own: only its host.
+        let own = EnrollmentIcons.allowedHosts(jamfProURL: "https://jamf.example.com:8443")
+        #expect(own == ["jamf.example.com"])
+        #expect(!EnrollmentIcons.mayDownload(icon, allowedHosts: own))
+        // A Jamf Platform API tenant (no Jamf Pro address): Jamf Cloud.
+        #expect(EnrollmentIcons.allowedHosts(jamfProURL: nil) == [".jamfcloud.com"])
     }
 
     @Test func localizesThroughTheAppsFetch() async throws {

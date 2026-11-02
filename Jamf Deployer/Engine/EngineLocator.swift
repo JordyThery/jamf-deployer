@@ -54,8 +54,7 @@ nonisolated enum EngineLocator {
     /// Writes the engine CLI configuration pointing
     /// provider installation at the bundled mirror, so init never downloads.
     static func ensureCLIConfig() throws -> URL {
-        let url = URL.applicationSupportDirectory
-            .appending(path: "Jamf Deployer/engine/tofu.tfrc")
+        let url = AppFiles.url("engine/tofu.tfrc")
         let contents = """
         provider_installation {
           filesystem_mirror {

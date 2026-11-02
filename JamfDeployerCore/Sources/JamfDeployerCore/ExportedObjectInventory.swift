@@ -134,6 +134,12 @@ public nonisolated enum ExportedObjectInventory {
         public var name: String
         public var declaration: String
         public var value: String?
+
+        public init(name: String, declaration: String, value: String?) {
+            self.name = name
+            self.declaration = declaration
+            self.value = value
+        }
     }
 
     /// The sensitive variables the directory's resources reference. The

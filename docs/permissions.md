@@ -59,7 +59,9 @@ tenant’s Apps and Books locations and their licensed content with
 Captured blocks list the privileges recorded at export, narrowed to their
 own object types, plus read access for the lookups capture adds: the
 Automated Device Enrollment instance, Jamf’s built-in groups and the Apps
-and Books location.
+and Books location. A captured block that uploads a package file to a
+tenant on Jamf Cloud also needs `jamf-cloud-distribution-service-files:create`:
+the file goes straight to Jamf Cloud’s storage.
 
 ### Per feature
 

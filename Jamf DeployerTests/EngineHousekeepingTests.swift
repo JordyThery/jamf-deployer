@@ -76,13 +76,17 @@ struct StateBackendHousekeepingTests {
             keyText: "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n"))
     }
 
-    @Test("SSH sign-in prefers the agent and never hands over a locked key")
+    @Test("SSH sign-in passes the agent and an unlocked key file, never a locked key")
     func sshEnvironment() throws {
         let plain = (path: "/Users/example/.ssh/id_ed25519", text: Self.openSSHKey(cipher: "none"))
         let locked = (path: "/Users/example/.ssh/id_rsa", text: Self.openSSHKey(cipher: "aes256-ctr"))
 
-        // An agent with keys: it alone.
+        // An agent with keys (maybe ones this remote doesn't take): the
+        // unlocked key file goes alongside it, as before 1.1.0.
         #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: true, keys: [plain])
+            == ["SSH_AUTH_SOCK": "/tmp/agent", "SSH_PRIVATE_KEY": plain.path])
+        // An agent with keys and only a locked key file: the agent alone.
+        #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: true, keys: [locked])
             == ["SSH_AUTH_SOCK": "/tmp/agent"])
         // An empty agent: the first key without a passphrase.
         #expect(try StateBackendService.sshEnvironment(agentSocket: "/tmp/agent", agentHasKeys: false, keys: [locked, plain])

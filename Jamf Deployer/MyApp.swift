@@ -9,9 +9,15 @@ struct MyApp: App {
     @State private var terraform = TerraformManager()
     @State private var componentUpdates = ComponentUpdateChecker()
     @State private var connections: ConnectionStore<TenantConnection>
+    @State private var waits: RequestWaits
 
     init() {
         let activityLog = ActivityLog()
+        // Waits before a retry, from every tenant's client: shown in the
+        // main window with Stop.
+        let waits = RequestWaits()
+        TenantClients.shared.showWaits(in: waits)
+        _waits = State(initialValue: waits)
         // Demo Mode in the Tenant menu, saved under "demoMode"
         let demo = DemoMode(key: "demoMode")
         if demo.isSandbox { DemoSecretVault.keepEverythingInMemory() }
@@ -61,6 +67,7 @@ struct MyApp: App {
                     .id(world.id)
                     .environment(world.tenantStore)
                     .environment(activityLog)
+                    .environment(waits)
                     .environment(updates)
                     .environment(tour)
                     .environment(world.deployService)
@@ -84,7 +91,7 @@ struct MyApp: App {
 
         AboutWindow(configuration: .jamfDeployer)
 
-        // General (Appearance first), Connections, Team, Advanced, then Updates.
+        // General, Connections, Team, Advanced, then Updates.
         SettingsWindow(updates: updates) {
             GeneralSettingsSections()
         } tabs: {

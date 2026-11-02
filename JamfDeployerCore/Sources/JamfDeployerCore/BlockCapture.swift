@@ -170,12 +170,6 @@ public nonisolated enum BlockCapture {
         case nothingToCapture(reasons: [String] = [])
         case invalidBlockID
         case blockExists(String)
-        /// The scan reported a secret in a captured object, but the value
-        /// could not be found to replace it.
-        case secretNotLocated(object: String, rule: String)
-        /// The secret is in a support file the object loads in a way the
-        /// capture cannot turn into a template.
-        case secretNotReplaceable(object: String)
 
         public var errorDescription: String? {
             switch self {
@@ -187,10 +181,6 @@ public nonisolated enum BlockCapture {
                 "Block IDs use lowercase letters, digits and dashes only."
             case .blockExists(let id):
                 "A block with the ID “\(id)” already exists in this source. Choose another ID, or delete the existing block first."
-            case .secretNotLocated(let object, let rule):
-                "The secret scan found a possible secret in \(object) (\(rule)), but it couldn’t be replaced by a secret setting. Leave this object out, or remove the secret in Jamf and export again."
-            case .secretNotReplaceable(let object):
-                "\(object) holds a possible secret in a file it loads in a way the capture can’t turn into a secret setting. Leave this object out, or remove the secret in Jamf and export again."
             }
         }
     }
@@ -672,6 +662,7 @@ public nonisolated enum BlockCapture {
         // entered per tenant and kept in the Keychain. Values stay in memory.
         let secretPlan = try planSecretSettings(request: request, fileTexts: fileTexts, localAddresses: localAddresses)
         fileTexts = secretPlan.fileTexts
+        warnings += secretPlan.warnings
         var secretSettings = secretPlan.settings
 
         // 1c. Write the files and count what survived.

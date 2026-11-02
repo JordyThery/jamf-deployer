@@ -119,6 +119,38 @@ struct StoreSecretCheckTests {
     }
 
     @discardableResult
+    @Test("A finding in a tenant's deploy history never stops a commit")
+    func deployHistoryDoesNotStopCommits() async throws {
+        let (store, url) = try await Self.makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let history = "tenants/00000000-0000-4000-9000-000000000001/history/20261101-120000/plan.json"
+        try Self.write("PASSWORD=\"\(Self.fakeScriptSecret)\"\n", to: history, in: url)
+        #expect(try await store.unacknowledgedFindings().count == 1, "it's still found, for the review")
+        #expect(try await store.commitAll(message: "Deploy") == true)
+        #expect(try Self.git(["ls-files"], in: url).contains("history/20261101-120000/plan.json"))
+
+        #expect(GitStoreService.isDeployHistory(history))
+        #expect(!GitStoreService.isDeployHistory(Self.scriptPath))
+        #expect(!GitStoreService.isDeployHistory("history/plan.json"))
+        #expect(!GitStoreService.isDeployHistory("tenants/not-a-tenant/history/plan.json"))
+    }
+
+    @Test("The review marks several findings as not a secret at once")
+    func bulkAcknowledgement() async throws {
+        let (store, url) = try await Self.makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let second = Self.scriptPath.replacingOccurrences(of: "ZZ Secret Scan Test", with: "ZZ Second")
+        try Self.write("PASSWORD=\"\(Self.fakeScriptSecret)\"\n", to: Self.scriptPath, in: url)
+        try Self.write("PASSWORD=\"\(Self.fakeScriptSecret)\"\n", to: second, in: url)
+        let findings = try await store.unacknowledgedFindings()
+        #expect(findings.count == 2)
+
+        try await store.acknowledge(findings)
+        #expect(try await store.unacknowledgedFindings().isEmpty)
+        #expect(try await store.commitAll(message: "Adopt") == true)
+        #expect(await store.acknowledgements().notSecrets.count == 2)
+    }
+
     static func git(_ arguments: [String], in url: URL) throws -> String {
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/git")

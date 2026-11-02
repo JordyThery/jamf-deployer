@@ -195,7 +195,7 @@ struct DemoModeTests {
     }
 
     @Test("Demo tenants' secrets stay in memory, never in the Keychain")
-    func secretsInMemory() {
+    func secretsInMemory() throws {
         let id = DemoTenants.newTenantID()
         let secrets = TenantSecrets(tenantID: id)
         #expect(secrets.platformClientSecret.load() == "demo-secret")
@@ -204,7 +204,7 @@ struct DemoModeTests {
         #expect(setting.save("demo-value"))
         #expect(setting.load() == "demo-value")
         let keychain = KeychainSecretStore(service: setting.service, accessibility: .whenUnlocked)
-        #expect(keychain.secret(for: setting.account) == nil, "nothing reached the Keychain")
+        #expect(try keychain.readSecret(for: setting.account) == nil, "nothing reached the Keychain")
         secrets.deleteAll()
         #expect(setting.load() == nil)
         // a real tenant's items are still the Keychain's

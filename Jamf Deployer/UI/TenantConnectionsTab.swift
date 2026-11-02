@@ -105,7 +105,7 @@ struct TenantConnectionsTab: View {
         let tenant = record.tenant
         let connection = record.connection
         let usesPassword = connection.signIn == .usernamePassword
-        guard let secret = typed[.main] ?? store.secret(.main, for: connection), !secret.isEmpty else {
+        guard let secret = try typed[.main] ?? store.readSecret(.main, for: connection), !secret.isEmpty else {
             throw TestError.noSecret(usesPassword: usesPassword)
         }
         let signInName = (usesPassword ? connection.username : connection.clientID)

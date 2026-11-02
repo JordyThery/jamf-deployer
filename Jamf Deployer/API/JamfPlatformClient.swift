@@ -41,7 +41,7 @@ nonisolated struct JamfAPIConfiguration: Sendable {
         let item = TenantSecrets(tenantID: tenant.id).platformClientSecret
         let usesPassword = tenant.isJamfPro && tenant.jamfProAuth == .userAccount
         secret = {
-            guard let value = item.load() else {
+            guard let value = try item.read() else {
                 throw JamfAPIError.notAuthenticated(usesPassword ? "no password saved" : "no client secret saved",
                                                     flavor: usesPassword ? .jamfProUser : tenant.isJamfPro ? .jamfProAPIClient : .platform)
             }
@@ -142,10 +142,14 @@ actor JamfPlatformClient {
     /// Where the requests go, which decides where a missing permission is fixed.
     nonisolated let server: JamfPlatform.Server
 
+    /// - Parameter waits: where waits before a retry show, with Stop; nil
+    ///   for one-off checks (the wizard, Test Connection), whose sheet shows
+    ///   its own progress.
     init(
         configuration: JamfAPIConfiguration,
         activityLog: ActivityLog?,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        waits: RequestWaits? = nil
     ) {
         self.configuration = configuration
         let server: JamfPlatform.Server = configuration.flavor == .platform ? .platformAPI : .jamfPro
@@ -153,7 +157,8 @@ actor JamfPlatformClient {
         let recorder = RequestRecorder(
             session: session, log: activityLog, category: "API",
             service: configuration.flavor == .platform ? "Jamf Platform API" : "Jamf Pro",
-            connection: configuration.connectionName
+            connection: configuration.connectionName,
+            waits: waits
         )
         let tokenPath: String
         let method: JamfPlatform.TokenProvider.Method

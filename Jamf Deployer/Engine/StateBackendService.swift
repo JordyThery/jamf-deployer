@@ -79,7 +79,7 @@ final class StateBackendService {
     /// refuses to start while another copy runs, so it must not share the
     /// system one.
     nonisolated static var workFolderURL: URL {
-        URL.applicationSupportDirectory.appending(path: "Jamf Deployer/engine/state-backend")
+        AppFiles.url("engine/state-backend")
     }
 
     /// Stops a backend left running by an app that crashed or was force-quit:
@@ -372,18 +372,19 @@ final class StateBackendService {
         return environment
     }
 
-    /// SSH sign-in for the backend: the engineer's agent when it holds a
-    /// key (it follows their own setup); otherwise the first default key
-    /// file without a passphrase, which the backend can't ask for.
+    /// SSH sign-in for the backend: the engineer's agent, and alongside it
+    /// the first default key file without a passphrase (which the backend
+    /// can't ask for), so a key in the agent that this remote doesn't take
+    /// (a work key, say) doesn't hide the one it does. Only locked key files
+    /// and an empty agent: the engineer is asked to add a key to the agent.
     nonisolated static func sshEnvironment(
         agentSocket: String?, agentHasKeys: Bool, keys: [(path: String, text: String)]
     ) throws -> [String: String] {
         var environment: [String: String] = [:]
         if let agentSocket { environment["SSH_AUTH_SOCK"] = agentSocket }
-        if agentSocket != nil && agentHasKeys { return environment }
         if let key = keys.first(where: { !isPassphraseProtected(keyText: $0.text) }) {
             environment["SSH_PRIVATE_KEY"] = key.path
-        } else if !keys.isEmpty {
+        } else if !keys.isEmpty && !(agentSocket != nil && agentHasKeys) {
             throw BackendError.sshKeyNeedsAgent
         }
         return environment

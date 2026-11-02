@@ -21,6 +21,9 @@ struct ContentView: View {
             detail
         }
         .frame(minWidth: 900, minHeight: 560)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            RequestWaitsBar()
+        }
         .sheet(isPresented: $isConnectingTenant) {
             ConnectTenantWizard()
         }
@@ -69,6 +72,30 @@ struct ContentView: View {
             CatalogView()
         case .history:
             HistoryView()
+        }
+    }
+}
+
+/// A wait before Jamf is asked again ("Jamf asked to wait 40 s"), with Stop,
+/// which ends every wait at once; those requests aren't sent again.
+private struct RequestWaitsBar: View {
+    @Environment(RequestWaits.self) private var waits
+
+    var body: some View {
+        if let text = waits.statusText {
+            HStack(spacing: 8) {
+                Label(text, systemImage: "hourglass")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Stop") { waits.cancelAll() }
+                    .help("Ends the wait now; the request isn’t sent again.")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+            .accessibilityElement(children: .contain)
         }
     }
 }
