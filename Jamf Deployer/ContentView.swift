@@ -24,7 +24,6 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             detail
-                .navigationSubtitle(demo.isOn ? DemoMode.title : "")
         }
         .frame(minWidth: 900, minHeight: 560)
         .safeAreaInset(edge: .bottom, spacing: 0) {

@@ -455,17 +455,13 @@ final class DemoSmokeUITests: DeployerUITestCase {
     /// Tenant › Preview Changes… (⌘P) opens the preview for the selected tenant.
     func test21ViewAndTenantMenus() {
         XCTAssertTrue(app.outlines.staticTexts[contoso].waitForExistence(timeout: 20))
-        app.typeKey("2", modifierFlags: .command)
-        XCTAssertTrue(waitTitle("Building Blocks"), "⌘2 didn’t open Building Blocks")
-        app.typeKey("3", modifierFlags: .command)
-        XCTAssertTrue(waitTitle("History"), "⌘3 didn’t open History")
-        app.typeKey("1", modifierFlags: .command)
-        XCTAssertTrue(waitTitle("Fleet"), "⌘1 didn’t open the dashboard")
         for (item, title) in [("Building Blocks", "Building Blocks"), ("History", "History"), ("Dashboard", "Fleet")] {
             tap(app.menuBars.menuBarItems["View"])
             tap(app.menuBars.menuItems[item], timeout: 10)
-            XCTAssertTrue(waitTitle(title), "View › \(item) didn’t open it")
+            XCTAssertTrue(waitTitle(title), "View › \(item) didn’t open it (title: \(mainWindow.title))")
         }
+        // ⌘1–3 aren't pressed: on a keyboard where digits need Shift
+        // (Belgian, French), XCTest's typed "2" doesn't arrive as ⌘2.
 
         openDemoTenant(contoso)
         app.typeKey("p", modifierFlags: .command)
