@@ -84,7 +84,7 @@ final class ExportUITests: DeployerUITestCase {
                      "Terraform: resources in the state", "Terraform: the last apply"] {
             XCTAssertTrue(anyContaining(term).waitForExistence(timeout: 10), "The tenant page does not show \"\(term)\"")
         }
-        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        tap(app.toolbars.buttons["Preview Changes…"], timeout: 10)
         XCTAssertTrue(anyContaining("Behind this preview").waitForExistence(timeout: 300), "The preview shows no engine details")
         XCTAssertTrue(anyContaining("tofu plan -input=false -out=plan.bin -json").exists, "The plan command is not shown")
         XCTAssertTrue(anyContaining("tofu apply -input=false -json").exists, "The deploy command is not shown")
@@ -145,10 +145,10 @@ final class ExportUITests: DeployerUITestCase {
     /// Settings open one block at a time: opens each selected block's
     /// settings until `element` shows.
     private func openSettings(until element: XCUIElement) {
-        let toggles = app.buttons.matching(NSPredicate(format: "label IN {'Show Settings', 'Hide Settings'}"))
+        let toggles = app.buttons.matching(NSPredicate(format: "identifier IN {'Show Settings', 'Hide Settings'}"))
         for index in 0..<toggles.count where !element.exists {
             let toggle = toggles.element(boundBy: index)
-            if toggle.label == "Show Settings" {
+            if toggle.identifier == "Show Settings" {
                 toggle.click()
                 sleep(1)
             }

@@ -342,12 +342,12 @@ struct TenantDetailView: View {
                 Button {
                     isPreviewing = true
                 } label: {
-                    Label("Preview Changes", systemImage: "list.bullet.clipboard")
+                    Label("Preview Changes…", systemImage: "list.bullet.clipboard")
                 }
                 .disabled(!hasAnythingToPreview(tenant) || deployService.isBusy || tenant.isHandedOver)
                 .help(!hasAnythingToPreview(tenant)
                     ? "Select building blocks or adopt existing configuration first"
-                    : "See exactly what would change before anything is deployed")
+                    : "See exactly what would change before anything is deployed (⌘P)")
             }
             .sheet(isPresented: $isPreviewing) {
                 PreviewDeploySheet(tenantID: tenant.id)
@@ -367,9 +367,24 @@ struct TenantDetailView: View {
                 engineerClientID = (tenant.id, tenant.engineerClientID)
             }
             .onChange(of: appState.previewRequestCount) {
-                if !tenant.isHandedOver, hasAnythingToPreview(tenant) {
+                if !tenant.isHandedOver, hasAnythingToPreview(tenant), !isPresentingSheet {
                     isPreviewing = true
                 }
+            }
+            // The Tenant and View menus' commands, with the same checks as
+            // the buttons on this page.
+            .onChange(of: appState.menuRequest, initial: true) {
+                handleMenuRequest(tenant)
+            }
+            .onChange(of: isRunningPreflight) { _, running in
+                guard !running else { return }
+                let failed = checks.filter { $0.outcome == .fail }.count
+                let warned = checks.filter { $0.outcome == .warn }.count
+                AccessibilityNotification.Announcement(
+                    failed > 0 ? "Preflight finished. \(failed) check\(failed == 1 ? "" : "s") failed."
+                        : warned > 0 ? "Preflight finished. \(warned) check\(warned == 1 ? " needs" : "s need") review."
+                        : "Preflight finished. All checks passed."
+                ).post()
             }
             .alert("Hand Over “\(tenant.name)”?", isPresented: $isConfirmingHandOver) {
                 TextField("Type the tenant name to confirm", text: $handOverTypedName)
@@ -524,6 +539,8 @@ struct TenantDetailView: View {
                                             keepOutcomes["\(object.address)|\(field.path)"] = "\(object.displayName) · \(field.path): \(note)"
                                         }
                                         .help("Accept the value in Jamf; the baseline adopts it where a block setting controls the field")
+                                        .accessibilityLabel("Keep change to \(field.path) on \(object.displayName)")
+                                        .accessibilityIdentifier("Keep This Change")
                                     }
                                     .controlSize(.small)
                                     .padding(.top, 2)
@@ -601,6 +618,65 @@ struct TenantDetailView: View {
         Task {
             defer { isCheckingDrift = false }
             await deployService.checkDriftRecordingFailure(tenant: tenant)
+            let updated = tenantStore.tenant(id: tenant.id) ?? tenant
+            let message = if deployService.fleetCheckFailure(for: tenant.id) != nil {
+                "Check for changes failed."
+            } else if updated.outstandingDrift.isEmpty {
+                "Check finished. In sync with the baseline."
+            } else {
+                "Check finished. \(updated.outstandingDrift.count) change\(updated.outstandingDrift.count == 1 ? "" : "s") made in Jamf."
+            }
+            AccessibilityNotification.Announcement(message).post()
+        }
+    }
+
+    private var isPresentingSheet: Bool {
+        isPreviewing || isAdopting || isAddingCustomObject || isUpdatingSecret || isConfirmingHandOver
+    }
+
+    /// Runs a menu command for this tenant as its button on this page would.
+    private func handleMenuRequest(_ tenant: Tenant) {
+        // Baseline Updates… is the baseline editor's, on the Overview tab.
+        if appState.menuRequest?.command == .baselineUpdates {
+            tab = .overview
+            return
+        }
+        guard let command = appState.take([
+            .showOverview, .showSetup, .showExport, .checkForChanges, .adopt,
+            .addCustomObject, .runPreflight, .updateSecret, .handOver, .forceUnlock,
+        ]) else { return }
+        let canChange = !deployService.isDemo && !tenant.isHandedOver && !tenant.handOverPending
+        switch command {
+        case .showOverview: tab = .overview
+        case .showSetup: tab = .setup
+        case .showExport: tab = .export
+        case .checkForChanges:
+            guard deployService.isManaged(tenant), !isCheckingDrift, !deployService.isBusy, !tenant.isHandedOver else { return }
+            tab = .overview
+            checkDrift(tenant)
+        case .runPreflight:
+            guard !isRunningPreflight else { return }
+            tab = .overview
+            runPreflight(tenant: tenant)
+        case .adopt:
+            if canChange, !isPresentingSheet { isAdopting = true }
+        case .addCustomObject:
+            if canChange, !isPresentingSheet { isAddingCustomObject = true }
+        case .updateSecret:
+            if !isPresentingSheet { isUpdatingSecret = true }
+        case .handOver:
+            if canChange, deployService.isManaged(tenant), !isPresentingSheet {
+                tab = .overview
+                isConfirmingHandOver = true
+            }
+        case .forceUnlock:
+            // the confirmation sits on the lock notice in the Overview
+            if deployService.lock(for: tenant.id) != nil, !deployService.isEngineWorkRunning, !isPresentingSheet {
+                tab = .overview
+                isConfirmingForceUnlock = true
+            }
+        default:
+            break
         }
     }
 

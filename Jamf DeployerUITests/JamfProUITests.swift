@@ -55,7 +55,7 @@ final class JamfProUITests: DeployerUITestCase {
         let target = app.sheets.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH 'UIT - JP Adopt'")).firstMatch
         tap(target, timeout: 10)
         tap(app.sheets.buttons["Stage 1 for Adoption"])
-        tap(app.sheets.buttons["Preview Changes"], timeout: 60)
+        tap(app.sheets.buttons["Preview Changes…"], timeout: 60)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 300)
         XCTAssertTrue(anyContaining("1 adopted object").waitForExistence(timeout: 15))

@@ -10,15 +10,21 @@ struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(DemoMode.self) private var demo
 
-    @State private var selection: SidebarSelection? = .fleet
     @State private var isConnectingTenant = false
+
+    /// The sidebar's selection lives in `AppState`, so the View menu can
+    /// change it.
+    private var selection: Binding<SidebarSelection?> {
+        Bindable(appState).selection
+    }
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: $selection, isConnectingTenant: $isConnectingTenant)
+            SidebarView(selection: selection, isConnectingTenant: $isConnectingTenant)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             detail
+                .navigationSubtitle(demo.isOn ? DemoMode.title : "")
         }
         .frame(minWidth: 900, minHeight: 560)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -40,13 +46,14 @@ struct ContentView: View {
             StoreSecretsSheet(review: review)
         }
         .guidedTour(tour)
-        .onChange(of: selection) {
-            appState.selection = selection
+        // File › Connect a Tenant… (⌘N)
+        .onChange(of: appState.menuRequest) {
+            if appState.take([.connectTenant]) != nil { isConnectingTenant = true }
         }
-        .onChange(of: tenantStore.tenants) {
+        .onChange(of: tenantStore.tenants, initial: true) {
             // a tenant removed in Settings › Connections leaves the detail
-            if case .tenant(let id) = selection, tenantStore.tenant(id: id) == nil {
-                selection = .fleet
+            if case .tenant(let id) = appState.selection, tenantStore.tenant(id: id) == nil {
+                appState.selection = .fleet
             }
         }
         .task {
@@ -61,9 +68,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch selection {
+        switch appState.selection {
         case .fleet, nil:
-            FleetDashboardView(selection: $selection, isConnectingTenant: $isConnectingTenant)
+            FleetDashboardView(selection: selection, isConnectingTenant: $isConnectingTenant)
         case .tenant(let id):
             // A fresh view per tenant: no form state carries over.
             TenantDetailView(tenantID: id)

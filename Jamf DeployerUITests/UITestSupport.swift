@@ -167,7 +167,7 @@ class DeployerUITestCase: JTKitUITestCase {
 
     /// Opens Preview Changes for the selected tenant, deploys, and waits for Done.
     func previewAndDeploy(file: StaticString = #filePath, line: UInt = #line) {
-        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        tap(app.toolbars.buttons["Preview Changes…"], timeout: 10)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 300)
     }
@@ -228,7 +228,7 @@ class DeployerUITestCase: JTKitUITestCase {
     func openSettings(of blockLabelPrefix: String) {
         let checkbox = blockCheckbox(String(blockLabelPrefix.dropLast()))
         XCTAssertTrue(checkbox.waitForExistence(timeout: 10), "\(blockLabelPrefix) not listed")
-        let buttons = app.buttons.matching(NSPredicate(format: "label == 'Show Settings'")).allElementsBoundByIndex
+        let buttons = app.buttons.matching(NSPredicate(format: "identifier == 'Show Settings'")).allElementsBoundByIndex
         let row = buttons.min { abs($0.frame.midY - checkbox.frame.midY) < abs($1.frame.midY - checkbox.frame.midY) }
         guard let button = row, abs(button.frame.midY - checkbox.frame.midY) < 30 else {
             XCTFail("No Show Settings button next to \(blockLabelPrefix)")

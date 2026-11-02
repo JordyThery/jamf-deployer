@@ -57,7 +57,7 @@ final class FleetUITests: DeployerUITestCase {
             app.typeKey(.return, modifierFlags: [])
             tap(app.buttons["Hide Settings"].firstMatch, timeout: 5)
         }
-        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        tap(app.toolbars.buttons["Preview Changes…"], timeout: 10)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
         XCTAssertTrue(anyContaining(" 0 failed").waitForExistence(timeout: 15), "Some fleet objects failed to deploy")
@@ -91,7 +91,7 @@ final class FleetUITests: DeployerUITestCase {
             sleep(1)
         }
         XCTAssertEqual(app.checkBoxes.matching(NSPredicate(format: "value == 1")).count, 0, "Blocks are still selected")
-        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        tap(app.toolbars.buttons["Preview Changes…"], timeout: 10)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
         XCTAssertTrue(anyContaining(" 0 failed").waitForExistence(timeout: 15), "Some fleet objects failed to delete")

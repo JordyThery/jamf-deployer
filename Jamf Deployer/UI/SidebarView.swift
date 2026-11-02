@@ -21,6 +21,8 @@ struct SidebarView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(TenantDeployService.self) private var deployService
     @Environment(DemoMode.self) private var demo
+    @Environment(AppWorlds.self) private var worlds
+    @Environment(AppState.self) private var appState
     @Binding var selection: SidebarSelection?
     @Binding var isConnectingTenant: Bool
     @State private var tenantPendingRemoval: Tenant?
@@ -31,6 +33,27 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
+            // Always in view while demo mode is on, not only as a color:
+            // what the window shows is sample data.
+            if demo.isOn {
+                Section {
+                    HStack {
+                        Label(DemoMode.title, systemImage: "testtube.2")
+                            .font(.callout.weight(.medium))
+                        Spacer()
+                        Button("Turn Off") {
+                            _ = demo.requestSwitch(to: false)
+                        }
+                        .controlSize(.small)
+                        // as the Tenant menu's switch: running work would be torn down
+                        .disabled(worlds.isBusy)
+                    }
+                    .help(DemoMode.helpText)
+                    .accessibilityElement(children: .contain)
+                    .selectionDisabled()
+                }
+            }
+
             Section("Fleet") {
                 Label("Dashboard", systemImage: "rectangle.3.group")
                     .tag(SidebarSelection.fleet)
@@ -53,12 +76,7 @@ struct SidebarView: View {
                     .tag(SidebarSelection.tenant(tenant.id))
                     .contextMenu {
                         Button("Remove Tenant…", role: .destructive) {
-                            removalTypedName = ""
-                            if TenantRemoval.needsTypedName(isManaged: deployService.isManaged(tenant)) {
-                                managedTenantPendingRemoval = tenant
-                            } else {
-                                tenantPendingRemoval = tenant
-                            }
+                            confirmRemoval(of: tenant)
                         }
                         // engine work would lose its folder and state halfway
                         .disabled(deployService.isRemoving(tenant.id) || deployService.isEngineWorkRunning)
@@ -127,6 +145,13 @@ struct SidebarView: View {
         } message: {
             Text(TenantRemoval.message(isTeamMode: deployService.isTeamMode, isManaged: true))
         }
+        // Tenant › Remove Tenant…: the same confirmation, for the selected tenant
+        .onChange(of: appState.menuRequest) {
+            guard appState.take([.removeTenant]) != nil,
+                  let id = appState.selectedTenantID, let tenant = tenantStore.tenant(id: id),
+                  !deployService.isRemoving(id), !deployService.isEngineWorkRunning else { return }
+            confirmRemoval(of: tenant)
+        }
         .alert(
             "Tenant Not Removed",
             isPresented: Binding(get: { removalError != nil }, set: { if !$0 { removalError = nil } })
@@ -134,6 +159,15 @@ struct SidebarView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(removalError ?? "")
+        }
+    }
+
+    private func confirmRemoval(of tenant: Tenant) {
+        removalTypedName = ""
+        if TenantRemoval.needsTypedName(isManaged: deployService.isManaged(tenant)) {
+            managedTenantPendingRemoval = tenant
+        } else {
+            tenantPendingRemoval = tenant
         }
     }
 

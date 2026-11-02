@@ -6,6 +6,7 @@ import JamfDeployerCore
 struct FleetDashboardView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(TenantDeployService.self) private var deployService
+    @Environment(AppState.self) private var appState
     @State private var catalog: LoadedCatalog?
     @Binding var selection: SidebarSelection?
     @Binding var isConnectingTenant: Bool
@@ -14,6 +15,8 @@ struct FleetDashboardView: View {
     @State private var isRollingOut = false
     @State private var isExporting = false
     @State private var isSyncing = false
+    /// Rows chosen with the keyboard or a click; Return opens the tenant.
+    @State private var tableSelection = Set<Tenant.ID>()
 
     private var rows: [Tenant] {
         tenantStore.tenants.filter { tenant in
@@ -45,7 +48,7 @@ struct FleetDashboardView: View {
                     .buttonStyle(.borderedProminent)
                 }
             } else {
-                Table(rows) {
+                Table(rows, selection: $tableSelection) {
                     TableColumn("Tenant") { tenant in
                         HStack(spacing: 6) {
                             Text(tenant.name)
@@ -145,7 +148,7 @@ struct FleetDashboardView: View {
             } label: {
                 Label("Roll Out…", systemImage: "square.stack.3d.forward.dottedline")
             }
-            .disabled(deployService.isBusy || tenantStore.tenants.filter(deployService.canRollOut).count < 2)
+            .disabled(!canRollOut)
             .help("Deploy to several tenants one at a time, test tenants first, previewing each one")
             .unavailableInDemoMode(deployService.isDemo)
             Button {
@@ -153,9 +156,29 @@ struct FleetDashboardView: View {
             } label: {
                 Label("Export as Terraform…", systemImage: "shippingbox")
             }
-            .disabled(deployService.isBusy || !tenantStore.tenants.contains { !$0.isHandedOver })
+            .disabled(!canExport)
             .help("Write tenants as a plain Terraform repository with GitHub workflows, to review or to move them there")
             .unavailableInDemoMode(deployService.isDemo)
+        }
+        // File › Export as Terraform… and Tenant › Roll Out…: the same
+        // checks as the toolbar buttons
+        .onChange(of: appState.menuRequest, initial: true) {
+            switch appState.take([.exportTerraform, .rollOut]) {
+            case .exportTerraform?:
+                if canExport, !isRollingOut { isExporting = true }
+            case .rollOut?:
+                if canRollOut, !isExporting { isRollingOut = true }
+            default:
+                break
+            }
+        }
+        .onChange(of: deployService.fleetCheckProgress == nil) { _, finished in
+            guard finished else { return }
+            let changed = tenantStore.tenants.filter { !$0.outstandingDrift.isEmpty }.count
+            let failed = tenantStore.tenants.filter { deployService.fleetCheckFailure(for: $0.id) != nil }.count
+            var message = changed == 0 ? "Fleet check finished. No changes made in Jamf." : "Fleet check finished. \(changed) tenant\(changed == 1 ? " has" : "s have") changes made in Jamf."
+            if failed > 0 { message += " \(failed) check\(failed == 1 ? "" : "s") failed." }
+            AccessibilityNotification.Announcement(message).post()
         }
         .sheet(isPresented: $isRollingOut) {
             RolloutView()
@@ -163,6 +186,14 @@ struct FleetDashboardView: View {
         .sheet(isPresented: $isExporting) {
             RepositoryExportSheet()
         }
+    }
+
+    private var canRollOut: Bool {
+        !deployService.isDemo && !deployService.isBusy && tenantStore.tenants.filter(deployService.canRollOut).count >= 2
+    }
+
+    private var canExport: Bool {
+        !deployService.isDemo && !deployService.isBusy && tenantStore.tenants.contains { !$0.isHandedOver }
     }
 
     @ViewBuilder

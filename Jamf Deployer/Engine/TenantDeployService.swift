@@ -1822,6 +1822,11 @@ final class TenantDeployService {
         guard !(tenantStore.tenant(id: tenant.id) ?? tenant).isHandedOver else { throw DeployError.handedOver }
         guard let runner = runners[tenant.id] else { throw DeployError.planExpired }
         guard !busyTenants.contains(tenant.id) else { throw DeployError.tenantBusy }
+        if LiveLaunch.isSwitched {
+            // a release check's live run changes only its own test objects
+            try LiveRun.requireOnlyTestObjects(
+                session.summary.groups.flatMap(\.changes).filter { $0.kind != .unchanged }.map(\.displayName))
+        }
         busyTenants.insert(tenant.id)
 
         phases[tenant.id] = .applying

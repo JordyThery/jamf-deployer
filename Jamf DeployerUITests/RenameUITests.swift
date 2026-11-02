@@ -71,7 +71,7 @@ final class RenameUITests: DeployerUITestCase {
     }
 
     private func previewAndDeployExpectingNoFailures(file: StaticString = #filePath, line: UInt = #line) {
-        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        tap(app.toolbars.buttons["Preview Changes…"], timeout: 10)
         deployCurrentPreview()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 300), "Deploy did not finish", file: file, line: line)
         XCTAssertTrue(anyContaining(" 0 failed").exists, "The deploy reported failures", file: file, line: line)

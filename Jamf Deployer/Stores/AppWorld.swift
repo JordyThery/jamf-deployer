@@ -31,6 +31,8 @@ final class AppWorld: Identifiable {
         let catalogSources = CatalogSourceStore(fileURL: storeURL.appending(path: "catalog-sources.json"), tools: .app)
         let deployService = TenantDeployService(tenantStore: tenantStore, activityLog: activityLog,
                                                 catalogSources: catalogSources, storeURL: storeURL, tools: .app)
+        // a live UI test may start with the run's tenants connected
+        LiveRun.seedTenants(into: tenantStore)
         return AppWorld(tenantStore: tenantStore, catalogSources: catalogSources, deployService: deployService,
                         isDemo: false)
     }

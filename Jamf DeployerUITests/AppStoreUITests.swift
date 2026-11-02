@@ -28,7 +28,7 @@ final class AppStoreUITests: DeployerUITestCase {
         XCTAssertTrue(block.waitForExistence(timeout: 30))
         if (block.value as? Int) != 1 { block.click() }
         if !app.buttons["Hide Settings"].waitForExistence(timeout: 3) {
-            tap(app.buttons.matching(NSPredicate(format: "label == 'Show Settings'")).firstMatch, timeout: 10)
+            tap(app.buttons.matching(NSPredicate(format: "identifier == 'Show Settings'")).firstMatch, timeout: 10)
         }
         tap(app.popUpButtons.matching(NSPredicate(format: "value == 'Choose a group…'")).firstMatch, timeout: 10)
         tap(app.menuItems["UIT - AS Empty Macs"].firstMatch, timeout: 10)

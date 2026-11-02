@@ -5,6 +5,7 @@ import JamfDeployerCore
 struct HistoryView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(TenantDeployService.self) private var deployService
+    @Environment(AppState.self) private var appState
 
     private struct Row: Identifiable {
         var id: String { "\(tenantID)-\(entry.id)" }
@@ -57,6 +58,8 @@ struct HistoryView: View {
                         }
                         .controlSize(.small)
                         .help("Restore this deploy’s baseline; preview and deploy to apply it")
+                        .accessibilityLabel("Roll back \(row.tenantName) to \(row.entry.date.formatted(date: .abbreviated, time: .shortened))")
+                        .accessibilityIdentifier("Roll Back…")
                     }
                     .width(90)
                     TableColumn("Blocks") { row in
@@ -82,6 +85,10 @@ struct HistoryView: View {
             Button("Reload", systemImage: "arrow.clockwise") {
                 reload()
             }
+        }
+        // View › Reload History
+        .onChange(of: appState.menuRequest, initial: true) {
+            if appState.take([.reloadHistory]) != nil { reload() }
         }
         .confirmationDialog(
             "Roll Back “\(rowPendingRollback?.tenantName ?? "")”?",

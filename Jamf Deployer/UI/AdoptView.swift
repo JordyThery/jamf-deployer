@@ -109,7 +109,11 @@ struct AdoptView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 200)
                     Button("All") { selectedTypes = Set(resourceTypes.map(\.filterKey)) }
+                        .accessibilityLabel("Select All Types")
+                        .accessibilityIdentifier("All")
                     Button("None") { selectedTypes = [] }
+                        .accessibilityLabel("Deselect All Types")
+                        .accessibilityIdentifier("None")
                     Spacer()
                     Text("\(selectedTypes.count) type\(selectedTypes.count == 1 ? "" : "s") selected")
                         .font(.caption)
@@ -153,8 +157,12 @@ struct AdoptView: View {
                         .frame(maxWidth: 180)
                     Button("All") { selectedObjects.formUnion(filteredObjects.map(\.address)) }
                         .help("Selects every object the filter shows")
+                        .accessibilityLabel("Select All Shown")
+                        .accessibilityIdentifier("All")
                     Button("None") { selectedObjects.subtract(filteredObjects.map(\.address)) }
                         .help("Deselects every object the filter shows")
+                        .accessibilityLabel("Deselect All Shown")
+                        .accessibilityIdentifier("None")
                 }
                 .controlSize(.small)
                 if !secretObjects.isEmpty {
@@ -253,13 +261,15 @@ struct AdoptView: View {
         case .pickTypes:
             Button("Discover Objects") { discover() }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(selectedTypes.isEmpty || terraform.binaryURL == nil)
         case .pickObjects:
             Button("Stage \(selectedObjects.count) for Adoption") { stage() }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(selectedObjects.isEmpty)
         case .ready:
-            Button("Preview Changes") {
+            Button("Preview Changes…") {
                 openPreviewAfterAdopt = true
                 dismiss()
             }

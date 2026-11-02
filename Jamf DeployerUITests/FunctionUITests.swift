@@ -175,7 +175,7 @@ final class FunctionUITests: DeployerUITestCase {
         XCTAssertEqual(targets.count, 4, "Expected the four test categories")
         for target in targets { target.click() }
         tap(app.sheets.buttons["Stage 4 for Adoption"])
-        tap(app.sheets.buttons["Preview Changes"], timeout: 60)
+        tap(app.sheets.buttons["Preview Changes…"], timeout: 60)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 300)
         XCTAssertTrue(anyContaining("4 adopted objects").waitForExistence(timeout: 15))
@@ -190,7 +190,7 @@ final class FunctionUITests: DeployerUITestCase {
         if (block.value as? Int) != 1 { block.click() }
         // A block without a scope yet opens its settings by itself.
         if !app.buttons["Hide Settings"].waitForExistence(timeout: 3) {
-            tap(app.buttons.matching(NSPredicate(format: "label == 'Show Settings'")).firstMatch, timeout: 10)
+            tap(app.buttons.matching(NSPredicate(format: "identifier == 'Show Settings'")).firstMatch, timeout: 10)
         }
         tap(app.buttons["Choose Apps…"].firstMatch, timeout: 10)
         let add = app.sheets.buttons["Add"].firstMatch
@@ -247,7 +247,7 @@ final class FunctionUITests: DeployerUITestCase {
         exportCategories(from: Self.sandbox, kind: "Clone to tenant")
         XCTAssertTrue(anyContaining("selected)").waitForExistence(timeout: 600), "Export did not finish")
         // The second None belongs to the object list (the first to the type list).
-        tap(app.buttons.matching(NSPredicate(format: "label == 'None'")).element(boundBy: 1))
+        tap(app.buttons.matching(NSPredicate(format: "identifier == 'None'")).element(boundBy: 1))
         let targets = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH 'UIT - '")).allElementsBoundByIndex
         XCTAssertEqual(targets.count, 4)
         for target in targets { target.click() }
@@ -283,7 +283,7 @@ final class FunctionUITests: DeployerUITestCase {
     func test17bCaptureBlockAndDeployElsewhere() throws {
         exportCategories(from: Self.sandbox, kind: "Building block")
         XCTAssertTrue(anyContaining("selected)").waitForExistence(timeout: 600), "Export did not finish")
-        tap(app.buttons.matching(NSPredicate(format: "label == 'None'")).element(boundBy: 1))
+        tap(app.buttons.matching(NSPredicate(format: "identifier == 'None'")).element(boundBy: 1))
         let targets = app.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH 'UIT - '")).allElementsBoundByIndex
         XCTAssertEqual(targets.count, 4)
         for target in targets where (target.value as? Int) != 1 { target.click() }

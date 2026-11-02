@@ -7,6 +7,8 @@ import JamfDeployerCore
 struct BaselineEditorView: View {
     @Environment(TenantStore.self) private var tenantStore
     @Environment(TenantDeployService.self) private var deployService
+    @Environment(AppState.self) private var appState
+    @Environment(\.isEnabled) private var isEnabled
 
     let tenant: Tenant
     let catalog: LoadedCatalog
@@ -115,6 +117,11 @@ struct BaselineEditorView: View {
         }
         .sheet(isPresented: $isCheckingUpdates) {
             BaselineUpdateSheet(tenant: tenant)
+        }
+        // Tenant › Baseline Updates…, dimmed as the button is
+        .onChange(of: appState.menuRequest, initial: true) {
+            guard appState.take([.baselineUpdates]) != nil else { return }
+            if isEnabled, !deployService.isDemo, !isSavingPreset { isCheckingUpdates = true }
         }
         .task(id: "\(tenant.id)|\(tenant.blockSelections.map(\.blockID).joined(separator: ","))") {
             readFilledSecrets()
@@ -265,6 +272,8 @@ struct BaselineEditorView: View {
                         expandedBlockID = expandedBlockID == block.id ? nil : block.id
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel(expandedBlockID == block.id ? "Hide Settings for \(block.name)" : "Show Settings for \(block.name)")
+                    .accessibilityIdentifier(expandedBlockID == block.id ? "Hide Settings" : "Show Settings")
                 }
             }
 

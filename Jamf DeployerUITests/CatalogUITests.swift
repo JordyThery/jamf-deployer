@@ -95,7 +95,7 @@ final class CatalogUITests: DeployerUITestCase {
 
     func test04DeployEverything() throws {
         openTenant(Self.tenant)
-        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        tap(app.toolbars.buttons["Preview Changes…"], timeout: 10)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
         XCTAssertTrue(anyContaining("0 failed").waitForExistence(timeout: 15), "Some objects failed to deploy")
@@ -145,7 +145,7 @@ final class CatalogUITests: DeployerUITestCase {
         XCTAssertEqual(targets.count, 6, "Expected the six objects to adopt")
         for target in targets { target.click() }
         tap(app.sheets.buttons["Stage 6 for Adoption"], timeout: 10)
-        tap(app.sheets.buttons["Preview Changes"], timeout: 120)
+        tap(app.sheets.buttons["Preview Changes…"], timeout: 120)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
         XCTAssertTrue(anyContaining("6 adopted objects").waitForExistence(timeout: 15), "The objects were not adopted")
@@ -173,7 +173,7 @@ final class CatalogUITests: DeployerUITestCase {
             sleep(1)
         }
         XCTAssertEqual(app.checkBoxes.matching(NSPredicate(format: "value == 1")).count, 0, "Blocks are still selected")
-        tap(app.toolbars.buttons["Preview Changes"], timeout: 10)
+        tap(app.toolbars.buttons["Preview Changes…"], timeout: 10)
         deployCurrentPreview()
         tap(app.buttons["Done"], timeout: 1800)
         XCTAssertTrue(anyContaining("0 failed").waitForExistence(timeout: 15), "Some objects failed to delete")

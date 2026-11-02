@@ -8,6 +8,7 @@ import JamfDeployerCore
 struct CatalogView: View {
     @Environment(TenantDeployService.self) private var deployService
     @Environment(CatalogSourceStore.self) private var catalogSources
+    @Environment(AppState.self) private var appState
     @State private var catalog: LoadedCatalog?
     @State private var loadError: String?
     @State private var selectedBlock: BlockMetadata?
@@ -46,6 +47,7 @@ struct CatalogView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(category)
                                     .font(.title3.bold())
+                                    .accessibilityAddTraits(.isHeader)
                                 LazyVGrid(
                                     columns: [GridItem(.adaptive(minimum: 280), spacing: 12)],
                                     alignment: .leading,
@@ -90,6 +92,12 @@ struct CatalogView: View {
             .help("Follow a building-block catalog published as a Git repository, pinned by release tag")
             .unavailableInDemoMode(deployService.isDemo)
         }
+        // the Catalog menu's Manage Sources… and Add Git Catalog…
+        .onChange(of: appState.menuRequest, initial: true) {
+            guard let command = appState.take([.manageSources, .addGitCatalog]),
+                  !deployService.isDemo, !isManagingSources, !isAddingGitSource, selectedBlock == nil else { return }
+            if command == .manageSources { isManagingSources = true } else { isAddingGitSource = true }
+        }
         .sheet(isPresented: $isAddingGitSource) {
             AddGitCatalogSheet { 
                 catalog = try? deployService.loadCatalog()
@@ -132,6 +140,7 @@ struct CatalogView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Blocks come from catalogs")
                         .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
                     Text("The built-in blocks use the groups and categories already in your tenant. Add the demo catalog for a full baseline to start from.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -235,7 +244,8 @@ struct BlockCard: View {
             }
         }
         .padding(12)
-        .frame(height: 130)
+        // grows with larger text instead of clipping the summary
+        .frame(minHeight: 130, alignment: .top)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .help(block.summary)

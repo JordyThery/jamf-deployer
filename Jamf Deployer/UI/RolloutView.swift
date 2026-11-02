@@ -196,6 +196,7 @@ struct RolloutView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Ring \(queue[next - 1].ring) is done.", systemImage: "checkmark.circle")
                 .font(.title3.bold())
+                .accessibilityAddTraits(.isHeader)
             outcomeList
             Text("Check the tenants above, then continue with ring \(queue[next].ring).")
                 .font(.callout)
@@ -209,6 +210,7 @@ struct RolloutView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Rollout finished")
                 .font(.title3.bold())
+                .accessibilityAddTraits(.isHeader)
             outcomeList
         }
         .padding()
@@ -268,6 +270,7 @@ struct RolloutView: View {
             Spacer()
             if prepareError != nil {
                 Button("Stop Rollout") { stage = .finished }
+                    .keyboardShortcut(.cancelAction)
             }
         case .deciding(let index):
             Spacer()
@@ -275,14 +278,17 @@ struct RolloutView: View {
                 outcomes[queue[index].id] = .notDeployed
                 stage = .finished
             }
+            .keyboardShortcut(.cancelAction)
             Button("Skip and Continue") {
                 outcomes[queue[index].id] = .skipped
                 advance(from: index)
             }
             .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
         case .ringPause(let next):
             Spacer()
             Button("Stop Rollout") { stage = .finished }
+                .keyboardShortcut(.cancelAction)
             Button("Continue with Ring \(queue[next].ring)") { start(next) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
