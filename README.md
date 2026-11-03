@@ -29,7 +29,7 @@ Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jam
 
 The fleet dashboard keeps every tenant’s sync state, baseline size and Apple token expirations on one screen:
 
-![The fleet dashboard listing tenants with their sync status, baseline block count, last deploy and ADE token expiration](docs/screenshot-dashboard.png)
+![The fleet dashboard listing tenants with their sync status, baseline block count, last deploy and ADE and Apps and Books token expirations](docs/screenshot-dashboard.png)
 
 ## Menus and shortcuts
 

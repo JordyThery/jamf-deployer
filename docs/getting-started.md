@@ -48,7 +48,7 @@ Every deploy is recorded in **History** (sidebar). **Roll Back…** restores the
 
 The **Day 0 Setup** tab tracks the things an API can’t fully do — APNs certificate, Automated Device Enrollment and Apps and Books tokens, branding, single sign-on, the Jamf Protect link and the Cloud Services Connection — with live status where Jamf exposes it and links to the right console pages where it doesn’t.
 
-![The Day 0 Setup tab: APNs, Automated Device Enrollment, Apps and Books, branding, single sign-on and the Jamf Protect link, each with live status](screenshot-day0.png)
+![The Day 0 Setup tab: APNs, Automated Device Enrollment, Apps and Books, branding, single sign-on, the Jamf Protect link and the Cloud Services Connection, each with live status](screenshot-day0.png)
 
 ## Demo Mode
 

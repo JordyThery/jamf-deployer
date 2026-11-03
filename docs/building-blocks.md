@@ -68,7 +68,7 @@ The App Catalog block picks its apps with a searchable picker, with per-app deli
 
 ![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
 
-![The tenant Overview: Managed in this tenant with the adopt actions, and Add from the catalog with block settings](screenshot-baseline.png)
+![The tenant Overview: connection, preflight, Managed in this tenant with the adopt actions, and Add from the catalog](screenshot-baseline.png)
 
 ## Settings and scope
 
