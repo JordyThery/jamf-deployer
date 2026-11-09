@@ -72,7 +72,7 @@ final class LiveUITests: LiveDeployerUITestCase {
         // 2. The Categories block and the adopted category in one deploy.
         openTenant(tenant)
         tick("Categories")
-        adopt(categoryName, resourceType: "category", on: tenant)
+        try adopt(categoryName, resourceType: "category", on: tenant)
         XCTAssertTrue(reachReview(), "The preview didn't finish")
         let creates = plannedCount("create"), adopts = plannedCount("adopt")
         record(step(role, "Preview Changes: the block's categories created, the test's category adopted"),

@@ -253,6 +253,21 @@ actor JamformerRunner {
         )
     }
 
+    /// A run's output as the Activity Log and a failure screen show it:
+    /// besides the secret scan's scanned text (already gone from
+    /// `logLines`), JTKit's redaction hides credentials and tokens, and the
+    /// run's own secrets are masked wherever they appear.
+    nonisolated static func maskedOutput(_ lines: [String], secrets: [String]) -> [String] {
+        let secrets = secrets.filter { $0.count >= 4 }
+        return lines.map { line in
+            var text = Redaction.text(line)
+            for secret in secrets {
+                text = text.replacingOccurrences(of: secret, with: "••••••")
+            }
+            return text
+        }
+    }
+
     /// Removes terminal control sequences and progress-bar junk. The
     /// exporter renders animated progress with full CSI sequences (cursor
     /// movement, 24-bit colors) and carriage-return redraws; after

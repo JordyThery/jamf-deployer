@@ -78,3 +78,20 @@ struct JamformerPinTests {
         }
     }
 }
+
+@Suite("A failed export's output, masked")
+struct JamformerFailureOutputTests {
+    @Test func secretsAndTokensAreMasked() {
+        let lines = [
+            "Verifying authentication...",
+            "terraform init failed: client_secret=s3cr3t-value-123",
+            "Authorization: Bearer abc.def.ghi",
+            "echoed s3cr3t-value-123 back",
+        ]
+        let masked = JamformerRunner.maskedOutput(lines, secrets: ["s3cr3t-value-123"])
+        #expect(masked.count == lines.count)
+        #expect(masked[0] == "Verifying authentication...")
+        #expect(masked.allSatisfy { !$0.contains("s3cr3t-value-123") })
+        #expect(!masked[2].contains("abc.def.ghi"))
+    }
+}

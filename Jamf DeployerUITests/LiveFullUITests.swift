@@ -150,7 +150,7 @@ final class LiveFullUITests: LiveDeployerUITestCase {
                anyContaining("Signed in to the Jamf Pro API").waitForExistence(timeout: 120))
         ensureTerraform(on: tenant)
 
-        adopt(categoryName, resourceType: "categories", on: tenant)
+        try adopt(categoryName, resourceType: "categories", on: tenant)
         XCTAssertTrue(reachReview(), "The preview didn't finish")
         record(step(role, "adopt: preview"), plannedCount("adopt") == 1)
         deployCurrentPreview()
