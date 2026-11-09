@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 — 2026-11-09
 
 - **OpenTofu 1.13.9** is now built in (was 1.13.2). It fixes saving the
   deployment state after a first deploy that stopped partway, and a crash on
