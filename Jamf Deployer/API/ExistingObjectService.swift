@@ -65,7 +65,7 @@ nonisolated enum ExistingObjectService {
     }
 
     private static func client(for tenant: Tenant, activityLog: ActivityLog?) throws -> JamfPlatformClient {
-        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
+        guard try TenantSecrets(tenantID: tenant.id).platformClientSecret.read() != nil else {
             throw LookupError.missingSecret(usesPassword: tenant.usesPassword)
         }
         return TenantClients.shared.client(for: tenant, activityLog: activityLog)

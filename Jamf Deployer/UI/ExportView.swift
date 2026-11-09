@@ -301,15 +301,18 @@ struct ExportView: View {
 
     private func runExport() {
         let secrets = TenantSecrets(tenantID: tenant.id)
-        let credential = exportProvider == "jamfprotect"
-            ? secrets.protectClientSecret.load()
-            : secrets.platformClientSecret.load()
-        guard let secret = credential, let terraformURL = terraform.binaryURL else {
-            errorMessage = exportProvider == "jamfprotect"
-                ? "The Protect API client secret is missing — reconnect Protect in Day 0 Setup."
-                : JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
+        let secret: String
+        do {
+            secret = exportProvider == "jamfprotect"
+                ? try secrets.protectClientSecret.required(
+                    missing: "The Protect API client secret is missing — reconnect Protect in Day 0 Setup.")
+                : try secrets.platformClientSecret.required(
+                    missing: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        } catch {
+            errorMessage = error.localizedDescription
             return
         }
+        guard let terraformURL = terraform.binaryURL else { return }
         isRunning = true
         errorMessage = nil
         exportResult = nil

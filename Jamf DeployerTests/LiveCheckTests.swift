@@ -117,7 +117,8 @@ struct LiveTenant: Sendable {
 
     /// The kinds of object the sweep looks at, dependents first.
     static let sweepKinds: [(resource: String, classic: Bool)] = [
-        ("policies", true), ("osxconfigurationprofiles", true), ("computergroups", true), ("scripts", false), ("categories", false),
+        ("policies", true), ("osxconfigurationprofiles", true), ("computergroups", true), ("macapplications", true),
+        ("scripts", false), ("categories", false),
     ]
 
     func delete(resource: String, id: String) async throws {

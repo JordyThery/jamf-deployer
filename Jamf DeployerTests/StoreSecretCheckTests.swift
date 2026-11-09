@@ -84,6 +84,24 @@ struct StoreSecretCheckTests {
         #expect(try await store.unacknowledgedFindings().map(\.line) == [2])
     }
 
+    @Test func unreadableNotASecretMarksAreCopiedBeforeTheyAreReplaced() async throws {
+        let (store, url) = try await Self.makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let fileURL = url.appending(path: GitStoreService.acknowledgementsFile)
+        let damaged = Data("{ \"notSecrets\": [ cut off".utf8)
+        try damaged.write(to: fileURL)
+        #expect(await store.acknowledgements().notSecrets.isEmpty)
+
+        try await store.acknowledge(SecretFinding(path: Self.scriptPath, line: 1, rule: "Password value in HCL attribute"))
+        #expect(await store.acknowledgements().notSecrets.count == 1)
+        let copies = try FileManager.default.contentsOfDirectory(atPath: url.path)
+            .filter { $0.hasPrefix(GitStoreService.acknowledgementsFile + ".unreadable-") }
+        #expect(copies.count == 1)
+        if let copy = copies.first {
+            #expect(try Data(contentsOf: url.appending(path: copy)) == damaged)
+        }
+    }
+
     @Test func theWholeStoreIsChecked() async throws {
         let (store, url) = try await Self.makeStore()
         defer { try? FileManager.default.removeItem(at: url) }

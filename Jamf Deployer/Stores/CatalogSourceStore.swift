@@ -86,17 +86,21 @@ final class CatalogSourceStore {
         customSources = load()
     }
 
-    /// Loads the source list. A file that exists but cannot be read is set
-    /// aside (bytes intact) rather than silently overwritten by a later save.
+    /// Loads the source list. A file that exists but cannot be read is
+    /// copied to `catalog-sources.json.unreadable-<date>` (bytes intact; an
+    /// earlier copy is never replaced; never committed) and only then
+    /// removed, so a later save can't overwrite it.
     private func load() -> [CustomSource] {
         do {
             return try JSONFile.load([CustomSource].self, from: fileURL)
         } catch {
             guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
-            let damaged = fileURL.deletingPathExtension().appendingPathExtension("damaged.json")
-            try? FileManager.default.removeItem(at: damaged)
-            try? FileManager.default.moveItem(at: fileURL, to: damaged)
-            logger.error("catalog-sources.json could not be read and was set aside: \(error.localizedDescription, privacy: .public)")
+            if let copy = FileCopies.keepUnreadableCopy(of: fileURL) {
+                try? FileManager.default.removeItem(at: fileURL)
+                logger.error("catalog-sources.json could not be read and was set aside as \(copy, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            } else {
+                logger.error("catalog-sources.json could not be read or copied; left as it is: \(error.localizedDescription, privacy: .public)")
+            }
             return []
         }
     }

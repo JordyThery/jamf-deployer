@@ -690,11 +690,14 @@ struct TenantDetailView: View {
     }
 
     private func runPreflight(tenant: Tenant) {
-        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
+        do {
+            _ = try TenantSecrets(tenantID: tenant.id).platformClientSecret
+                .required(missing: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        } catch {
             checks = [PreflightCheck(
                 id: "secret", title: "Stored credentials",
                 outcome: .fail,
-                detail: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
+                detail: error.localizedDescription
             )]
             return
         }
@@ -791,7 +794,13 @@ struct UpdateClientSecretSheet: View {
         .onAppear {
             savedClientID = tenant.engineerClientID
             clientID = savedClientID
-            hasStatePassphrase = secrets.statePassphrase.load() != nil
+            do {
+                hasStatePassphrase = try secrets.statePassphrase.read() != nil
+            } catch {
+                // Never ask for a new passphrase over one the Keychain can't read right now.
+                hasStatePassphrase = true
+                message = "\(error.localizedDescription) The recovery passphrase is left as it is."
+            }
         }
     }
 

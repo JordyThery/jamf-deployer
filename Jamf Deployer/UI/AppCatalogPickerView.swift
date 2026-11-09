@@ -229,8 +229,11 @@ struct AppCatalogPickerView: View {
     // MARK: Search
 
     private func search() {
-        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
-            loadError = JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
+        do {
+            _ = try TenantSecrets(tenantID: tenant.id).platformClientSecret
+                .required(missing: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        } catch {
+            loadError = error.localizedDescription
             return
         }
         isLoading = true

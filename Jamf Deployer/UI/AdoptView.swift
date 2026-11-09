@@ -291,8 +291,12 @@ struct AdoptView: View {
     // MARK: Actions
 
     private func discover() {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
-            step = .failed(JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        let secret: String
+        do {
+            secret = try TenantSecrets(tenantID: tenant.id).platformClientSecret
+                .required(missing: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        } catch {
+            step = .failed(error.localizedDescription)
             return
         }
         guard let terraformURL = terraform.binaryURL else { return }

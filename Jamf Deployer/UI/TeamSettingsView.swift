@@ -22,6 +22,8 @@ struct TeamSettingsView: View {
     @State private var message: String?
     @State private var isConfirmingLeave = false
     @State private var isShowingPassphrase = false
+    /// Read from the Keychain when Show is clicked, not on every redraw.
+    @State private var shownPassphrase = ""
     @State private var hasTeamPassphrase = TeamPassphrase.item.load() != nil
 
     var body: some View {
@@ -89,17 +91,17 @@ struct TeamSettingsView: View {
             LabeledContent("Team passphrase") {
                 HStack {
                     if isShowingPassphrase {
-                        Text(TeamPassphrase.item.load() ?? "")
+                        Text(shownPassphrase)
                             .font(.callout.monospaced())
                             .textSelection(.enabled)
                         Button("Copy") {
-                            SecretPasteboard.copy(TeamPassphrase.item.load() ?? "")
+                            SecretPasteboard.copy(shownPassphrase)
                         }
                         .controlSize(.small)
                         .accessibilityLabel("Copy Team Passphrase")
                         .accessibilityIdentifier("Copy")
                     }
-                    Button(isShowingPassphrase ? "Hide" : "Show") { isShowingPassphrase.toggle() }
+                    Button(isShowingPassphrase ? "Hide" : "Show") { togglePassphrase() }
                         .controlSize(.small)
                         .help("Shows the passphrase to share with an engineer joining the team space")
                 }
@@ -184,6 +186,21 @@ struct TeamSettingsView: View {
     }
 
     // MARK: Actions
+
+    /// Shows the passphrase read from the Keychain, or says it can't be read.
+    private func togglePassphrase() {
+        guard !isShowingPassphrase else {
+            isShowingPassphrase = false
+            shownPassphrase = ""
+            return
+        }
+        do {
+            shownPassphrase = try TeamPassphrase.item.read() ?? ""
+            isShowingPassphrase = true
+        } catch {
+            message = error.localizedDescription
+        }
+    }
 
     private func sync() {
         isWorking = true

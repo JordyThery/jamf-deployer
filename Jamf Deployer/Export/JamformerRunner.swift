@@ -26,6 +26,12 @@ actor JamformerRunner {
         var exitCode: Int32
     }
 
+    /// A provider jamformer has no bundled engine plugin for.
+    struct UnknownProvider: LocalizedError {
+        let provider: String
+        var errorDescription: String? { "The exporter can’t run for “\(provider)”: no built-in version of it." }
+    }
+
     private let jamformerURL: URL
 
     /// The doorway jamformer is started through; demo mode's never starts it.
@@ -40,6 +46,7 @@ actor JamformerRunner {
     func listResourceTypes(provider: String) async throws -> [ResourceType] {
         let output = try await run(
             arguments: ["-skip-update-check", "-list-resources", "-provider", provider],
+            provider: provider,
             environment: [:]
         )
         var types: [ResourceType] = []
@@ -131,7 +138,7 @@ actor JamformerRunner {
             }
         }
 
-        var result = try await run(arguments: arguments, environment: environment, onLine: onLine)
+        var result = try await run(arguments: arguments, provider: provider, environment: environment, onLine: onLine)
         result.outputURL = outputURL
 
         // The exporter always runs a search phase, but settings-style types
@@ -154,7 +161,7 @@ actor JamformerRunner {
                 retryArguments[index + 1] = retryURL.path
             }
             try? FileManager.default.removeItem(at: outputURL)
-            result = try await run(arguments: retryArguments, environment: environment, onLine: onLine)
+            result = try await run(arguments: retryArguments, provider: provider, environment: environment, onLine: onLine)
             result.outputURL = retryURL
             for file in ["pro_category.tf", "pro_category_import.tf"] {
                 try? FileManager.default.removeItem(at: retryURL.appending(path: file))
@@ -164,15 +171,35 @@ actor JamformerRunner {
         return result
     }
 
+    /// The engine plugin version jamformer must use for `provider`: always
+    /// the bundled one. Left to itself, jamformer downloads the newest
+    /// plugin, whose attribute names the bundled engine may not know yet.
+    nonisolated static func bundledProviderVersion(for provider: String) -> String? {
+        switch provider {
+        case "jamfplatform": EngineInfo.jamfPlatformProviderVersion
+        case "jamfpro": EngineInfo.jamfProProviderVersion
+        case "jamfprotect": EngineInfo.jamfProtectProviderVersion
+        default: nil
+        }
+    }
+
+    /// Every jamformer launch goes through here, pinned to the bundled
+    /// plugin version of `provider` (as an argument and in the environment).
     private func run(
         arguments: [String],
+        provider: String,
         environment: [String: String],
         onLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> ExportResult {
+        guard let version = Self.bundledProviderVersion(for: provider) else {
+            throw UnknownProvider(provider: provider)
+        }
+        let pinnedArguments = arguments + ["-provider-version", version]
         var fullEnvironment = environment
+        fullEnvironment["JAMFORMER_PROVIDER_VERSION"] = version
         fullEnvironment["HOME"] = NSHomeDirectory()
         fullEnvironment["PATH"] = "/usr/bin:/bin"
-        let process = try tools.process(.jamformer, executable: jamformerURL, arguments: arguments,
+        let process = try tools.process(.jamformer, executable: jamformerURL, arguments: pinnedArguments,
                                         environment: fullEnvironment)
 
         let stdout = Pipe()

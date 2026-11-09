@@ -315,6 +315,52 @@ actor JamfPlatformClient {
         return zip(checks, results).map { ($0, $1.result) }
     }
 
+    /// JTKit's Test Connection: signs in, runs the read checks and returns
+    /// "Connected · Jamf Pro <version>". A permission that is missing or
+    /// couldn't be checked is thrown as `PermissionShortfall`, which names
+    /// what to add where this connection signs in.
+    func testConnection(checks: [JamfPlatform.PermissionCheck]) async throws -> String {
+        try checkInstanceURL()
+        let encoded = checks.map { check in
+            var check = check
+            check.path = Self.encodedPath(check.path)
+            return check
+        }
+        let client = try platform.get()
+        do {
+            return try await client.testConnection(checks: encoded) {
+                "Jamf Pro \(PreflightService.displayVersion(try await client.jamfProVersion().version))"
+            }
+        } catch let problem as JamfPlatform.PermissionProblem {
+            throw PermissionShortfall(problem: problem, server: server, signIn: signIn)
+        }
+    }
+
+    /// Signed in, but a read permission is missing or couldn't be checked,
+    /// worded for the connection: Jamf Account permissions on the Platform
+    /// API, Jamf Pro privileges (API role or user account) on a Jamf Pro one.
+    nonisolated struct PermissionShortfall: LocalizedError {
+        let problem: JamfPlatform.PermissionProblem
+        let server: JamfPlatform.Server
+        let signIn: SignInMethod
+
+        var errorDescription: String? {
+            guard !problem.missing.isEmpty else { return "Signed in, but not every permission could be checked." }
+            guard server == .jamfPro else { return problem.errorDescription }
+            let account = signIn == .usernamePassword ? "the user account" : "the API client"
+            return problem.missing.count == 1
+                ? "Signed in, but \(account) is missing a privilege."
+                : "Signed in, but \(account) is missing \(problem.missing.count) privileges."
+        }
+
+        var failureReason: String? {
+            let hint = JamfPlatform.PermissionCheck.hint(for: problem.missing, on: server, signIn: signIn)
+            let lines = [hint].compactMap { $0 }
+                + problem.unchecked.map { "\($0.check.name) couldn’t be checked: \($0.reason)" }
+            return lines.joined(separator: "\n")
+        }
+    }
+
     /// Drops the token, so the next request signs in again.
     func forgetToken() async {
         await tokens.forgetToken()

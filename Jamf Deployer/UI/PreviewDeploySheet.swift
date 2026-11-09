@@ -452,8 +452,12 @@ struct PreviewDeploySheet: View {
                 // a sheet without the passphrase recovers nothing
                 recoveryIncludesPassphrase = hasPassphrase(for: tenant)
                 hasRecoveryPassphrase = recoveryIncludesPassphrase
-                guard recoveryIncludesPassphrase else { return }
-                recoveryText = deployService.recoverySheetText(for: tenant)
+                guard recoveryIncludesPassphrase,
+                      let text = try? deployService.recoverySheetText(for: tenant) else {
+                    hasRecoveryPassphrase = false
+                    return
+                }
+                recoveryText = text
                 isExportingRecovery = true
             }
                 .buttonStyle(.borderedProminent)

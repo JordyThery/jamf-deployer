@@ -34,7 +34,7 @@ nonisolated final class ToolDoorway: Sendable {
     private enum Mode: Sendable {
         case real(isDemoOn: @Sendable () -> Bool)
         case demo
-        case trap(@Sendable (ExternalTool) -> Void)
+        case trap(@Sendable (Launch) -> Void)
     }
 
     private let mode: Mode
@@ -61,8 +61,21 @@ nonisolated final class ToolDoorway: Sendable {
         ToolDoorway(.real(isDemoOn: isDemoOn))
     }
 
+    /// One launch as a test's doorway hears of it.
+    struct Launch: Sendable {
+        let tool: ExternalTool
+        let arguments: [String]
+        let environment: [String: String]?
+    }
+
     /// For tests: `attempted` hears of every launch, which is then refused.
     static func trap(_ attempted: @escaping @Sendable (ExternalTool) -> Void) -> ToolDoorway {
+        ToolDoorway(.trap { attempted($0.tool) })
+    }
+
+    /// For tests: `attempted` hears of every launch with its arguments and
+    /// environment, which is then refused.
+    static func trapRecording(_ attempted: @escaping @Sendable (Launch) -> Void) -> ToolDoorway {
         ToolDoorway(.trap(attempted))
     }
 
@@ -83,7 +96,7 @@ nonisolated final class ToolDoorway: Sendable {
     ) throws -> Process {
         switch mode {
         case .trap(let attempted):
-            attempted(tool)
+            attempted(Launch(tool: tool, arguments: arguments, environment: environment))
             throw Refused(tool: tool)
         case .demo:
             throw Refused(tool: tool)

@@ -1569,7 +1569,10 @@ final class TenantDeployService {
         "recoverySaved.\(tenant.id.uuidString)"
     }
 
-    func recoverySheetText(for tenant: Tenant) -> String {
+    /// - Throws: when the passphrase can't be read (missing, or a Keychain
+    ///   that can't be read): a sheet without it would recover nothing.
+    func recoverySheetText(for tenant: Tenant) throws -> String {
+        let passphrase = try statePassphrase(for: tenant)
         if isTeamMode {
             return """
             Jamf Deployer — Team Space Recovery Sheet
@@ -1582,7 +1585,7 @@ final class TenantDeployService {
 
             Team passphrase:
 
-                \(TeamPassphrase.item.load() ?? "(not available on this Mac)")
+                \(passphrase)
 
             The team passphrase encrypts the deployment state of every tenant
             in this team space, stored on the \(StateBackendService.stateBranch)
@@ -1601,7 +1604,7 @@ final class TenantDeployService {
 
         Recovery passphrase:
 
-            \((try? statePassphrase(for: tenant)) ?? "(not available on this Mac)")
+            \(passphrase)
 
         This passphrase encrypts the tenant’s deployment state (the app’s
         memory of what it manages in this tenant). Keep this sheet in a

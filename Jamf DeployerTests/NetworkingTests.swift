@@ -179,6 +179,61 @@ struct JamfPlatformClientTests {
         #expect(server.requests.last?.header("X-Environment-Id") == nil)
     }
 
+    // Settings › Connections › Test Connection: JTKit's testConnection with
+    // the preflight's first read checks, worded for the connection.
+
+    @Test func testConnectionChecksTheReadsAndShowsTheVersion() async throws {
+        let server = MockServer { request in
+            switch request.path {
+            case "/auth/token": .json(200, tokenJSON("tok"))
+            case "/pro/v1/jamf-pro-version": .json(200, #"{"version":"11.24.0-t1234"}"#)
+            default: .json(200, #"{"totalCount":0,"results":[]}"#)
+            }
+        }
+        let text = try await client(platform, server: server).testConnection(checks: PreflightService.permissionChecks)
+        #expect(text == "Connected · Jamf Pro 11.24.0")
+        let read = Set(server.requests.map(\.path))
+        #expect(PreflightService.permissionChecks.allSatisfy { read.contains($0.path) })
+    }
+
+    @Test func testConnectionNamesAMissingJamfProPrivilege() async throws {
+        let server = MockServer { request in
+            switch request.path {
+            case "/api/oauth/token": .json(200, tokenJSON("tok"))
+            case "/api/v1/scripts": .json(403, #"{"httpStatus":403}"#)
+            default: .json(200, #"{"version":"11.24.0","totalCount":0,"results":[]}"#)
+            }
+        }
+        let configuration = JamfAPIConfiguration(jamfProURL: URL(string: "https://pin.example.invalid")!,
+                                                 auth: .apiClient, clientID: "client", clientSecret: "secret")
+        await #expect {
+            _ = try await client(configuration, server: server).testConnection(checks: PreflightService.permissionChecks)
+        } throws: { error in
+            guard let shortfall = error as? JamfPlatformClient.PermissionShortfall else { return false }
+            return shortfall.errorDescription == "Signed in, but the API client is missing a privilege."
+                && shortfall.failureReason?.contains("“\(JamfPro.Privilege.readScripts.rawValue)”") == true
+                && shortfall.failureReason?.contains("API Roles and Clients") == true
+                && shortfall.failureReason?.contains("Jamf Account") == false
+        }
+    }
+
+    @Test func testConnectionNamesAMissingPlatformPermission() async throws {
+        let server = MockServer { request in
+            switch request.path {
+            case "/auth/token": .json(200, tokenJSON("tok"))
+            case "/pro/v1/categories": .json(403, #"{"httpStatus":403}"#)
+            default: .json(200, #"{"version":"11.24.0","totalCount":0,"results":[]}"#)
+            }
+        }
+        await #expect {
+            _ = try await client(platform, server: server).testConnection(checks: PreflightService.permissionChecks)
+        } throws: { error in
+            guard let shortfall = error as? JamfPlatformClient.PermissionShortfall else { return false }
+            return shortfall.errorDescription?.contains("categories:read") == true
+                && shortfall.failureReason?.contains("Jamf Account") == true
+        }
+    }
+
     @Test func anInvalidJamfProURLSendsNothing() async throws {
         let server = MockServer { _ in .json(200, "{}") }
         var tenant = platformTenant()

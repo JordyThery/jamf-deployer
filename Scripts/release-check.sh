@@ -52,6 +52,8 @@ if [[ "${JD_LIVE_FULL:-}" == 1 ]]; then
         "Jamf DeployerUITests/LiveFullUITests/testRolloutInTwoRings"
         "Jamf DeployerUITests/LiveFullUITests/testFleetPresetConflictIsFlagged"
         "Jamf DeployerUITests/LiveFullUITests/testExportAsTerraformForReview"
+        "Jamf DeployerUITests/LiveFullUITests/testRenamingCatalogRelease"
+        "Jamf DeployerUITests/LiveFullUITests/testMacAppStoreApps"
     )
 fi
 CLEANUP_TEST="Jamf DeployerTests/LiveCleanupTests"

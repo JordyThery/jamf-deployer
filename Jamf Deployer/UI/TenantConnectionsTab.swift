@@ -100,7 +100,8 @@ struct TenantConnectionsTab: View {
     }
 
     /// Signs in with the values on screen (this Mac's own client ID in Team
-    /// Mode) and reads the Jamf Pro version, as the preflight does.
+    /// Mode), checks the read permissions the preflight checks first, and
+    /// reads the Jamf Pro version (JTKit's Test Connection).
     private func test(_ record: TenantConnection, typed: [ConnectionSecretKind: String]) async throws -> String {
         let tenant = record.tenant
         let connection = record.connection
@@ -115,8 +116,7 @@ struct TenantConnectionsTab: View {
         let client = JamfPlatformClient(
             configuration: try Self.testConfiguration(for: tenant, signInName: signInName, password: password),
             activityLog: activityLog)
-        let version = try await client.jamfProVersion()
-        return "Connected · Jamf Pro \(PreflightService.displayVersion(version))"
+        return try await client.testConnection(checks: PreflightService.permissionChecks)
     }
 
     /// Test Connection's sign-in: always the tenant's real address and the

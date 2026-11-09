@@ -41,6 +41,20 @@ nonisolated struct KeychainItem: Sendable {
         return value
     }
 
+    /// The value an action needs, like JTKit's `requiredSecret`.
+    /// - Throws: `MissingValue` with `missing` when none is stored (or it is
+    ///   empty), `SecretStoreError` when the Keychain can't read it.
+    func required(missing: String) throws -> String {
+        guard let value = try read(), !value.isEmpty else { throw MissingValue(message: missing) }
+        return value
+    }
+
+    /// No value is stored; the message says what to enter, and where.
+    struct MissingValue: LocalizedError, Equatable {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
     /// Nil also when the Keychain can't be read. Only for screens that
     /// show whether something is saved; signing in and engine runs use
     /// `read()`, so a Keychain that can't be read is reported as such.

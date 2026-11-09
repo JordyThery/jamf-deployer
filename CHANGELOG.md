@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **OpenTofu 1.13.9** is now built in (was 1.13.2). It fixes saving the
+  deployment state after a first deploy that stopped partway, and a crash on
+  a broken state encryption setting.
+- **Capture, Adopt and Clone use the built-in engine plugins' versions.**
+  The exporter no longer downloads a newer jamfplatform, jamfpro or
+  jamfprotect plugin, whose output the built-in engine may not read.
+- **Test Connection in Settings › Connections also checks the read
+  permissions** a deploy needs first (categories, scripts, Automated Device
+  Enrollment, Apps and Books), and says which permission or Jamf Pro
+  privilege to add.
+- **A Keychain that can't be read is reported as such** in Adopt, Export,
+  Day 0, the app pickers, the preflight and the team passphrase, instead of
+  “the client secret is missing”. Update Client Secret… no longer asks for a
+  new recovery passphrase when the saved one only can't be read right now,
+  and a recovery sheet is never saved without its passphrase.
+- **A catalog-sources list or a “Not a secret” list that can't be read** is
+  kept as a dated copy next to it (on this Mac only, never shared with a
+  team), and an earlier copy is never replaced.
+
 ## 1.2.0 — 2026-11-02
 
 ### Adopt, Capture and the store

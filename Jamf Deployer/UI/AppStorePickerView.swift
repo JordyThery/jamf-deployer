@@ -270,8 +270,11 @@ struct AppStorePickerView: View {
     // MARK: Loading
 
     private func client() -> JamfPlatformClient? {
-        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
-            loadError = JamfAPIError.missingSecret(usesPassword: tenant.usesPassword)
+        do {
+            _ = try TenantSecrets(tenantID: tenant.id).platformClientSecret
+                .required(missing: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        } catch {
+            loadError = error.localizedDescription
             return nil
         }
         return TenantClients.shared.client(for: tenant, activityLog: activityLog)
