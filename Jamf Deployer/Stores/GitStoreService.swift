@@ -1,5 +1,6 @@
 import Foundation
 import JamfDeployerCore
+import JTKit
 import os
 
 /// The store on disk is a Git repository — always, remote or not. Solo use
@@ -104,6 +105,8 @@ actor GitStoreService {
     # Engine state never goes into this repository: solo state stays on
     # this Mac, team state lives in the state backend.
     tenants/*/state/
+    # Copies of files the app couldn't read, kept on this Mac only.
+    *.unreadable-*
     .DS_Store
     """
 
@@ -281,15 +284,32 @@ actor GitStoreService {
         guard !new.isEmpty else { return }
         current.notSecrets.append(contentsOf: Set(new))
         current.notSecrets.sort { ($0.path, $0.line, $0.rule) < ($1.path, $1.line, $1.rule) }
+        let fileURL = storeURL.appending(path: Self.acknowledgementsFile)
+        // An unreadable file reads as no marks: keep a copy of it before
+        // it is replaced, so earlier marks are never lost.
+        if FileManager.default.fileExists(atPath: fileURL.path), Self.decodedAcknowledgements(at: fileURL) == nil,
+           FileCopies.keepUnreadableCopy(of: fileURL) == nil {
+            throw AcknowledgementsUnreadable()
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(current).write(to: storeURL.appending(path: Self.acknowledgementsFile), options: .atomic)
+        try encoder.encode(current).write(to: fileURL, options: .atomic)
+    }
+
+    /// The "Not a secret" marks file can't be read, and no copy of it could be kept.
+    struct AcknowledgementsUnreadable: LocalizedError {
+        var errorDescription: String? {
+            "The list of findings marked “Not a secret” can’t be read, and no copy of it could be kept, so it wasn’t changed."
+        }
+    }
+
+    private static func decodedAcknowledgements(at url: URL) -> Acknowledgements? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(Acknowledgements.self, from: data)
     }
 
     func acknowledgements() -> Acknowledgements {
-        guard let data = try? Data(contentsOf: storeURL.appending(path: Self.acknowledgementsFile)),
-              let decoded = try? JSONDecoder().decode(Acknowledgements.self, from: data) else { return Acknowledgements() }
-        return decoded
+        Self.decodedAcknowledgements(at: storeURL.appending(path: Self.acknowledgementsFile)) ?? Acknowledgements()
     }
 
     /// The one-time check of a store from before this check existed: the

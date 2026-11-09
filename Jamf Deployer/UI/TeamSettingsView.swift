@@ -22,7 +22,11 @@ struct TeamSettingsView: View {
     @State private var message: String?
     @State private var isConfirmingLeave = false
     @State private var isShowingPassphrase = false
-    @State private var hasTeamPassphrase = TeamPassphrase.item.load() != nil
+    /// Read from the Keychain when Show is clicked, not on every redraw.
+    @State private var shownPassphrase = ""
+    /// Read with `read()`: a Keychain that can't be read hides the entry
+    /// field, so nothing is typed over a passphrase this Mac may hold.
+    @State private var teamPassphrase = SecretPresence(reading: { try TeamPassphrase.item.read() })
 
     var body: some View {
         Section {
@@ -85,26 +89,38 @@ struct TeamSettingsView: View {
         }
         .disabled(isWorking)
 
-        if hasTeamPassphrase {
+        switch teamPassphrase {
+        case .stored:
             LabeledContent("Team passphrase") {
                 HStack {
                     if isShowingPassphrase {
-                        Text(TeamPassphrase.item.load() ?? "")
+                        Text(shownPassphrase)
                             .font(.callout.monospaced())
                             .textSelection(.enabled)
                         Button("Copy") {
-                            SecretPasteboard.copy(TeamPassphrase.item.load() ?? "")
+                            SecretPasteboard.copy(shownPassphrase)
                         }
                         .controlSize(.small)
                         .accessibilityLabel("Copy Team Passphrase")
                         .accessibilityIdentifier("Copy")
                     }
-                    Button(isShowingPassphrase ? "Hide" : "Show") { isShowingPassphrase.toggle() }
+                    Button(isShowingPassphrase ? "Hide" : "Show") { togglePassphrase() }
                         .controlSize(.small)
                         .help("Shows the passphrase to share with an engineer joining the team space")
                 }
             }
-        } else {
+        case .unreadable(let error):
+            LabeledContent("Team passphrase") {
+                Label("Saved on this Mac, but it can’t be read right now. \(error)", systemImage: "lock.fill")
+                    .font(.caption)
+                    .labelStyle(.tintedIcon(.orange))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Try Again") {
+                teamPassphrase = SecretPresence(reading: { try TeamPassphrase.item.read() })
+            }
+            .controlSize(.small)
+        case .none:
             passphraseEntry(prompt: "This Mac needs the team passphrase to read the team’s deployment state. Ask a teammate for it.")
         }
     }
@@ -185,6 +201,21 @@ struct TeamSettingsView: View {
 
     // MARK: Actions
 
+    /// Shows the passphrase read from the Keychain, or says it can't be read.
+    private func togglePassphrase() {
+        guard !isShowingPassphrase else {
+            isShowingPassphrase = false
+            shownPassphrase = ""
+            return
+        }
+        do {
+            shownPassphrase = try TeamPassphrase.item.read() ?? ""
+            isShowingPassphrase = true
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
     private func sync() {
         isWorking = true
         Task {
@@ -195,6 +226,14 @@ struct TeamSettingsView: View {
 
     private func savePassphrase() {
         let passphrase = passphraseField.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Read again right before saving: never save over (or delete) a
+        // passphrase this Mac already holds or can't read right now.
+        let presence = SecretPresence(reading: { try TeamPassphrase.item.read() })
+        guard presence == .none else {
+            teamPassphrase = presence
+            message = presence == .stored ? "This Mac already has the team passphrase; it was left as it is." : nil
+            return
+        }
         isWorking = true
         Task {
             defer { isWorking = false }
@@ -204,7 +243,7 @@ struct TeamSettingsView: View {
             }
             do {
                 if try await deployService.checkTeamPassphrase() {
-                    hasTeamPassphrase = true
+                    teamPassphrase = .stored
                     passphraseField = ""
                     message = "Team passphrase saved."
                 } else {
@@ -253,7 +292,7 @@ struct TeamSettingsView: View {
                     throw TeamError.createFailed(Self.describe(error))
                 }
                 deployService.retireLocalState(of: tenantStore.tenants)
-                hasTeamPassphrase = true
+                teamPassphrase = .stored
                 isCreating = false
                 message = "Team space created. Engineers join with the same URL and the team passphrase."
             } catch {
@@ -308,7 +347,7 @@ struct TeamSettingsView: View {
                     await deployService.syncTeamState()
                     throw TeamError.joinFailed(Self.describe(error))
                 }
-                hasTeamPassphrase = true
+                teamPassphrase = .stored
                 passphraseField = ""
                 message = imported.isEmpty
                     ? "Joined the team space."
@@ -331,7 +370,7 @@ struct TeamSettingsView: View {
                 _ = try? await deployService.commitStore(message: "Leave team space")
                 await deployService.syncTeamState()
                 TeamPassphrase.item.delete()
-                hasTeamPassphrase = false
+                teamPassphrase = .none
                 isShowingPassphrase = false
                 message = "Left Team Mode — everything stays on this Mac. Save a new recovery sheet for each tenant before its next deploy."
             } catch {

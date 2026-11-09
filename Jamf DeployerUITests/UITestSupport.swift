@@ -12,15 +12,6 @@ class DeployerUITestCase: JTKitUITestCase {
     // The guided tour would cover the window on a reset Mac.
     override var demoLaunchArguments: [String] { ["-hasSeenGuidedTour", "YES"] }
 
-    /// Prints the failure before JTKit takes its failure screenshot: on
-    /// this Mac that screenshot can crash the test runner, which would
-    /// lose the message. Labels only, like the rest of the log.
-    override func record(_ issue: XCTIssue) {
-        let place = issue.sourceCodeContext.location.map { "\($0.fileURL.lastPathComponent):\($0.lineNumber)" } ?? "?"
-        print("UITEST-FAILURE \(place): \(issue.compactDescription)")
-        super.record(issue)
-    }
-
     override func didLaunch() {
         // A larger window keeps long forms on screen (clicks need a hit point).
         let window = app.windows["main"].firstMatch

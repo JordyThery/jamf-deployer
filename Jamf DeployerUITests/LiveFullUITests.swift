@@ -14,14 +14,13 @@ import JTKitUITestSupport
 /// deployed through the app; a change "made in Jamf" is only ever made on
 /// an object the test created itself, through the gateway.
 ///
-/// Left out: blocks that need an Automated Device Enrollment instance, an
-/// Apps and Books location, Jamf Protect or Security Cloud, and blocks that
-/// make objects the cleanup can't sweep (extension attributes, disk
-/// encryption configurations, App Installers, mobile profiles, tenant-wide
-/// settings); the Rename suite (it needs a catalog with two locally built
-/// releases); the App Store suite (it needs an Apps and Books location);
-/// Team Mode (no private test repository; it stays covered by unit tests);
-/// moving an export to a repository (exports for review only).
+/// Left out: blocks that need an Automated Device Enrollment instance,
+/// Jamf Protect or Security Cloud, and blocks that make objects the cleanup
+/// can't sweep (extension attributes, disk encryption configurations, App
+/// Installers, mobile profiles, tenant-wide settings); Team Mode and moving
+/// an export to a repository (nothing is pushed in a live run; Team Mode
+/// stays covered by unit tests). The App Store test runs only on a test
+/// tenant with an Apps and Books location that holds a license.
 final class LiveFullUITests: LiveDeployerUITestCase {
 
     // MARK: Custom objects on both connections
@@ -151,7 +150,7 @@ final class LiveFullUITests: LiveDeployerUITestCase {
                anyContaining("Signed in to the Jamf Pro API").waitForExistence(timeout: 120))
         ensureTerraform(on: tenant)
 
-        adopt(categoryName, resourceType: "categories", on: tenant)
+        try adopt(categoryName, resourceType: "categories", on: tenant)
         XCTAssertTrue(reachReview(), "The preview didn't finish")
         record(step(role, "adopt: preview"), plannedCount("adopt") == 1)
         deployCurrentPreview()
@@ -356,6 +355,281 @@ final class LiveFullUITests: LiveDeployerUITestCase {
         openTenant(tenant)
         untick("Categories")
         record(step(Self.testB, "Export as Terraform: the block removed"), previewAndDeploy())
+    }
+
+    // MARK: A catalog release that renames a group
+
+    /// A local Git catalog with two releases: v1.0.0 has a static group
+    /// and a policy scoped to it; v1.0.1 renames the group (new address,
+    /// new name, new key). On jamf-test-b: v1.0.0 deployed; the catalog
+    /// source removed and added again (the tenant's blocks must follow its
+    /// new identity); Baseline Updates… offers v1.0.1, whose deploy must
+    /// finish without failures even though the engine deletes the old
+    /// group before it updates the policy; read back: one group with the
+    /// new name, the policy scoped to it. Then both blocks are removed.
+    func testRenamingCatalogRelease() throws {
+        let gateway = try liveGateway()
+        let role = Self.testB
+        let api = try LiveJamfPlatformAPI(gateway: gateway, role: role)
+        let tenant = try tenantName(role)
+        let catalogName = "\(runPrefix) Rename Catalog"
+        let catalogURL = try makeRenameCatalog(in: testFolder.appending(path: "rename-catalog", directoryHint: .isDirectory))
+        defer { finishLiveTest(step: step(role, "rename: nothing left")) {} }
+        try launchDeployer(roles: [role])
+
+        addGitCatalog(name: catalogName, url: catalogURL.absoluteString, tag: "v1.0.0")
+        openTenant(tenant)
+        tick("Rename Groups")
+        tick("Rename Policy")
+        record(step(role, "rename: deploy v1.0.0"), previewAndDeploy())
+
+        removeCatalogSources(named: catalogName)
+        addGitCatalog(name: catalogName, url: catalogURL.absoluteString, tag: "v1.0.0")
+        recordLive(step: step(role, "rename: the catalog source removed and added again"), passed: true)
+
+        openTenant(tenant)
+        tap(app.buttons["Baseline Updates…"], timeout: 15)
+        record(step(role, "rename: Baseline Updates… offers v1.0.1"), anyContaining("v1.0.1").waitForExistence(timeout: 60))
+        tap(app.sheets.buttons["Stage Selected Updates"], timeout: 10)
+        record(step(role, "rename: deploy v1.0.1 without failures"), previewAndDeploy())
+
+        waitForNetwork()
+        let renamed = "\(objectPrefix)Rename Pilot Renamed"
+        let groups = try liveCall { try await api.object("proclassic/computergroups") }
+        let names = ((groups["computer_groups"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
+            .filter { $0.hasPrefix(objectPrefix + "Rename Pilot") }
+        record(step(role, "rename: read back, only the renamed group"), names == [renamed], note: names.joined(separator: ", "))
+        let policies = try liveCall { try await api.object("proclassic/policies") }
+        let policyID = ((policies["policies"] as? [[String: Any]]) ?? [])
+            .first { ($0["name"] as? String) == "\(objectPrefix)Rename Check" }?["id"]
+        var scoped: [String] = []
+        if let policyID {
+            let detail = try liveCall { try await api.object("proclassic/policies/id/\(policyID)") }
+            let scope = (detail["policy"] as? [String: Any])?["scope"] as? [String: Any]
+            scoped = ((scope?["computer_groups"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
+        }
+        record(step(role, "rename: read back, the policy scoped to the renamed group"), scoped == [renamed],
+               note: scoped.joined(separator: ", "))
+
+        openTenant(tenant)
+        untick("Rename Policy")
+        untick("Rename Groups")
+        record(step(role, "rename: both blocks removed"), previewAndDeploy())
+        removeCatalogSources(named: catalogName)
+    }
+
+    /// Writes the two-release catalog and returns a bare clone's file URL.
+    /// Its objects are a static computer group and a disabled policy with
+    /// no trigger devices reach, both named with the tenant's prefix.
+    private func makeRenameCatalog(in folder: URL) throws -> URL {
+        let work = folder.appending(path: "work", directoryHint: .isDirectory)
+        let bare = folder.appending(path: "catalog.git", directoryHint: .isDirectory)
+        try? FileManager.default.removeItem(at: folder)
+        for block in ["rename-groups", "rename-policy"] {
+            try FileManager.default.createDirectory(at: work.appending(path: "blocks/\(block)"), withIntermediateDirectories: true)
+        }
+        func write(_ text: String, _ path: String) throws {
+            try Data(text.utf8).write(to: work.appending(path: path))
+        }
+        try write(#"{ "id": "jtktest-rename", "name": "JTKTEST Rename Catalog", "schemaVersion": 1 }"#, "catalog.json")
+        let versions = """
+        terraform {
+          required_providers {
+            jamfplatform = {
+              source = "jamf/jamfplatform"
+            }
+          }
+        }
+
+        """
+        let variables = """
+        variable "name_prefix" {
+          type = string
+        }
+
+        variable "managed_by_tag" {
+          type = string
+        }
+
+        """
+        let dependencies = ["ids", "names", "jamf_pro_ids"].map {
+            "variable \"dep_device_group_\($0)\" {\n  type    = map(string)\n  default = {}\n}\n"
+        }.joined(separator: "\n")
+        for block in ["rename-groups", "rename-policy"] {
+            try write(versions, "blocks/\(block)/versions.tf")
+        }
+        try write(variables, "blocks/rename-groups/variables.tf")
+        try write(variables + dependencies, "blocks/rename-policy/variables.tf")
+
+        func manifest(_ id: String, _ name: String, _ version: String, _ wiring: String) -> String {
+            """
+            {
+              "acceptsCategory": false, "alwaysOn": false, "category": "Core", "conflicts": [],
+              "id": "\(id)", "name": "\(name)", "summary": "Rename test block.", "version": "\(version)",
+              "minJamfProVersion": "11.31.0", "objectsCreated": ["1 object"],
+              "permissions": [], "products": ["jamf-pro", "jamf-platform"], "requires": [],
+              "risk": "low", "scope": { "kind": "none" }, "settings": [], \(wiring)
+            }
+
+            """
+        }
+        func release(_ version: String, resource: String, group: String) throws {
+            try write(manifest("rename-groups", "Rename Groups", version, #""provides": { "device_group": ["\#(group)"] }"#),
+                      "blocks/rename-groups/block.json")
+            try write(manifest("rename-policy", "Rename Policy", version, #""needs": { "device_group": ["\#(group)"] }"#),
+                      "blocks/rename-policy/block.json")
+            try write("""
+            resource "jamfplatform_device_group" "\(resource)" {
+              name        = "${var.name_prefix}\(group)"
+              description = var.managed_by_tag
+              device_type = "computer"
+              group_type  = "static"
+            }
+
+            output "device_group_ids" {
+              value = { "\(group)" = jamfplatform_device_group.\(resource).id }
+            }
+
+            output "device_group_names" {
+              value = { "\(group)" = jamfplatform_device_group.\(resource).name }
+            }
+
+            output "device_group_jamf_pro_ids" {
+              value = { "\(group)" = jamfplatform_device_group.\(resource).jamf_pro_id }
+            }
+
+            """, "blocks/rename-groups/main.tf")
+            try write("""
+            resource "jamfplatform_pro_policy" "check" {
+              general = {
+                name          = "${var.name_prefix}Rename Check"
+                enabled       = false
+                frequency     = "Ongoing"
+                trigger_other = "jtktest-rename-check"
+              }
+              scope = {
+                targets = {
+                  computer_group_ids = [var.dep_device_group_jamf_pro_ids["\(group)"]]
+                }
+              }
+            }
+
+            """, "blocks/rename-policy/main.tf")
+            try git(["add", "-A"], in: work)
+            try git(["commit", "-qm", "v\(version)"], in: work)
+            try git(["tag", "v\(version)"], in: work)
+        }
+        try git(["init", "-q", "-b", "main"], in: work)
+        try release("1.0.0", resource: "pilot", group: "Rename Pilot")
+        try release("1.0.1", resource: "pilot_renamed", group: "Rename Pilot Renamed")
+        try git(["clone", "-q", "--bare", work.path, bare.path], in: folder)
+        return bare
+    }
+
+    /// Runs git in the test runner (the catalog is the test's own, local).
+    private func git(_ arguments: [String], in folder: URL) throws {
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/bin/git")
+        process.arguments = ["-c", "user.name=JTKTEST", "-c", "user.email=jtktest@example.invalid",
+                             "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"] + arguments
+        process.currentDirectoryURL = folder
+        process.environment = ["PATH": "/usr/bin:/bin", "HOME": testFolder.path, "GIT_CONFIG_NOSYSTEM": "1"]
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "git", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) failed"])
+        }
+    }
+
+    /// Building Blocks › Add Git Catalog…, pinned to `tag`.
+    private func addGitCatalog(name: String, url: String, tag: String, file: StaticString = #filePath, line: UInt = #line) {
+        openSidebar("Building Blocks")
+        tap(app.toolbars.buttons["Add Git Catalog…"], timeout: 15, file: file, line: line)
+        type(name, into: app.sheets.textFields.matching(NSPredicate(format: "placeholderValue == 'Shared Blocks'")).firstMatch)
+        type(url, into: app.sheets.textFields.matching(NSPredicate(format: "placeholderValue == 'https://github.com/org/blocks.git'")).firstMatch)
+        tap(app.sheets.buttons["Fetch Release Tags"], file: file, line: line)
+        let tags = app.sheets.popUpButtons.firstMatch
+        XCTAssertTrue(tags.waitForExistence(timeout: 60), "No release tags fetched", file: file, line: line)
+        if (tags.value as? String) != tag {
+            tags.click()
+            tap(app.menuItems[tag], timeout: 5, file: file, line: line)
+        }
+        tap(app.sheets.buttons["Add Catalog"], file: file, line: line)
+        XCTAssertTrue(app.sheets.firstMatch.waitForNonExistence(timeout: 120), "The catalog wasn't added", file: file, line: line)
+    }
+
+    /// Building Blocks › Manage Sources…: removes every source with this name.
+    private func removeCatalogSources(named name: String, file: StaticString = #filePath, line: UInt = #line) {
+        openSidebar("Building Blocks")
+        tap(app.toolbars.buttons["Manage Sources…"], timeout: 15, file: file, line: line)
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 10), file: file, line: line)
+        for _ in 0..<5 {
+            let label = app.sheets.staticTexts.matching(NSPredicate(format: "value == %@ OR label == %@", name, name)).firstMatch
+            guard label.waitForExistence(timeout: 2) else { break }
+            let row = app.sheets.buttons.matching(NSPredicate(format: "label == 'Remove…'")).allElementsBoundByIndex
+                .min { abs($0.frame.midY - label.frame.midY) < abs($1.frame.midY - label.frame.midY) }
+            guard let remove = row, abs(remove.frame.midY - label.frame.midY) < 30 else { break }
+            remove.click()
+            tap(dialogButton("Remove Source"), timeout: 10, file: file, line: line)
+            sleep(1)
+        }
+        tap(app.sheets.buttons["Close"], timeout: 5, file: file, line: line)
+    }
+
+    // MARK: Mac App Store Apps
+
+    /// The built-in Mac App Store Apps block on jamf-test-b (Platform API):
+    /// the first licensed app from the picker, scoped to the demo catalog's
+    /// empty static Pilot group (so no device gets it), deployed, checked
+    /// clean, and removed with the Pilot group. Skipped on a tenant without
+    /// an Apps and Books location.
+    func testMacAppStoreApps() throws {
+        let gateway = try liveGateway()
+        let role = Self.testB
+        let api = try LiveJamfPlatformAPI(gateway: gateway, role: role)
+        let locations = try liveCall { try await api.object("pro/v1/volume-purchasing-locations") }
+        guard ((locations["totalCount"] as? NSNumber)?.intValue ?? 0) > 0 else {
+            recordLive(step: step(role, "Mac App Store Apps: skipped, no Apps and Books location"), passed: true)
+            throw XCTSkip("\(role) has no Apps and Books location")
+        }
+        let tenant = try tenantName(role)
+        defer { finishLiveTest(step: step(role, "Mac App Store Apps: nothing left")) {} }
+        try launchDeployer(roles: [role])
+        ensureDemoCatalog()
+
+        openTenant(tenant)
+        tick("Device Groups")
+        tick("Mac App Store Apps")
+        openSettings(of: "Mac App Store Apps")
+        chooseScope("Pilot", current: [])
+        tap(app.buttons["Choose Apps…"].firstMatch, timeout: 15)
+        let add = app.sheets.buttons["Add"].firstMatch
+        record(step(role, "Mac App Store Apps: the picker lists a licensed app"), add.waitForExistence(timeout: 120))
+        add.click()
+        tap(app.sheets.buttons["Done"], timeout: 10)
+        record(step(role, "Mac App Store Apps: 1 app selected"), anyContaining("1 app selected").waitForExistence(timeout: 10))
+        XCTAssertFalse(anyContaining("needs a value before this block can deploy").waitForExistence(timeout: 3), "A required setting is empty")
+
+        openPreview()
+        XCTAssertTrue(reachReview(), "The preview didn't finish")
+        let creates = plannedCount("create")
+        // the Pilot group and four smart groups, and the app
+        record(step(role, "Mac App Store Apps: preview"), creates == 6, note: "\(creates) create")
+        deployCurrentPreview()
+        record(step(role, "Mac App Store Apps: deploy"), finishDeploy())
+        try checkForChanges(on: tenant, expectingChanges: false)
+        recordLive(step: step(role, "Mac App Store Apps: Check for Changes clean"), passed: true)
+
+        openTenant(tenant)
+        untick("Mac App Store Apps")
+        untick("Device Groups")
+        openPreview()
+        XCTAssertTrue(reachReview(), "The preview didn't finish")
+        let removes = plannedCount("remove")
+        record(step(role, "Mac App Store Apps: removal planned"), removes == creates, note: "\(removes) remove")
+        deployCurrentPreview()
+        record(step(role, "Mac App Store Apps: removed"), finishDeploy())
     }
 
     // MARK: Helpers

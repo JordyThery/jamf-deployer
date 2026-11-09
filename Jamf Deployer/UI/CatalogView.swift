@@ -629,6 +629,12 @@ struct ManageSourcesSheet: View {
 
     var body: some View {
         SheetFrame(title: "Catalog Sources", systemImage: "folder.badge.gearshape") {
+            if catalogSources.isListUnreadable {
+                Label(CatalogSourceStore.ListUnreadable().errorDescription ?? "", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .labelStyle(.tintedIcon(.yellow))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if catalogSources.customSources.isEmpty {
                 ContentUnavailableView(
                     "No Custom Sources",

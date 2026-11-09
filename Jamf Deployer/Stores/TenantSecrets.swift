@@ -30,6 +30,11 @@ nonisolated struct KeychainItem: Sendable {
     /// - Throws: `SecretStoreError` when the Keychain may hold one but can't
     ///   read it (locked, access refused): never treat that as "no secret".
     func read() throws -> String? {
+        #if DEBUG
+        if Self.unreadableForTests.withLock({ $0.contains(cacheKey) }) {
+            throw SecretStoreError(status: -25308) // errSecInteractionNotAllowed: a locked Keychain
+        }
+        #endif
         if isCached, let cached = Self.cache.withLock({ $0[cacheKey] }) { return cached }
         let value: String?
         if DemoSecretVault.keepsInMemory(account: account) {
@@ -41,12 +46,38 @@ nonisolated struct KeychainItem: Sendable {
         return value
     }
 
+    /// The value an action needs, like JTKit's `requiredSecret`.
+    /// - Throws: `MissingValue` with `missing` when none is stored (or it is
+    ///   empty), `SecretStoreError` when the Keychain can't read it.
+    func required(missing: String) throws -> String {
+        guard let value = try read(), !value.isEmpty else { throw MissingValue(message: missing) }
+        return value
+    }
+
+    /// No value is stored; the message says what to enter, and where.
+    struct MissingValue: LocalizedError, Equatable {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
     /// Nil also when the Keychain can't be read. Only for screens that
     /// show whether something is saved; signing in and engine runs use
     /// `read()`, so a Keychain that can't be read is reported as such.
     func load() -> String? {
         try? read()
     }
+
+    #if DEBUG
+    /// Items that read as a locked Keychain would, for tests; one item at
+    /// a time, so tests running alongside are unaffected.
+    private static let unreadableForTests = OSAllocatedUnfairLock<Set<String>>(initialState: [])
+
+    func setUnreadableForTests(_ unreadable: Bool) {
+        Self.unreadableForTests.withLock {
+            if unreadable { $0.insert(cacheKey) } else { $0.remove(cacheKey) }
+        }
+    }
+    #endif
 
     // MARK: Read cache
 
@@ -234,6 +265,24 @@ nonisolated struct ReportingSecretStore: SecretStore {
         let saved = base.setSecret(secret, for: account)
         clients.secretChanged(account: account)
         return saved
+    }
+}
+
+/// Whether a Keychain item holds a value, decided with `read()`: a
+/// Keychain that can't be read counts as "stored, can't be read right
+/// now", never as "none".
+nonisolated enum SecretPresence: Equatable {
+    case stored
+    case none
+    /// The Keychain's error, to show as it is.
+    case unreadable(String)
+
+    init(reading read: () throws -> String?) {
+        do {
+            self = try read() != nil ? .stored : .none
+        } catch {
+            self = .unreadable(error.localizedDescription)
+        }
     }
 }
 

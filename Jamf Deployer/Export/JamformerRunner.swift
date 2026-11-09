@@ -26,6 +26,12 @@ actor JamformerRunner {
         var exitCode: Int32
     }
 
+    /// A provider jamformer has no bundled engine plugin for.
+    struct UnknownProvider: LocalizedError {
+        let provider: String
+        var errorDescription: String? { "The exporter can’t run for “\(provider)”: no built-in version of it." }
+    }
+
     private let jamformerURL: URL
 
     /// The doorway jamformer is started through; demo mode's never starts it.
@@ -40,6 +46,7 @@ actor JamformerRunner {
     func listResourceTypes(provider: String) async throws -> [ResourceType] {
         let output = try await run(
             arguments: ["-skip-update-check", "-list-resources", "-provider", provider],
+            provider: provider,
             environment: [:]
         )
         var types: [ResourceType] = []
@@ -131,7 +138,17 @@ actor JamformerRunner {
             }
         }
 
-        var result = try await run(arguments: arguments, environment: environment, onLine: onLine)
+        // Progress lines are masked as the failure screen's are, so nothing
+        // shown live is hidden only afterwards.
+        var maskedOnLine: (@Sendable (String) -> Void)?
+        if let show = onLine {
+            maskedOnLine = { @Sendable line in
+                show(Self.maskedOutput([line], secrets: [clientSecret]).first ?? "")
+            }
+        }
+        let onLine = maskedOnLine
+
+        var result = try await run(arguments: arguments, provider: provider, environment: environment, onLine: onLine)
         result.outputURL = outputURL
 
         // The exporter always runs a search phase, but settings-style types
@@ -146,15 +163,10 @@ actor JamformerRunner {
             onLine?("The selected types have no searchable objects — retrying with a helper type.")
             let retryURL = FileManager.default.temporaryDirectory
                 .appending(path: "jamf-deployer-export-\(UUID().uuidString)")
-            var retryArguments = arguments
-            if let index = retryArguments.firstIndex(of: "-include-resources") {
-                retryArguments[index + 1] = (includeResources + ["category"]).joined(separator: " ")
-            }
-            if let index = retryArguments.firstIndex(of: "-output") {
-                retryArguments[index + 1] = retryURL.path
-            }
+            let retryArguments = Self.helperRetryArguments(arguments, includeResources: includeResources,
+                                                           outputPath: retryURL.path)
             try? FileManager.default.removeItem(at: outputURL)
-            result = try await run(arguments: retryArguments, environment: environment, onLine: onLine)
+            result = try await run(arguments: retryArguments, provider: provider, environment: environment, onLine: onLine)
             result.outputURL = retryURL
             for file in ["pro_category.tf", "pro_category_import.tf"] {
                 try? FileManager.default.removeItem(at: retryURL.appending(path: file))
@@ -164,16 +176,58 @@ actor JamformerRunner {
         return result
     }
 
+    /// The engine plugin version jamformer must use for `provider`: always
+    /// the bundled one. Left to itself, jamformer downloads the newest
+    /// plugin, whose attribute names the bundled engine may not know yet.
+    nonisolated static func bundledProviderVersion(for provider: String) -> String? {
+        switch provider {
+        case "jamfplatform": EngineInfo.jamfPlatformProviderVersion
+        case "jamfpro": EngineInfo.jamfProProviderVersion
+        case "jamfprotect": EngineInfo.jamfProtectProviderVersion
+        default: nil
+        }
+    }
+
+    /// The arguments of the retry with the `category` helper type, written
+    /// to `outputPath`; pinned again by `run`, like every launch.
+    nonisolated static func helperRetryArguments(_ arguments: [String], includeResources: [String],
+                                                 outputPath: String) -> [String] {
+        var retry = arguments
+        if let index = retry.firstIndex(of: "-include-resources"), retry.indices.contains(index + 1) {
+            retry[index + 1] = (includeResources + ["category"]).joined(separator: " ")
+        }
+        if let index = retry.firstIndex(of: "-output"), retry.indices.contains(index + 1) {
+            retry[index + 1] = outputPath
+        }
+        return retry
+    }
+
+    /// A launch's arguments and environment, pinned to the bundled plugin
+    /// version of `provider` (as an argument and in the environment), with
+    /// only `HOME` and `PATH` added.
+    /// - Throws: `UnknownProvider` when the provider has no bundled version.
+    nonisolated static func pinnedLaunch(arguments: [String], environment: [String: String],
+                                         provider: String) throws -> (arguments: [String], environment: [String: String]) {
+        guard let version = bundledProviderVersion(for: provider) else {
+            throw UnknownProvider(provider: provider)
+        }
+        var fullEnvironment = environment
+        fullEnvironment["JAMFORMER_PROVIDER_VERSION"] = version
+        fullEnvironment["HOME"] = NSHomeDirectory()
+        fullEnvironment["PATH"] = "/usr/bin:/bin"
+        return (arguments + ["-provider-version", version], fullEnvironment)
+    }
+
+    /// Every jamformer launch goes through here, pinned by `pinnedLaunch`.
     private func run(
         arguments: [String],
+        provider: String,
         environment: [String: String],
         onLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> ExportResult {
-        var fullEnvironment = environment
-        fullEnvironment["HOME"] = NSHomeDirectory()
-        fullEnvironment["PATH"] = "/usr/bin:/bin"
-        let process = try tools.process(.jamformer, executable: jamformerURL, arguments: arguments,
-                                        environment: fullEnvironment)
+        let launch = try Self.pinnedLaunch(arguments: arguments, environment: environment, provider: provider)
+        let process = try tools.process(.jamformer, executable: jamformerURL, arguments: launch.arguments,
+                                        environment: launch.environment)
 
         let stdout = Pipe()
         let stderr = Pipe()
@@ -224,6 +278,34 @@ actor JamformerRunner {
             secretFindings: SecretScan.parseJamformerReport(lines),
             exitCode: exitCode
         )
+    }
+
+    /// A run's output as the Activity Log and a failure screen show it:
+    /// besides the secret scan's scanned text (already gone from
+    /// `logLines`), JTKit's redaction hides credentials and tokens, and the
+    /// run's own secrets are masked wherever they appear, as typed and
+    /// percent-encoded, longest first (as JTKit's redaction of known
+    /// secrets does), so a shorter secret inside a longer one can't leave
+    /// part of it. Secrets shorter than 4 characters are left out: masking
+    /// them would hide ordinary words.
+    nonisolated static func maskedOutput(_ lines: [String], secrets: [String]) -> [String] {
+        let secrets = Array(Set(secrets.filter { $0.count >= 4 })).sorted { $0.count > $1.count }
+        return lines.map { line in
+            var text = Redaction.text(line)
+            for secret in secrets {
+                text = text.replacingOccurrences(of: secret, with: "••••••")
+                let encoded = percentEncoded(secret)
+                if encoded != secret { text = text.replacingOccurrences(of: encoded, with: "••••••") }
+            }
+            return text
+        }
+    }
+
+    /// The form a value takes in a URL or form body: everything but
+    /// letters, digits and `-._~` percent-encoded, as JTKit encodes forms.
+    nonisolated static func percentEncoded(_ value: String) -> String {
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? value
     }
 
     /// Removes terminal control sequences and progress-bar junk. The

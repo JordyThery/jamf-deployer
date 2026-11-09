@@ -145,9 +145,17 @@ class LiveDeployerUITestCase: DeployerUITestCase {
 
     // MARK: Adopt
 
+    /// Discovery stopped with an error; the description carries the
+    /// exporter's last lines as the app shows them (secrets masked).
+    struct DiscoveryFailed: Error, CustomStringConvertible {
+        let output: String
+        var description: String { "Discovery Failed: \(output)" }
+    }
+
     /// Adopt Existing Configuration…: discovers `type` objects, stages the
-    /// one named `name` and opens its preview from the sheet.
-    func adopt(_ name: String, resourceType: String, on tenant: String, file: StaticString = #filePath, line: UInt = #line) {
+    /// one named `name` and opens its preview from the sheet. Stops at once
+    /// when discovery fails, recording the exporter's last lines.
+    func adopt(_ name: String, resourceType: String, on tenant: String, file: StaticString = #filePath, line: UInt = #line) throws {
         openTenant(tenant)
         tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Adopt'")).firstMatch, timeout: 30, file: file, line: line)
         let filter = app.sheets.textFields.matching(NSPredicate(format: "placeholderValue == 'Filter types' OR label == 'Filter types'")).firstMatch
@@ -156,7 +164,18 @@ class LiveDeployerUITestCase: DeployerUITestCase {
         tap(app.sheets.buttons["None"], timeout: 30, file: file, line: line)
         tap(app.sheets.checkBoxes.matching(NSPredicate(format: "label == %@", resourceType)).firstMatch, timeout: 60, file: file, line: line)
         tap(app.sheets.buttons["Discover Objects"], file: file, line: line)
-        XCTAssertTrue(anyContaining("found — choose").waitForExistence(timeout: 900), "Discovery did not finish", file: file, line: line)
+        let found = anyContaining("found — choose")
+        let failed = app.staticTexts["Discovery Failed"].firstMatch
+        let deadline = Date().addingTimeInterval(900)
+        while Date() < deadline, !found.exists, !failed.exists { sleep(2) }
+        if failed.exists {
+            let lines = app.staticTexts["discoveryOutput"].firstMatch
+            let output = lines.exists ? ((lines.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? lines.label) : "(no output shown)"
+            recordLive(step: "\(tenant): live UI: adopt discovery", passed: false, note: output)
+            XCTFail("Discovery Failed on \(tenant): \(output)", file: file, line: line)
+            throw DiscoveryFailed(output: output)
+        }
+        XCTAssertTrue(found.exists, "Discovery did not finish", file: file, line: line)
         tap(app.sheets.buttons["None"], file: file, line: line)
         type(name, into: app.sheets.textFields.matching(NSPredicate(format: "placeholderValue == 'Filter objects'")).firstMatch)
         tap(app.sheets.checkBoxes.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch, timeout: 30, file: file, line: line)

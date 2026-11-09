@@ -32,7 +32,7 @@ final class Day0Service {
     private(set) var isDetecting = false
 
     private func client(for tenant: Tenant) throws -> JamfPlatformClient {
-        guard TenantSecrets(tenantID: tenant.id).platformClientSecret.load() != nil else {
+        guard try TenantSecrets(tenantID: tenant.id).platformClientSecret.read() != nil else {
             throw TenantDeployService.DeployError.missingCredentials(usesPassword: tenant.usesPassword)
         }
         return TenantClients.shared.client(for: tenant, activityLog: activityLog)

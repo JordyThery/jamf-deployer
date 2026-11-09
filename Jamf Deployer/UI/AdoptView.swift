@@ -45,6 +45,8 @@ struct AdoptView: View {
     /// Selected objects that could not be staged, and why.
     @State private var stagingNote: String?
     @State private var logTail: [String] = []
+    /// The last lines of a failed discovery's output, secrets masked.
+    @State private var failureOutput: [String] = []
     /// Possible secrets, by object: from jamformer's scan and the app's own.
     @State private var secretObjects: [SecretObjectFinding] = []
     /// Objects holding a possible secret: each flagged value becomes a
@@ -233,11 +235,25 @@ struct AdoptView: View {
             }
 
         case .failed(let message):
-            ContentUnavailableView(
-                "Discovery Failed",
-                systemImage: "xmark.octagon",
-                description: Text(message)
-            )
+            VStack(spacing: 12) {
+                ContentUnavailableView(
+                    "Discovery Failed",
+                    systemImage: "xmark.octagon",
+                    description: Text(message)
+                )
+                if !failureOutput.isEmpty {
+                    ScrollView {
+                        Text(failureOutput.joined(separator: "\n"))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("discoveryOutput")
+                    }
+                    .frame(maxHeight: 140)
+                    .padding(.horizontal)
+                }
+            }
         }
     }
 
@@ -291,13 +307,18 @@ struct AdoptView: View {
     // MARK: Actions
 
     private func discover() {
-        guard let secret = TenantSecrets(tenantID: tenant.id).platformClientSecret.load() else {
-            step = .failed(JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        let secret: String
+        do {
+            secret = try TenantSecrets(tenantID: tenant.id).platformClientSecret
+                .required(missing: JamfAPIError.missingSecret(usesPassword: tenant.usesPassword))
+        } catch {
+            step = .failed(error.localizedDescription)
             return
         }
         guard let terraformURL = terraform.binaryURL else { return }
         step = .discovering
         logTail = []
+        failureOutput = []
         // Only names the exporter offers: an unknown name aborts the export.
         let available = Set(resourceTypes.map(\.filterKey))
         let types = available.isEmpty ? Array(selectedTypes) : Array(selectedTypes.intersection(available))
@@ -318,7 +339,22 @@ struct AdoptView: View {
                     }
                 )
                 guard result.exitCode == 0 else {
-                    step = .failed("The discovery stopped with an error. Check the Activity Log.")
+                    let output = JamformerRunner.maskedOutput(result.logLines, secrets: [secret])
+                    failureOutput = Array(output.suffix(8))
+                    activityLog.append(ActivityLogEntry(
+                        category: "Adopt", operation: "discover", detail: tenant.name,
+                        note: "The exporter stopped with exit code \(result.exitCode).\n"
+                            + output.suffix(200).joined(separator: "\n"),
+                        failedWithoutStatus: true
+                    ))
+                    // Known exporter errors (missing privileges, 409s) explained, as in Export.
+                    let known = ErrorTranslation.translateIfKnown(output.suffix(25).joined(separator: "\n"),
+                                                                  for: tenant.errorConnection)
+                    let headline = known.map { $0.message + ($0.hint.map { " \($0)" } ?? "") }
+                        ?? "The discovery stopped with an error (exit code \(result.exitCode))."
+                    step = .failed(failureOutput.isEmpty
+                        ? "\(headline) Check the Activity Log."
+                        : "\(headline) The exporter’s last lines are below; the Activity Log has the full output.")
                     return
                 }
                 exportURL = result.outputURL

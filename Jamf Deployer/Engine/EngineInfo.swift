@@ -4,7 +4,7 @@ import Foundation
 /// updates, never silently. `Vendor/fetch.sh` is where they are pinned; a unit
 /// test keeps these equal to it.
 nonisolated enum EngineInfo {
-    static let openTofuVersion = "1.13.2"
+    static let openTofuVersion = "1.13.9"
     static let jamfPlatformProviderVersion = "1.7.2"
     static let jamfProtectProviderVersion = "0.12.0"
     static let jamfProProviderVersion = "0.42.0"

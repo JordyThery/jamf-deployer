@@ -46,6 +46,9 @@ struct PreviewDeploySheet: View {
     /// read when the recovery step starts and again when the sheet is built.
     @State private var hasRecoveryPassphrase = false
     @State private var recoveryIncludesPassphrase = false
+    /// The Keychain's error when the passphrase can't be read right now
+    /// (not the same as missing).
+    @State private var recoveryPassphraseError: String?
     /// Try Again's preview, cancelled when the sheet closes, as the first
     /// preview's `.task` is.
     @State private var retryTask: Task<Void, Never>?
@@ -441,7 +444,8 @@ struct PreviewDeploySheet: View {
         case .needsRecovery:
             Label(hasRecoveryPassphrase
                     ? "First deploy: save this tenant’s recovery sheet before deploying."
-                    : RecoveryEscrow.missingPassphraseText(isTeamMode: deployService.isTeamMode),
+                    : RecoveryEscrow.missingPassphraseText(isTeamMode: deployService.isTeamMode,
+                                                           unreadable: recoveryPassphraseError),
                   systemImage: "key")
                 .font(.callout)
             Spacer()
@@ -453,7 +457,14 @@ struct PreviewDeploySheet: View {
                 recoveryIncludesPassphrase = hasPassphrase(for: tenant)
                 hasRecoveryPassphrase = recoveryIncludesPassphrase
                 guard recoveryIncludesPassphrase else { return }
-                recoveryText = deployService.recoverySheetText(for: tenant)
+                do {
+                    recoveryText = try deployService.recoverySheetText(for: tenant)
+                } catch {
+                    recoveryPassphraseError = error.localizedDescription
+                    recoveryIncludesPassphrase = false
+                    hasRecoveryPassphrase = false
+                    return
+                }
                 isExportingRecovery = true
             }
                 .buttonStyle(.borderedProminent)
@@ -587,8 +598,17 @@ struct PreviewDeploySheet: View {
     }
 
     /// Whether this Mac has the state passphrase (the team's in Team Mode).
+    /// A passphrase the Keychain can't read sets `recoveryPassphraseError`.
     private func hasPassphrase(for tenant: Tenant) -> Bool {
-        RecoveryEscrow.isUsable((try? deployService.statePassphrase(for: tenant)))
+        recoveryPassphraseError = nil
+        do {
+            return RecoveryEscrow.isUsable(try deployService.statePassphrase(for: tenant))
+        } catch let error as SecretStoreError {
+            recoveryPassphraseError = error.localizedDescription
+            return false
+        } catch {
+            return false
+        }
     }
 
     private func startDeploy(_ session: PreviewSession) {
@@ -632,8 +652,13 @@ nonisolated enum RecoveryEscrow {
         exportSucceeded && includesPassphrase
     }
 
-    static func missingPassphraseText(isTeamMode: Bool) -> String {
-        isTeamMode
+    /// - Parameter unreadable: the Keychain's error when the passphrase is
+    ///   saved but can't be read right now; nothing is to be entered then.
+    static func missingPassphraseText(isTeamMode: Bool, unreadable: String? = nil) -> String {
+        if let unreadable {
+            return "\(unreadable) The \(isTeamMode ? "team" : "tenant’s") passphrase is saved on this Mac but can’t be read right now, so there’s no recovery sheet to save. Unlock the Keychain, then preview again."
+        }
+        return isTeamMode
             ? "This Mac doesn’t have the team passphrase, so there’s no recovery sheet to save. Enter it in Settings › Team, then preview again."
             : "This Mac doesn’t have the tenant’s passphrase, so there’s no recovery sheet to save. Enter it with Update Client Secret… in the tenant’s Connection section, then preview again."
     }
