@@ -217,6 +217,27 @@ struct JamfPlatformClientTests {
         }
     }
 
+    @Test func testConnectionNamesAMissingPrivilegeOfAUserAccount() async throws {
+        let server = MockServer { request in
+            switch request.path {
+            case "/api/v1/auth/token": .json(200, #"{"token":"user-token","expires":"2099-01-01T00:00:00Z"}"#)
+            case "/api/v1/scripts": .json(403, #"{"httpStatus":403}"#)
+            default: .json(200, #"{"version":"11.24.0","totalCount":0,"results":[]}"#)
+            }
+        }
+        let configuration = JamfAPIConfiguration(jamfProURL: URL(string: "https://pin.example.invalid")!,
+                                                 auth: .userAccount, clientID: "admin", clientSecret: "fake-password")
+        await #expect {
+            _ = try await client(configuration, server: server).testConnection(checks: PreflightService.permissionChecks)
+        } throws: { error in
+            guard let shortfall = error as? JamfPlatformClient.PermissionShortfall else { return false }
+            return shortfall.errorDescription == "Signed in, but the user account is missing a privilege."
+                && shortfall.failureReason?.contains("“\(JamfPro.Privilege.readScripts.rawValue)”") == true
+                && shortfall.failureReason?.contains("User Accounts and Groups") == true
+                && shortfall.failureReason?.contains("API Roles and Clients") == false
+        }
+    }
+
     @Test func testConnectionNamesAMissingPlatformPermission() async throws {
         let server = MockServer { request in
             switch request.path {

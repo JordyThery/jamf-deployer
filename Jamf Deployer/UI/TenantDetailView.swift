@@ -738,6 +738,9 @@ struct UpdateClientSecretSheet: View {
     /// This Mac's client ID or username when the sheet opened, read from
     /// the Keychain once rather than on every redraw.
     @State private var savedClientID = ""
+    /// False when the Keychain couldn't read this Mac's client ID: saving
+    /// stays off, so the record's ID never replaces (or deletes) it.
+    @State private var isClientIDReadable = true
     @State private var hasStatePassphrase = true
 
     private var secrets: TenantSecrets { TenantSecrets(tenantID: tenant.id) }
@@ -786,20 +789,28 @@ struct UpdateClientSecretSheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!ClientSecretUpdate.canSave(
-                    isTeamMode: deployService.isTeamMode, savedID: savedClientID, typedID: clientID,
+                    isTeamMode: deployService.isTeamMode, isSavedIDReadable: isClientIDReadable,
+                    savedID: savedClientID, typedID: clientID,
                     secret: usesPassword ? secret : secret.trimmingCharacters(in: .whitespacesAndNewlines),
                     passphrase: passphrase.trimmingCharacters(in: .whitespacesAndNewlines)))
         }
         .frame(width: 480, height: needsPassphrase || deployService.isTeamMode ? 340 : 260)
         .onAppear {
-            savedClientID = tenant.engineerClientID
+            do {
+                savedClientID = try secrets.engineerClientID.read() ?? tenant.clientID
+            } catch {
+                savedClientID = tenant.clientID
+                isClientIDReadable = false
+                message = "\(error.localizedDescription) Nothing can be saved until this Mac’s \(usesPassword ? "username" : "client ID") can be read; try again once the Keychain is unlocked."
+            }
             clientID = savedClientID
             do {
                 hasStatePassphrase = try secrets.statePassphrase.read() != nil
             } catch {
                 // Never ask for a new passphrase over one the Keychain can't read right now.
                 hasStatePassphrase = true
-                message = "\(error.localizedDescription) The recovery passphrase is left as it is."
+                message = [message, "\(error.localizedDescription) The recovery passphrase is left as it is."]
+                    .compactMap(\.self).joined(separator: " ")
             }
         }
     }
@@ -809,8 +820,9 @@ struct UpdateClientSecretSheet: View {
         let trimmedID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         // Passwords are kept exactly as typed; secrets are trimmed (pasted).
         let value = usesPassword ? secret : secret.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ClientSecretUpdate.canSave(isTeamMode: deployService.isTeamMode, savedID: savedClientID,
-                                         typedID: clientID, secret: value, passphrase: trimmed) else { return }
+        guard ClientSecretUpdate.canSave(isTeamMode: deployService.isTeamMode, isSavedIDReadable: isClientIDReadable,
+                                         savedID: savedClientID, typedID: clientID,
+                                         secret: value, passphrase: trimmed) else { return }
         var savedID = true
         if deployService.isTeamMode, !trimmedID.isEmpty {
             // The record's own ID needs no copy on this Mac.
@@ -838,9 +850,12 @@ nonisolated enum ClientSecretUpdate {
         return isTeamMode && !typed.isEmpty && typed != savedID
     }
 
-    /// - Parameters: `secret` and `passphrase` as they would be saved.
-    static func canSave(isTeamMode: Bool, savedID: String, typedID: String,
+    /// - Parameters: `secret` and `passphrase` as they would be saved;
+    ///   `isSavedIDReadable` false when the Keychain couldn't read this
+    ///   Mac's client ID (`savedID` is then only the record's).
+    static func canSave(isTeamMode: Bool, isSavedIDReadable: Bool = true, savedID: String, typedID: String,
                         secret: String, passphrase: String) -> Bool {
+        guard isSavedIDReadable else { return false }
         if idChanged(isTeamMode: isTeamMode, savedID: savedID, typedID: typedID) {
             return !secret.isEmpty
         }

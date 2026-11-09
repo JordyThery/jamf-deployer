@@ -117,14 +117,38 @@ struct LiveTenant: Sendable {
 
     /// The kinds of object the sweep looks at, dependents first.
     static let sweepKinds: [(resource: String, classic: Bool)] = [
-        ("policies", true), ("osxconfigurationprofiles", true), ("computergroups", true), ("macapplications", true),
+        ("policies", true), ("osxconfigurationprofiles", true), ("macapplications", true), ("computergroups", true),
         ("scripts", false), ("categories", false),
+    ]
+
+    /// What each kind can be used by: those are deleted before it, or Jamf
+    /// refuses the delete (HAS_DEPENDENCIES) and the object stays behind.
+    static let sweepUsers: [String: [String]] = [
+        "computergroups": ["policies", "osxconfigurationprofiles", "macapplications"],
+        "scripts": ["policies"],
+        "categories": ["policies", "osxconfigurationprofiles", "macapplications", "scripts"],
     ]
 
     func delete(resource: String, id: String) async throws {
         let classic = Self.sweepKinds.first { $0.resource == resource }?.classic ?? false
         let path = classic ? "proclassic/\(resource)/id/\(id)" : "pro/v1/\(resource)/\(id)"
         _ = try await api.send(HTTPRequest(method: "DELETE", path: path))
+    }
+}
+
+// MARK: Cleanup order (not live)
+
+@Suite("Live cleanup order")
+struct LiveSweepOrderTests {
+    @Test func dependentsAreDeletedFirst() throws {
+        let order = LiveTenant.sweepKinds.map(\.resource)
+        for (kind, users) in LiveTenant.sweepUsers {
+            let kindIndex = try #require(order.firstIndex(of: kind))
+            for user in users {
+                let userIndex = try #require(order.firstIndex(of: user))
+                #expect(userIndex < kindIndex, "\(user) must be deleted before \(kind)")
+            }
+        }
     }
 }
 

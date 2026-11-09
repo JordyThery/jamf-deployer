@@ -62,6 +62,9 @@ final class CatalogSourceStore {
     }
 
     private(set) var customSources: [CustomSource] = []
+    /// The list on disk can't be read and no copy of it could be kept:
+    /// nothing is saved over it until it reads again (`reload()`).
+    private(set) var isListUnreadable = false
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "CatalogSources")
 
     private let fileURL: URL
@@ -89,8 +92,10 @@ final class CatalogSourceStore {
     /// Loads the source list. A file that exists but cannot be read is
     /// copied to `catalog-sources.json.unreadable-<date>` (bytes intact; an
     /// earlier copy is never replaced; never committed) and only then
-    /// removed, so a later save can't overwrite it.
+    /// removed, so a later save can't overwrite it. When the copy fails,
+    /// the file stays and `isListUnreadable` stops every save.
     private func load() -> [CustomSource] {
+        isListUnreadable = false
         do {
             return try JSONFile.load([CustomSource].self, from: fileURL)
         } catch {
@@ -99,6 +104,7 @@ final class CatalogSourceStore {
                 try? FileManager.default.removeItem(at: fileURL)
                 logger.error("catalog-sources.json could not be read and was set aside as \(copy, privacy: .public): \(error.localizedDescription, privacy: .public)")
             } else {
+                isListUnreadable = true
                 logger.error("catalog-sources.json could not be read or copied; left as it is: \(error.localizedDescription, privacy: .public)")
             }
             return []
@@ -109,6 +115,7 @@ final class CatalogSourceStore {
     /// catalog.json if the folder is new.
     @discardableResult
     func addSource(name: String, folderURL: URL) throws -> CustomSource {
+        guard !isListUnreadable else { throw ListUnreadable() }
         let manifestURL = folderURL.appending(path: "catalog.json")
         if !FileManager.default.fileExists(atPath: manifestURL.path) {
             let manifest: [String: Any] = [
@@ -128,7 +135,7 @@ final class CatalogSourceStore {
     }
 
     func removeSource(_ source: CustomSource) {
-        guard customSources.contains(where: { $0.id == source.id }) else { return }
+        guard !isListUnreadable, customSources.contains(where: { $0.id == source.id }) else { return }
         customSources.removeAll { $0.id == source.id }
         save()
         onChange?("Remove catalog source “\(source.name)”")
@@ -181,6 +188,7 @@ final class CatalogSourceStore {
     /// Registers a Git catalog source pinned to a starting tag.
     @discardableResult
     func addGitSource(name: String, url: String, tag: String) async throws -> CustomSource {
+        guard !isListUnreadable else { throw ListUnreadable() }
         guard !RepositoryPublisher.hasCredentials(url) else { throw CatalogSourceError.urlHasCredentials }
         let id = UUID()
         let cacheRoot = CustomSource.cacheRoot(for: id)
@@ -200,6 +208,14 @@ final class CatalogSourceStore {
     }
 
     private func save() {
+        guard !isListUnreadable else { return }
         try? JSONFile.save(customSources, to: fileURL)
+    }
+
+    /// The list on disk can't be read, and no copy of it could be kept.
+    struct ListUnreadable: LocalizedError {
+        var errorDescription: String? {
+            "The list of catalog sources can’t be read, and no copy of it could be kept, so it wasn’t changed."
+        }
     }
 }

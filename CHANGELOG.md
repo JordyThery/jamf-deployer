@@ -14,12 +14,21 @@
   privilege to add.
 - **A Keychain that can't be read is reported as such** in Adopt, Export,
   Day 0, the app pickers, the preflight and the team passphrase, instead of
-  “the client secret is missing”. Update Client Secret… no longer asks for a
-  new recovery passphrase when the saved one only can't be read right now,
-  and a recovery sheet is never saved without its passphrase.
+  “the client secret is missing”. Settings › Team no longer asks for the
+  team passphrase when the saved one only can't be read right now, and
+  never replaces or removes a saved one. Update Client Secret… no longer
+  asks for a new recovery passphrase in that case, doesn't save until this
+  Mac's own client ID or username can be read, and a recovery sheet is never
+  saved without its passphrase.
 - **A catalog-sources list or a “Not a secret” list that can't be read** is
   kept as a dated copy next to it (on this Mac only, never shared with a
-  team), and an earlier copy is never replaced.
+  team), and an earlier copy is never replaced. If the copy can't be made,
+  the list isn't saved over.
+- **A failed discovery in Adopt shows why.** The last lines of the
+  exporter's output appear under *Discovery Failed*, with a plain
+  explanation for known errors such as a missing privilege, and the Activity
+  Log keeps the full output with the exit code. Secrets are masked there and
+  in the progress lines of Adopt, Capture and Clone.
 
 ## 1.2.0 — 2026-11-02
 

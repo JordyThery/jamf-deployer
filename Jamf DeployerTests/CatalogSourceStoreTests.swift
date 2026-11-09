@@ -66,4 +66,43 @@ struct CatalogSourceStoreTests {
         let tracked = try StoreSecretCheckTests.git(["ls-files"], in: storeURL)
         #expect(!tracked.contains("unreadable"))
     }
+
+    /// A list that can't be read or copied stays as it is, and nothing is saved over it.
+    @Test func anUnreadableSourceListThatCantBeCopiedIsNeverSavedOver() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "catalog-locked-\(UUID().uuidString)")
+        let blocks = FileManager.default.temporaryDirectory.appending(path: "catalog-folder-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let fileURL = folder.appending(path: "catalog-sources.json")
+        let damaged = Data("{ not json".utf8)
+        try damaged.write(to: fileURL)
+        // A folder nothing can be written to: the copy (and the removal) fail.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+            try? FileManager.default.removeItem(at: folder)
+            try? FileManager.default.removeItem(at: blocks)
+        }
+
+        let sources = CatalogSourceStore(fileURL: fileURL, tools: .real(isDemoOn: { false }))
+        #expect(sources.isListUnreadable)
+        #expect(sources.customSources.isEmpty)
+        var messages: [String] = []
+        sources.onChange = { messages.append($0) }
+
+        // Writable again, so only the store's own refusal can keep the file intact.
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+        #expect(throws: CatalogSourceStore.ListUnreadable.self) {
+            _ = try sources.addSource(name: "My Blocks", folderURL: blocks)
+        }
+        sources.removeSource(CatalogSourceStore.CustomSource(id: UUID(), name: "Gone", path: blocks.path))
+        #expect(messages.isEmpty)
+        #expect(try Data(contentsOf: fileURL) == damaged)
+
+        // Once it reads again, saving works as before.
+        try Data("[]".utf8).write(to: fileURL)
+        sources.reload()
+        #expect(!sources.isListUnreadable)
+        _ = try sources.addSource(name: "My Blocks", folderURL: blocks)
+        #expect(try String(contentsOf: fileURL, encoding: .utf8).contains("My Blocks"))
+    }
 }

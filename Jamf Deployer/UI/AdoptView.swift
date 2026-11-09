@@ -347,9 +347,14 @@ struct AdoptView: View {
                             + output.suffix(200).joined(separator: "\n"),
                         failedWithoutStatus: true
                     ))
+                    // Known exporter errors (missing privileges, 409s) explained, as in Export.
+                    let known = ErrorTranslation.translateIfKnown(output.suffix(25).joined(separator: "\n"),
+                                                                  for: tenant.errorConnection)
+                    let headline = known.map { $0.message + ($0.hint.map { " \($0)" } ?? "") }
+                        ?? "The discovery stopped with an error (exit code \(result.exitCode))."
                     step = .failed(failureOutput.isEmpty
-                        ? "The discovery stopped with an error (exit code \(result.exitCode)). Check the Activity Log."
-                        : "The discovery stopped with an error (exit code \(result.exitCode)). Its last lines are below; the Activity Log has the full output.")
+                        ? "\(headline) Check the Activity Log."
+                        : "\(headline) The exporter’s last lines are below; the Activity Log has the full output.")
                     return
                 }
                 exportURL = result.outputURL
