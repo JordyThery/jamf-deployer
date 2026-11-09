@@ -68,7 +68,7 @@ Every action on screen is also in the menu bar:
 - **Deployment state is encrypted.** The engine’s state and plan files are encrypted with a per-tenant passphrase (PBKDF2 + AES-GCM); a recovery sheet is saved before the first deploy. Without the passphrase the state is unreadable, including by the app.
 - **Nothing deploys without a preview.** The app only ever applies the exact plan you approved; there is no auto-apply.
 - **Team spaces share no credentials.** Each engineer signs in with their own Jamf API client or account, kept in their Keychain. Engine state is encrypted on each Mac with the team passphrase before it reaches the repository.
-- The app talks only to your Jamf tenants (including Jamf Cloud’s file storage when a block uploads a package), your Git remotes (Team Mode and Git catalog sources), GitHub (release and component-update checks, and update downloads), and HashiCorp’s release server when you agree to the Terraform download for capturing blocks and adoption.
+- The app talks only to your Jamf tenants (including Jamf Cloud’s file storage when a block uploads a package), your Git remotes (Team Mode and Git catalog sources), GitHub (release and component-update checks, and update downloads), the Terraform registry and GitHub while it discovers objects for an export or adoption (to fetch the engine plugin, jamfplatform, jamfpro or jamfprotect, at the version built into the app), and HashiCorp’s release server when you agree to the Terraform download for capturing blocks and adoption.
 
 ## Building
 

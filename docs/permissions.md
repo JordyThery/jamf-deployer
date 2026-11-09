@@ -143,7 +143,10 @@ Protect deployment sync, under the Platform client above.
 - The app talks only to your Jamf tenants (including Jamf Cloud’s file
   storage when a block uploads a package), your Git remotes (Team Mode and
   Git catalog sources), GitHub (release and component-update checks, and
-  update downloads) and HashiCorp’s release server when you agree to the
-  Terraform download for capturing blocks and adoption.
+  update downloads), the Terraform registry and GitHub while it discovers
+  objects for an export or adoption (to fetch the engine plugin,
+  jamfplatform, jamfpro or jamfprotect, at the version built into the app)
+  and HashiCorp’s release server when you agree to the Terraform download
+  for capturing blocks and adoption.
 - No admin rights, no configuration profiles, no system extensions — it is
   an ordinary signed and notarized app.
