@@ -846,7 +846,8 @@ final class TenantDeployService {
     /// Removes a tenant from the app — and, in Team Mode, from the team
     /// space, state included. Nothing in Jamf is touched. When the team
     /// space's state cannot be deleted (a teammate holds its lock, say),
-    /// the tenant stays. Refused while any engine work runs or a preview is
+    /// the tenant stays, as it does when the Keychain refuses to delete one
+    /// of its items. Refused while any engine work runs or a preview is
     /// open: its workspace (the engine's folder) is deleted.
     func removeTenant(_ tenant: Tenant) async throws {
         try guardNoEngineWork()
@@ -869,7 +870,7 @@ final class TenantDeployService {
                 }
             }
         }
-        tenantStore.remove(tenant)
+        try tenantStore.remove(tenant)
         await recordInStore("Remove tenant \(tenant.name) — \(engineerName)")
     }
 

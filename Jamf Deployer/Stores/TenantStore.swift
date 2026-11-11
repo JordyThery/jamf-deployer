@@ -68,11 +68,14 @@ final class TenantStore {
     }
 
     /// Removes the tenant from the app. Nothing in Jamf is touched; the
-    /// caller is responsible for confirming with the user first.
-    func remove(_ tenant: Tenant) {
+    /// caller is responsible for confirming with the user first. Its
+    /// Keychain items are deleted first: when the Keychain refuses one, the
+    /// tenant stays (`TenantSecrets.DeletionRefused`), so no item is left
+    /// behind with no tenant it belongs to.
+    func remove(_ tenant: Tenant) throws {
+        try TenantSecrets(tenantID: tenant.id).deleteAllOrThrow()
         tenants.removeAll { $0.id == tenant.id }
         TenantClients.shared.drop(tenant.id)
-        TenantSecrets(tenantID: tenant.id).deleteAll()
         try? FileManager.default.removeItem(at: workspaceURL(for: tenant))
     }
 
