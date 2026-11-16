@@ -74,3 +74,73 @@ struct UnreadableKeychainTests {
         #expect(RecoveryEscrow.missingPassphraseText(isTeamMode: false).contains("doesn’t have"))
     }
 }
+
+// Removing a tenant deletes its Keychain items first; when the Keychain
+// refuses, the tenant stays and the message names the item.
+
+@MainActor
+@Suite("Removing a tenant while the Keychain refuses")
+struct TenantRemovalKeychainTests {
+    @Test("A refused delete keeps the tenant and says which item, and which were already deleted")
+    func refusedDeleteKeepsTheTenant() async throws {
+        let fixture = DeployServiceGuardTests.make()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let tenant = DeployServiceGuardTests.tenant("Refused")
+        fixture.tenantStore.add(tenant)
+        let secrets = TenantSecrets(tenantID: tenant.id)
+        secrets.platformClientSecret.save("fake-client-secret")
+        secrets.engineerClientID.setUndeletableForTests(true)
+        defer {
+            secrets.engineerClientID.setUndeletableForTests(false)
+            secrets.deleteAll()
+        }
+
+        await #expect {
+            try await fixture.service.removeTenant(tenant)
+        } throws: { error in
+            guard let refused = error as? TenantSecrets.DeletionRefused else { return false }
+            return refused.item == "own client ID or username" && !refused.whileReading
+                && refused.alreadyDeleted == ["client secret or password", "Jamf Protect client secret"]
+        }
+        #expect(fixture.tenantStore.tenant(id: tenant.id) != nil, "the tenant stays")
+        #expect(try secrets.platformClientSecret.read() == nil, "items deleted before the refusal stay deleted")
+
+        // Once the Keychain lets go, removing it again works.
+        secrets.engineerClientID.setUndeletableForTests(false)
+        try await fixture.service.removeTenant(tenant)
+        #expect(fixture.tenantStore.tenant(id: tenant.id) == nil)
+    }
+
+    @Test("A Keychain that can't be read stops the removal before anything is deleted")
+    func unreadableItemStopsBeforeAnything() async throws {
+        let fixture = DeployServiceGuardTests.make()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let tenant = DeployServiceGuardTests.tenant("Locked")
+        fixture.tenantStore.add(tenant)
+        let secrets = TenantSecrets(tenantID: tenant.id)
+        secrets.platformClientSecret.save("fake-client-secret")
+        secrets.statePassphrase.setUnreadableForTests(true)
+        defer {
+            secrets.statePassphrase.setUnreadableForTests(false)
+            secrets.deleteAll()
+        }
+
+        await #expect {
+            try await fixture.service.removeTenant(tenant)
+        } throws: { error in
+            guard let refused = error as? TenantSecrets.DeletionRefused else { return false }
+            return refused.item == "state passphrase" && refused.whileReading && refused.alreadyDeleted.isEmpty
+        }
+        #expect(fixture.tenantStore.tenant(id: tenant.id) != nil)
+        #expect(try secrets.platformClientSecret.read() == "fake-client-secret", "nothing was deleted")
+    }
+
+    @Test("The refusal is shown as it is, never as a team space failure")
+    func refusalWording() {
+        let reading = TenantSecrets.DeletionRefused(item: "state passphrase", status: -25308, alreadyDeleted: [], whileReading: true)
+        #expect(SidebarView.removalErrorText(reading) == reading.errorDescription)
+        #expect(reading.errorDescription?.contains("nothing was removed") == true)
+        let deleting = TenantSecrets.DeletionRefused(item: "state passphrase", status: nil, alreadyDeleted: ["client secret or password"])
+        #expect(SidebarView.removalErrorText(deleting).contains("Its client secret or password was already deleted."))
+    }
+}

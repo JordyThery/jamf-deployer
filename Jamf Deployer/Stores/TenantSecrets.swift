@@ -77,6 +77,16 @@ nonisolated struct KeychainItem: Sendable {
             if unreadable { $0.insert(cacheKey) } else { $0.remove(cacheKey) }
         }
     }
+
+    /// Items whose `deleteOrThrow()` is refused as a locked Keychain's
+    /// would be, for tests; one item at a time.
+    private static let undeletableForTests = OSAllocatedUnfairLock<Set<String>>(initialState: [])
+
+    func setUndeletableForTests(_ undeletable: Bool) {
+        Self.undeletableForTests.withLock {
+            if undeletable { $0.insert(cacheKey) } else { $0.remove(cacheKey) }
+        }
+    }
     #endif
 
     // MARK: Read cache
@@ -130,6 +140,11 @@ nonisolated struct KeychainItem: Sendable {
     /// refused) throws `SecretWriteError`. An item that isn't there counts
     /// as deleted.
     func deleteOrThrow() throws {
+        #if DEBUG
+        if Self.undeletableForTests.withLock({ $0.contains(cacheKey) }) {
+            throw SecretWriteError(status: -25308) // errSecInteractionNotAllowed: a locked Keychain
+        }
+        #endif
         if DemoSecretVault.keepsInMemory(account: account) {
             DemoSecretVault.save(nil, service: service, account: account)
         } else {
@@ -249,8 +264,29 @@ nonisolated struct TenantSecrets: Sendable {
         try delete("state passphrase") { try statePassphrase.deleteOrThrow() }
     }
 
-    /// The Keychain refused to delete one of a tenant's items, so the
-    /// tenant wasn't removed.
+    /// Reads each of the tenant's items before anything else is removed (in
+    /// Team Mode, its state in the team space): a Keychain that can't be
+    /// read now (locked) would refuse the deletes too, so the removal stops
+    /// before anything is lost (`DeletionRefused`, nothing deleted).
+    func checkReadableForRemoval() throws {
+        let items: [(String, KeychainItem)] = [
+            ("client secret or password", platformClientSecret),
+            ("Jamf Protect client secret", protectClientSecret),
+            ("own client ID or username", engineerClientID),
+            ("state passphrase", statePassphrase),
+        ]
+        for (name, item) in items {
+            do {
+                _ = try item.read()
+            } catch {
+                throw DeletionRefused(item: name, status: (error as? SecretStoreError)?.status,
+                                      alreadyDeleted: [], whileReading: true)
+            }
+        }
+    }
+
+    /// The Keychain refused to delete (or, beforehand, to read) one of a
+    /// tenant's items, so the tenant wasn't removed.
     struct DeletionRefused: LocalizedError, Equatable {
         /// e.g. "client secret or password".
         let item: String
@@ -258,9 +294,14 @@ nonisolated struct TenantSecrets: Sendable {
         let status: OSStatus?
         /// The items deleted before the refusal; they stay deleted.
         let alreadyDeleted: [String]
+        /// Refused while checking, before anything was deleted.
+        var whileReading = false
 
         var errorDescription: String? {
             let code = status.map { " (error \($0))" } ?? ""
+            if whileReading {
+                return "The Keychain can’t read its \(item) right now\(code), so nothing was removed. If the Keychain is locked, unlock it, then remove the tenant again."
+            }
             let deleted = alreadyDeleted.isEmpty ? ""
                 : " Its \(alreadyDeleted.formatted(.list(type: .and))) \(alreadyDeleted.count == 1 ? "was" : "were") already deleted."
             return "The Keychain refused to delete its \(item)\(code).\(deleted) If the Keychain is locked, unlock it, then remove the tenant again."

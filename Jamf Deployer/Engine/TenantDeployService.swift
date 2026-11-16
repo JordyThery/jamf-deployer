@@ -857,6 +857,9 @@ final class TenantDeployService {
             busyTenants.remove(tenant.id)
             removingTenants.remove(tenant.id)
         }
+        // A locked Keychain stops the removal here, before the team space's
+        // state is deleted: a kept tenant never loses its state.
+        try TenantSecrets(tenantID: tenant.id).checkReadableForRemoval()
         if isTeamMode, let remote = teamRemoteURL {
             // A tenant that never had state in the team space has none to delete.
             let withState = try? await gitStore.tenantIDsWithTeamState()
