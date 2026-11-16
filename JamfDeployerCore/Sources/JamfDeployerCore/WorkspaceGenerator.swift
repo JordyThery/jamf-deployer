@@ -64,10 +64,10 @@ public nonisolated struct WorkspaceInput: Sendable {
         namePrefix: String,
         selections: [GeneratedSelection],
         providerVersion: String,
-        protectProviderVersion: String = "0.12.0",
+        protectProviderVersion: String = "0.13.0",
         removals: [BlockRemoval] = [],
         connection: ConnectionKind = .platform,
-        jamfProProviderVersion: String = "0.42.0",
+        jamfProProviderVersion: String = "0.43.0",
         stateBackend: StateBackend = .local
     ) {
         self.namePrefix = namePrefix
