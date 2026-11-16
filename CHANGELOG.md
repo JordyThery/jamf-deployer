@@ -8,19 +8,19 @@
 - **Newer engine plugins are built in:** jamfplatform 1.9.0 (was 1.7.2),
   jamfpro 0.43.0 (was 0.42.0) and jamfprotect 0.13.0 (was 0.12.0), and the
   exporter jamformer 0.7.0 (was 0.6.1).
-  - The first Preview after updating can show one update for policies with
-    several scripts or packages, for PreStages and for blueprints with
-    several items. Nothing else changes in Jamf; approving it once is enough.
-    On a deployed blueprint, approving it sends the blueprint to its devices
-    again, so plan when to do it.
+  - Tenants deployed with an earlier version need no extra step: the first
+    Check for Changes and Preview after updating show no changes. Only a
+    blueprint that lists several Safari bookmarks, extensions, background
+    tasks or custom declarations can show one update, and approving it on a
+    deployed blueprint sends the blueprint to its devices again.
   - Some PreStage and policy settings have new names. Blocks that use the old
-    names keep working and show a note in Preview until February 2027. Notes
-    that repeat now appear once, with a count.
+    names keep working until February 2027. Check for Changes doesn't report
+    the new names as changes made in Jamf, and notes that repeat in Preview
+    appear once, with a count.
 - **Capture follows the new plugin.** A captured policy's scripts are linked
   by name again. A PreStage without an enrollment customization and an App
   Store app without an Apps and Books location are captured in a form the
-  new plugin accepts. Check for Changes no longer reports a PreStage's
-  configuration profiles as changed in Jamf.
+  new plugin accepts.
 - **Discovery always uses the Terraform you downloaded in the app.** The
   exporter never downloads another Terraform by itself.
 - **Removing a tenant while the Keychain is locked** keeps the tenant and
