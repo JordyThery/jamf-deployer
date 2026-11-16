@@ -83,6 +83,68 @@ struct ProviderUpgradeTests {
         #expect(DriftReportBuilder.isComputed("configuration_profile_ids"))
     }
 
+    /// A refresh-only plan with one drifted PreStage, `before` → `after`.
+    private static func driftReport(type: String, before: String, after: String) throws -> DriftReport {
+        let plan = try JSONDecoder().decode(PlanFile.self, from: Data("""
+        {"format_version": "1.2", "resource_drift": [{"address": "module.enrollment.\(type).example",
+          "type": "\(type)", "name": "example",
+          "change": {"actions": ["update"], "before": \(before), "after": \(after)}}]}
+        """.utf8))
+        return DriftReportBuilder.build(plan: plan, blockNames: [:])
+    }
+
+    @Test("After the update, new PreStage names that only mirror the old ones aren't changes made in Jamf")
+    func renamedAttributesAreNoChange() throws {
+        // As the first refresh on jamfplatform 1.9 reads a PreStage deployed on 1.7.2.
+        let report = try Self.driftReport(
+            type: "jamfplatform_pro_computer_prestage_enrollment",
+            before: #"{"display_name": "Example", "mandatory": true, "mdm_removable": false, "skip_setup_items": {"tos": false, "restore": true}}"#,
+            after: #"{"display_name": "Example", "mandatory": true, "mdm_removable": false, "make_mdm_profile_mandatory": true, "allow_mdm_profile_removal": false, "skip_setup_items": {"tos": false, "restore": true, "terms_and_conditions": false, "transfer_information": true, "liquid_glass": false}}"#)
+        #expect(report.objects.isEmpty)
+    }
+
+    @Test("A change made in Jamf still shows, under both names")
+    func realChangeStillShows() throws {
+        let report = try Self.driftReport(
+            type: "jamfplatform_pro_computer_prestage_enrollment",
+            before: #"{"mandatory": true, "support_phone_number": null}"#,
+            after: #"{"mandatory": false, "make_mdm_profile_mandatory": false, "support_phone_number": "555-0100"}"#)
+        let fields = try #require(report.objects.first).fields.map(\.path)
+        #expect(fields.contains("mandatory"))
+        #expect(fields.contains("make_mdm_profile_mandatory"), "the new name differs from the old name's earlier value")
+        #expect(fields.contains("support_phone_number"), "an attribute that was empty before, and isn't a rename, still counts")
+    }
+
+    @Test("prevent_unenrollment mirrors mdm_removable inverted; the same value would be a change")
+    func invertedRename() throws {
+        let type = "jamfplatform_pro_mobile_device_prestage_enrollment"
+        let echo = try Self.driftReport(type: type, before: #"{"mdm_removable": false, "skip_setup_items": {"tos": true}}"#,
+                                        after: #"{"mdm_removable": false, "prevent_unenrollment": true, "skip_setup_items": {"tos": true, "device_features_tour": true}}"#)
+        #expect(echo.objects.isEmpty)
+        let odd = try Self.driftReport(type: type, before: #"{"mdm_removable": false}"#,
+                                       after: #"{"mdm_removable": false, "prevent_unenrollment": false}"#)
+        #expect(odd.objects.first?.fields.map(\.path) == ["prevent_unenrollment"])
+    }
+
+    @Test("Warnings repeated on one object show once on it, with how often they came")
+    func repeatedObjectNotesAreGrouped() throws {
+        let plan = try JSONDecoder().decode(PlanFile.self, from: fixtureLikePlan)
+        let address = "jamfplatform_pro_category.example"
+        let notes = Array(repeating: EngineStreamEvent.Diagnostic(severity: "warning", summary: "Attribute Deprecated",
+                                                                   detail: nil, address: address), count: 3)
+        let summary = PreviewBuilder.build(plan: plan, diagnostics: notes, blockNames: [:])
+        #expect(summary.groups.flatMap(\.changes).first?.notes == ["Attribute Deprecated (3 times)"])
+    }
+
+    private var fixtureLikePlan: Data {
+        Data(#"""
+        {"format_version": "1.2", "resource_changes": [{"address": "jamfplatform_pro_category.example",
+          "type": "jamfplatform_pro_category", "name": "example",
+          "change": {"actions": ["update"], "before": {"name": "Example", "priority": 1},
+                     "after": {"name": "Example", "priority": 2}}}]}
+        """#.utf8)
+    }
+
     @Test("A warning repeated for many objects shows once, with how often it came")
     func repeatedWarningsAreGrouped() throws {
         let plan = try JSONDecoder().decode(PlanFile.self, from: Data(#"{"format_version": "1.2", "resource_changes": []}"#.utf8))
