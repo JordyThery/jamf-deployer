@@ -95,7 +95,8 @@ def require_writable(keychain_service, service, identity, tenants=None):
         raise Refused(f"Keychain service {keychain_service!r} isn’t a {service} tenant on the allow-list "
                       "(or points at a different tenant than the allow-list names)")
     for entry in matches:
-        if entry.get("access") != "full" or entry.get("production"):
+        # "disposable" is JTKit's other name for full access (AllowList.Access).
+        if entry.get("access") not in ("full", "disposable") or entry.get("production"):
             raise Refused(f"Allow-list role {entry.get('role')!r} may not be changed by these helpers "
                           f"(access {entry.get('access')!r}{', production' if entry.get('production') else ''})")
     return matches[0].get("role")
