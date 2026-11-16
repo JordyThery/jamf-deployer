@@ -84,3 +84,4 @@ Only use Force Unlock when you know the other run has stopped. Unlocking a live 
 - Locks don’t expire on their own. Force Unlock is the manual way out.
 - A tenant runs one engine operation at a time on a Mac (preview, check or deploy). A second request is refused with a message.
 - When joining, tenants whose ID already exists in the team space are skipped, not merged.
+- Everyone on a team uses the same version of the app. A release can save a tenant’s state in a format older releases can’t read: once a teammate deploys with 1.3.0, a Mac still on 1.2.1 can no longer preview, check or deploy that tenant. Update every Mac together.

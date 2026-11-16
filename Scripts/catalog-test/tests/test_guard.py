@@ -107,6 +107,15 @@ class AllowListTests(unittest.TestCase):
         with self.assertRaises(tenant_guard.Refused):
             tenant_guard.require_writable("Example-TestA", "jamfPro", "other.example.com", TENANTS)
 
+    def test_disposable_is_full_access_and_nothing_else_is(self):
+        for access, allowed in (("disposable", True), ("full", True), ("createAndRemove", False), ("read", False), ("readOnly", False)):
+            tenants = [dict(TENANTS[0], access=access)]
+            if allowed:
+                self.assertEqual(tenant_guard.require_writable("Example-TestA", "jamfPlatform", ENVIRONMENT, tenants), "jamf-test-a")
+            else:
+                with self.assertRaises(tenant_guard.Refused):
+                    tenant_guard.require_writable("Example-TestA", "jamfPlatform", ENVIRONMENT, tenants)
+
     def test_allow_listed_tenant_passes(self):
         self.assertEqual(tenant_guard.require_writable("Example-TestA", "jamfPlatform", ENVIRONMENT.upper(), TENANTS), "jamf-test-a")
         self.assertEqual(tenant_guard.require_writable("Example-TestA", "jamfPro", "https://Test-A.example.com/", TENANTS), "jamf-test-a")
@@ -123,6 +132,14 @@ class AllowListTests(unittest.TestCase):
                 tenant_guard.load_allowlist(path)  # readable by others
             os.chmod(path, 0o600)
             self.assertEqual(tenant_guard.load_allowlist(path), [])
+            for version in (2, 3):
+                with open(path, "w") as f:
+                    f.write('{"version": %d, "tenants": [], "productionReads": true}' % version)
+                self.assertEqual(tenant_guard.load_allowlist(path), [])
+            with open(path, "w") as f:
+                f.write('{"version": 4, "tenants": []}')
+            with self.assertRaises(tenant_guard.Refused):
+                tenant_guard.load_allowlist(path)  # a version this helper doesn't know
 
 
 if __name__ == "__main__":

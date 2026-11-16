@@ -1891,10 +1891,10 @@ struct JamfProConnectionTests {
     @Test func jamfProWorkspaceUsesTheJamfProPluginOnly() throws {
         let output = try WorkspaceGenerator.generate(WorkspaceInput(
             namePrefix: "JD - ", selections: [], providerVersion: "1.5.0",
-            connection: .jamfPro, jamfProProviderVersion: "0.42.0"
+            connection: .jamfPro, jamfProProviderVersion: "0.43.0"
         ))
         #expect(output.providersTF.contains(#"source  = "deploymenttheory/jamfpro""#))
-        #expect(output.providersTF.contains(#"version = "0.42.0""#))
+        #expect(output.providersTF.contains(#"version = "0.43.0""#))
         #expect(output.providersTF.contains(#"provider "jamfpro""#))
         #expect(!output.providersTF.contains("jamfplatform"))
         // Credentials come from the environment only.

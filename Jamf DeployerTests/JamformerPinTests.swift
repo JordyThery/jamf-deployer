@@ -88,10 +88,11 @@ struct JamformerPinTests {
     @Test("A launch is pinned, and adds only HOME and PATH", arguments: [0, 1, 2])
     func pinnedLaunchAddsThePin(providerIndex: Int) throws {
         let (provider, version) = Self.providers[providerIndex]
-        let launch = try JamformerRunner.pinnedLaunch(arguments: ["-provider", provider],
+        let arguments = ["-provider", provider, "-terraform-path", "/usr/bin/false"]
+        let launch = try JamformerRunner.pinnedLaunch(arguments: arguments,
                                                       environment: ["JAMF_URL": "https://pin.example.invalid"],
                                                       provider: provider)
-        #expect(launch.arguments == ["-provider", provider, "-provider-version", version])
+        #expect(launch.arguments == arguments + ["-provider-version", version])
         #expect(Set(launch.environment.keys) == ["JAMF_URL", "JAMFORMER_PROVIDER_VERSION", "HOME", "PATH"])
         #expect(launch.environment["JAMFORMER_PROVIDER_VERSION"] == version)
         #expect(throws: JamformerRunner.UnknownProvider.self) {
@@ -111,6 +112,61 @@ struct JamformerPinTests {
         let launch = try JamformerRunner.pinnedLaunch(arguments: retry, environment: [:], provider: "jamfplatform")
         #expect(launch.arguments.filter { $0 == "-provider-version" }.count == 1)
         #expect(launch.arguments.last == EngineInfo.jamfPlatformProviderVersion)
+    }
+}
+
+// Since 0.7.0, jamformer downloads the newest Terraform on every run
+// unless it is handed one. The app always hands it the Terraform it
+// downloaded with the user's consent and checked against its checksums.
+
+@Suite("jamformer uses the app's own Terraform")
+struct JamformerTerraformTests {
+    @Test("Every export hands jamformer the app's Terraform", arguments: ["jamfplatform", "jamfpro", "jamfprotect"])
+    func exportsNameTheAppsTerraform(provider: String) async {
+        let launches = Launches()
+        let runner = JamformerRunner(tools: .trapRecording { launches.record($0) })
+        var tenant = Tenant(name: "Pin", region: .us, clientID: "client", environmentID: "env", isProduction: false)
+        if provider == "jamfpro" {
+            tenant.connection = .jamfPro
+            tenant.jamfProURL = "https://pin.example.invalid"
+        }
+        let terraform = "/fake/Application Support/terraform/1.16.6/terraform"
+        await #expect(throws: ToolDoorway.Refused.self) {
+            _ = try await runner.export(tenant: tenant, clientSecret: "fake-secret", provider: provider,
+                                        includeResources: ["policy"], includePackageFiles: false,
+                                        terraformPath: terraform)
+        }
+        let launch = try? #require(launches.all.first)
+        let index = launch?.arguments.firstIndex(of: "-terraform-path")
+        #expect(index != nil, "an export launched without -terraform-path: jamformer would download Terraform itself")
+        if let launch, let index {
+            #expect(launch.arguments.indices.contains(index + 1) && launch.arguments[index + 1] == terraform)
+        }
+    }
+
+    @Test("An export without the app's Terraform never starts jamformer")
+    func noTerraformNoLaunch() async {
+        let launches = Launches()
+        let runner = JamformerRunner(tools: .trapRecording { launches.record($0) })
+        let tenant = Tenant(name: "Pin", region: .us, clientID: "client", environmentID: "env", isProduction: false)
+        await #expect(throws: JamformerRunner.NoTerraformPath.self) {
+            _ = try await runner.export(tenant: tenant, clientSecret: "fake-secret", includeResources: ["policy"],
+                                        includePackageFiles: false, terraformPath: "")
+        }
+        #expect(launches.all.isEmpty)
+    }
+
+    @Test("Only the type list, which needs no Terraform, may leave it out")
+    func onlyTheTypeListLeavesItOut() throws {
+        #expect(throws: JamformerRunner.NoTerraformPath.self) {
+            _ = try JamformerRunner.pinnedLaunch(arguments: ["-provider", "jamfplatform", "-output", "/tmp/x"],
+                                                 environment: [:], provider: "jamfplatform")
+        }
+        #expect(throws: JamformerRunner.NoTerraformPath.self) {
+            _ = try JamformerRunner.pinnedLaunch(arguments: ["-terraform-path", ""], environment: [:], provider: "jamfplatform")
+        }
+        _ = try JamformerRunner.pinnedLaunch(arguments: ["-skip-update-check", "-list-resources", "-provider", "jamfplatform"],
+                                             environment: [:], provider: "jamfplatform")
     }
 }
 

@@ -33,7 +33,7 @@ or read/update for tenant-wide settings).
 | Extension Attributes | `extension-attributes` (create/read/update/delete) |
 | Enrollment | `prestage-enrollments` (create/read/update/delete), `device-enrollment-program-instances:read` |
 | FileVault | `disk-encryption-configurations`, `policies` (create/read/update/delete) |
-| Software Updates | `blueprints` (create/read/update/delete), `device-groups:read` |
+| Software Updates | `blueprints` (create/read/update/delete/deploy), `device-groups:read` |
 | Compliance — CIS Level 1 | `compliance-benchmarks` (create/read/update/delete), `device-groups:read` |
 | Rosetta 2 | `scripts`, `policies` (create/read/update/delete) |
 | Check-in & Inventory | `computer-check-in`, `computer-inventory-collection-settings` (read/update) |

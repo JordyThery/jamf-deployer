@@ -51,6 +51,7 @@ public nonisolated enum DriftReportBuilder {
         "profile_uuid",
         "profile_url",
         "prestage_installed_profile_ids",
+        "configuration_profile_ids", // its name since jamfplatform 1.8
         "version_lock",
         "member_count",
         "selected_version",
@@ -73,12 +74,17 @@ public nonisolated enum DriftReportBuilder {
     public static func build(plan: PlanFile, blockNames: [String: String]) -> DriftReport {
         var objects: [DriftedObject] = []
         for drifted in plan.resourceDrift ?? [] {
+            // Attributes an engine plugin update renamed or added are filled
+            // in by the first refresh after it: not a change made in Jamf.
             let fields = deepFieldDiffs(
                 before: drifted.change.before,
                 after: drifted.change.after,
                 beforeSensitive: drifted.change.beforeSensitive,
                 afterSensitive: drifted.change.afterSensitive
-            )
+            ).filter {
+                !PluginRenames.isEcho(path: $0.path, resourceType: drifted.type,
+                                      before: drifted.change.before, after: drifted.change.after)
+            }
             guard !fields.isEmpty else { continue }
             let blockID = PreviewBuilder.moduleID(of: drifted.address) ?? "tenant"
             objects.append(DriftedObject(

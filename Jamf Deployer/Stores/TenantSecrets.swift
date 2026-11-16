@@ -77,6 +77,16 @@ nonisolated struct KeychainItem: Sendable {
             if unreadable { $0.insert(cacheKey) } else { $0.remove(cacheKey) }
         }
     }
+
+    /// Items whose `deleteOrThrow()` is refused as a locked Keychain's
+    /// would be, for tests; one item at a time.
+    private static let undeletableForTests = OSAllocatedUnfairLock<Set<String>>(initialState: [])
+
+    func setUndeletableForTests(_ undeletable: Bool) {
+        Self.undeletableForTests.withLock {
+            if undeletable { $0.insert(cacheKey) } else { $0.remove(cacheKey) }
+        }
+    }
     #endif
 
     // MARK: Read cache
@@ -124,6 +134,42 @@ nonisolated struct KeychainItem: Sendable {
         }
         remember(nil)
         TenantClients.shared.secretChanged(account: account)
+    }
+
+    /// Like `delete()`, but a delete the Keychain refuses (locked, access
+    /// refused) throws `SecretWriteError`. An item that isn't there counts
+    /// as deleted.
+    func deleteOrThrow() throws {
+        #if DEBUG
+        if Self.undeletableForTests.withLock({ $0.contains(cacheKey) }) {
+            throw SecretWriteError(status: -25308) // errSecInteractionNotAllowed: a locked Keychain
+        }
+        #endif
+        if DemoSecretVault.keepsInMemory(account: account) {
+            DemoSecretVault.save(nil, service: service, account: account)
+        } else {
+            do {
+                try store.writeSecret(nil, for: account)
+            } catch {
+                // the item may still be there: read it again next time
+                if isCached { Self.cache.withLock { $0[cacheKey] = nil } }
+                throw error
+            }
+        }
+        remember(nil)
+        TenantClients.shared.secretChanged(account: account)
+    }
+
+    /// Like `deleteAll(service:accountPrefix:)`, but throws
+    /// `SecretWriteError` when the Keychain refuses a lookup or a delete.
+    static func deleteAllOrThrow(service: String, accountPrefix prefix: String) throws {
+        if DemoSecretVault.keepsInMemory(account: prefix) {
+            DemoSecretVault.deleteAll(service: service, accountPrefix: prefix)
+            return
+        }
+        guard KeychainSecretStore(service: service, accessibility: .whenUnlocked).deleteSecrets(withAccountPrefix: prefix) else {
+            throw SecretWriteError(status: nil)
+        }
     }
 
     /// Deletes every item of `service` whose account starts with `prefix`.
@@ -192,6 +238,74 @@ nonisolated struct TenantSecrets: Sendable {
         engineerClientID.delete()
         statePassphrase.delete()
         KeychainItem.deleteAll(service: "\(Self.bundleID).block-setting", accountPrefix: "\(tenantID.uuidString).")
+    }
+
+    /// Deletes every item of the tenant, for removing it, and stops at the
+    /// first one the Keychain refuses (`DeletionRefused`), so the tenant
+    /// can be kept and removed again later. Items deleted before the
+    /// refusal stay deleted. The state passphrase goes last: a kept tenant
+    /// never loses it to a refusal of another item.
+    func deleteAllOrThrow() throws {
+        var deleted = [String]()
+        func delete(_ name: String, _ deleting: () throws -> Void) throws {
+            do {
+                try deleting()
+            } catch {
+                throw DeletionRefused(item: name, status: (error as? SecretWriteError)?.status, alreadyDeleted: deleted)
+            }
+            deleted.append(name)
+        }
+        try delete("client secret or password") { try platformClientSecret.deleteOrThrow() }
+        try delete("Jamf Protect client secret") { try protectClientSecret.deleteOrThrow() }
+        try delete("own client ID or username") { try engineerClientID.deleteOrThrow() }
+        try delete("secret block settings") {
+            try KeychainItem.deleteAllOrThrow(service: "\(Self.bundleID).block-setting", accountPrefix: "\(tenantID.uuidString).")
+        }
+        try delete("state passphrase") { try statePassphrase.deleteOrThrow() }
+    }
+
+    /// Reads each of the tenant's items before anything else is removed (in
+    /// Team Mode, its state in the team space): a Keychain that can't be
+    /// read now (locked) would refuse the deletes too, so the removal stops
+    /// before anything is lost (`DeletionRefused`, nothing deleted).
+    func checkReadableForRemoval() throws {
+        let items: [(String, KeychainItem)] = [
+            ("client secret or password", platformClientSecret),
+            ("Jamf Protect client secret", protectClientSecret),
+            ("own client ID or username", engineerClientID),
+            ("state passphrase", statePassphrase),
+        ]
+        for (name, item) in items {
+            do {
+                _ = try item.read()
+            } catch {
+                throw DeletionRefused(item: name, status: (error as? SecretStoreError)?.status,
+                                      alreadyDeleted: [], whileReading: true)
+            }
+        }
+    }
+
+    /// The Keychain refused to delete (or, beforehand, to read) one of a
+    /// tenant's items, so the tenant wasn't removed.
+    struct DeletionRefused: LocalizedError, Equatable {
+        /// e.g. "client secret or password".
+        let item: String
+        /// The Keychain's error code, when known.
+        let status: OSStatus?
+        /// The items deleted before the refusal; they stay deleted.
+        let alreadyDeleted: [String]
+        /// Refused while checking, before anything was deleted.
+        var whileReading = false
+
+        var errorDescription: String? {
+            let code = status.map { " (error \($0))" } ?? ""
+            if whileReading {
+                return "The Keychain can’t read its \(item) right now\(code), so nothing was removed. If the Keychain is locked, unlock it, then remove the tenant again."
+            }
+            let deleted = alreadyDeleted.isEmpty ? ""
+                : " Its \(alreadyDeleted.formatted(.list(type: .and))) \(alreadyDeleted.count == 1 ? "was" : "were") already deleted."
+            return "The Keychain refused to delete its \(item)\(code).\(deleted) If the Keychain is locked, unlock it, then remove the tenant again."
+        }
     }
 
     private func item(purpose: String) -> KeychainItem {

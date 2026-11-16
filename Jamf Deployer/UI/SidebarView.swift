@@ -190,10 +190,11 @@ struct SidebarView: View {
         }
     }
 
-    /// A refusal (busy, locked) says what to do itself; anything else
-    /// comes from deleting the state in the team space.
+    /// A refusal (busy, locked, the Keychain) says what to do itself;
+    /// anything else comes from deleting the state in the team space.
     static func removalErrorText(_ error: Error) -> String {
         let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        if error is TenantSecrets.DeletionRefused { return detail }
         switch error as? TenantDeployService.DeployError {
         case .tenantBusy?, .engineWorkInProgress?, .previewInProgress?, .locked?:
             return detail

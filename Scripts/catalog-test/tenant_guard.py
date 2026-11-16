@@ -9,6 +9,7 @@ import json, os, re, subprocess, sys
 
 ALLOWLIST = os.path.expanduser("~/Library/Application Support/JTKit Release Check/allowlist.json")
 MIN_PREFIX_LENGTH = 3
+SUPPORTED_VERSIONS = (1, 2, 3)
 # The UI test prefixes ("UIC - ", "UIF - ", "UIT RN - ") and the live checks' JTKTEST.
 TEST_PREFIX = re.compile(r"^(UI[A-Z]+( [A-Z]+)* - |JTKTEST)")
 
@@ -56,7 +57,9 @@ def load_allowlist(path=None):
             data = json.load(f)
     except ValueError as error:
         raise Refused(f"The allow-list can’t be read: {error}")
-    if data.get("version") != 1:
+    # The versions JTKit reads (AllowList.supportedVersions); 2 and 3 only add
+    # optional keys, none of which these checks use.
+    if data.get("version") not in SUPPORTED_VERSIONS:
         raise Refused(f"The allow-list’s version {data.get('version')!r} isn’t supported")
     return data.get("tenants") or []
 
@@ -92,7 +95,8 @@ def require_writable(keychain_service, service, identity, tenants=None):
         raise Refused(f"Keychain service {keychain_service!r} isn’t a {service} tenant on the allow-list "
                       "(or points at a different tenant than the allow-list names)")
     for entry in matches:
-        if entry.get("access") != "full" or entry.get("production"):
+        # "disposable" is JTKit's other name for full access (AllowList.Access).
+        if entry.get("access") not in ("full", "disposable") or entry.get("production"):
             raise Refused(f"Allow-list role {entry.get('role')!r} may not be changed by these helpers "
                           f"(access {entry.get('access')!r}{', production' if entry.get('production') else ''})")
     return matches[0].get("role")

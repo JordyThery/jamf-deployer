@@ -6,10 +6,10 @@ set -euo pipefail
 HERE="${0:A:h}"
 
 OPENTOFU_VERSION="1.13.9"
-JAMFPLATFORM_VERSION="1.7.2"
-JAMFPROTECT_VERSION="0.12.0"
-JAMFPRO_VERSION="0.42.0"
-JAMFORMER_VERSION="0.6.1"
+JAMFPLATFORM_VERSION="1.9.0"
+JAMFPROTECT_VERSION="0.13.0"
+JAMFPRO_VERSION="0.43.0"
+JAMFORMER_VERSION="0.7.0"
 # jamformer's download has no LICENSE; the one from its repository at that tag.
 # Update the checksum with the version, and the text in JamfDeployerCore/Licences.
 JAMFORMER_LICENSE_SHA256="a0df87821e031b784e010f350e83ce099201fbf4a06718e8d8662430be5c5640"

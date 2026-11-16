@@ -103,14 +103,20 @@ public nonisolated enum PreviewBuilder {
         var counts: [ChangeKind: Int] = [:]
         var generalNotes: [String] = []
 
+        // A warning can repeat many times, for one object (a deprecated
+        // attribute per setting) or for many: each is shown once, with how
+        // often it came.
+        var general: [String] = []
         var notesByAddress: [String: [String]] = [:]
         for diagnostic in diagnostics {
             if let address = diagnostic.address {
                 notesByAddress[address, default: []].append(diagnostic.summary)
             } else if diagnostic.severity == "warning" {
-                generalNotes.append(diagnostic.summary)
+                general.append(diagnostic.summary)
             }
         }
+        generalNotes = Self.grouped(general)
+        notesByAddress = notesByAddress.mapValues(Self.grouped)
 
         for change in plan.resourceChanges ?? [] {
             let kind = ChangeKind.from(
@@ -153,6 +159,20 @@ public nonisolated enum PreviewBuilder {
             hasDestructiveChanges: counts.keys.contains { $0.isDestructive && counts[$0, default: 0] > 0 },
             generalNotes: generalNotes
         )
+    }
+
+    /// Each note once, in first-seen order, with "(N times)" when it repeats.
+    static func grouped(_ notes: [String]) -> [String] {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for note in notes {
+            if counts[note] == nil { order.append(note) }
+            counts[note, default: 0] += 1
+        }
+        return order.map { note in
+            let count = counts[note] ?? 1
+            return count > 1 ? "\(note) (\(count) times)" : note
+        }
     }
 
     /// "module.filevault.jamfplatform_pro_policy.enable" → "filevault"
