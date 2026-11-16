@@ -32,6 +32,12 @@ actor JamformerRunner {
         var errorDescription: String? { "The exporter can’t run for “\(provider)”: no built-in version of it." }
     }
 
+    /// An export launch without the app's own Terraform: jamformer would
+    /// download the newest Terraform itself, unverified and without consent.
+    struct NoTerraformPath: LocalizedError {
+        var errorDescription: String? { "The exporter can’t run without the Terraform the app downloaded. Download it again, then try again." }
+    }
+
     private let jamformerURL: URL
 
     /// The doorway jamformer is started through; demo mode's never starts it.
@@ -204,12 +210,20 @@ actor JamformerRunner {
 
     /// A launch's arguments and environment, pinned to the bundled plugin
     /// version of `provider` (as an argument and in the environment), with
-    /// only `HOME` and `PATH` added.
-    /// - Throws: `UnknownProvider` when the provider has no bundled version.
+    /// only `HOME` and `PATH` added. Every launch but the type list needs
+    /// Terraform and must name the app's own: without `-terraform-path`,
+    /// jamformer (since 0.7.0) downloads the newest Terraform on every run.
+    /// - Throws: `UnknownProvider` when the provider has no bundled version,
+    ///   `NoTerraformPath` when an export names no Terraform.
     nonisolated static func pinnedLaunch(arguments: [String], environment: [String: String],
                                          provider: String) throws -> (arguments: [String], environment: [String: String]) {
         guard let version = bundledProviderVersion(for: provider) else {
             throw UnknownProvider(provider: provider)
+        }
+        if !arguments.contains("-list-resources") {
+            guard let index = arguments.firstIndex(of: "-terraform-path"),
+                  arguments.indices.contains(index + 1), !arguments[index + 1].isEmpty
+            else { throw NoTerraformPath() }
         }
         var fullEnvironment = environment
         fullEnvironment["JAMFORMER_PROVIDER_VERSION"] = version
