@@ -1,6 +1,6 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-11-09 (1.2.1, released 2026-11-09; its changes are listed in [CHANGELOG.md](../CHANGELOG.md)). The release check passed on 2026-11-09 against the published JTKit 1.4.0 in about 22 minutes. The open items, limits and what is live-verified, in one place.
+As of 2026-11-16 (1.3.0, released 2026-11-16; its changes are listed in [CHANGELOG.md](../CHANGELOG.md)). The release check passed on 2026-11-16 against the published JTKit 1.8.0 in about 21 minutes. The open items, limits and what is live-verified, in one place.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - ADE `.p7m` / Apps and Books `.vpptoken` uploads and Protect registration in Day 0 — wired and spec-verified, needing real Apple/Protect artifacts to fire for the first time.

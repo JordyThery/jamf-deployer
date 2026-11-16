@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.0 — unreleased
+## 1.3.0 — 2026-11-16
 
 - **Teams: update every Mac together.** After someone deploys a tenant with
   1.3.0, Jamf Deployer 1.2.1 and earlier can no longer read that tenant's
