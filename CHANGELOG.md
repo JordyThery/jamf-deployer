@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.0 — unreleased
+
+- **Teams: update every Mac together.** After someone deploys a tenant with
+  1.3.0, Jamf Deployer 1.2.1 and earlier can no longer read that tenant's
+  deployment state.
+- **Newer engine plugins are built in:** jamfplatform 1.9.0 (was 1.7.2),
+  jamfpro 0.43.0 (was 0.42.0) and jamfprotect 0.13.0 (was 0.12.0), and the
+  exporter jamformer 0.7.0 (was 0.6.1).
+  - The first Preview after updating can show one update for policies with
+    several scripts or packages, for PreStages and for blueprints with
+    several items. Nothing else changes in Jamf; approving it once is enough.
+    On a deployed blueprint, approving it sends the blueprint to its devices
+    again, so plan when to do it.
+  - Some PreStage and policy settings have new names. Blocks that use the old
+    names keep working and show a note in Preview until February 2027. Notes
+    that repeat now appear once, with a count.
+- **Capture follows the new plugin.** A captured policy's scripts are linked
+  by name again. A PreStage without an enrollment customization and an App
+  Store app without an Apps and Books location are captured in a form the
+  new plugin accepts. Check for Changes no longer reports a PreStage's
+  configuration profiles as changed in Jamf.
+- **Discovery always uses the Terraform you downloaded in the app.** The
+  exporter never downloads another Terraform by itself.
+- **Removing a tenant while the Keychain is locked** keeps the tenant and
+  says which saved item couldn't be deleted, instead of leaving its
+  credentials behind. In Team Mode the app checks the Keychain before it
+  deletes the tenant's state from the team space.
+- **Software Updates** needs the Blueprints *Deploy* permission as well;
+  the permissions page now lists it.
+
 ## 1.2.1 — 2026-11-09
 
 - **OpenTofu 1.13.9** is now built in (was 1.13.2). It fixes saving the

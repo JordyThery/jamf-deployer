@@ -330,13 +330,13 @@ struct LiveDeployTests {
         do {
             preview = try await service.preview(tenant: current(tenant, tenantStore))
         } catch {
-            run.record(step: step("a recovered import previews on jamfplatform 1.7.2"), passed: false, note: String(describing: error))
+            run.record(step: step("a recovered import previews on jamfplatform \(EngineInfo.jamfPlatformProviderVersion)"), passed: false, note: String(describing: error))
             throw error
         }
         let adopts = preview.summary.counts[.adopt] ?? 0
         let creates = preview.summary.counts[.create] ?? 0
         #expect(adopts == 1 && creates == 0, "adopt \(adopts), create \(creates)")
-        run.record(step: step("a recovered import previews on jamfplatform 1.7.2"), passed: adopts == 1 && creates == 0,
+        run.record(step: step("a recovered import previews on jamfplatform \(EngineInfo.jamfPlatformProviderVersion)"), passed: adopts == 1 && creates == 0,
                    note: "\(adopts) adopt, \(creates) create")
         try Self.requireOnlyTestObjects(preview, run: run)
         let adopted1 = try await service.deploy(tenant: current(tenant, tenantStore), session: preview)
