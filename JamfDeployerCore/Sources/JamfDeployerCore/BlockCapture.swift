@@ -365,8 +365,13 @@ public nonisolated enum BlockCapture {
                 return "data.jamfplatform_pro_automated_device_enrollment.instance.id"
             }
 
+            // An app without a location: jamfplatform 1.9 refuses "" and "0"
+            // at plan time; "-1" says the app isn't VPP-backed.
+            text = replacing(in: text, pattern: #"\bvpp_admin_account_id(\s*)= "0?""#) { match in
+                "vpp_admin_account_id\(match[1])= \"-1\""
+            }
+
             text = replacing(in: text, pattern: #"\bvpp_admin_account_id(\s*)= (?:"(\d+)"|jamfplatform_pro_volume_purchasing_location\.([A-Za-z0-9_-]+)\.id)"#) { match in
-                if !match[2].isEmpty, match[2] == "-1" || match[2] == "0" { return nil }
                 vppReferenced = true
                 if vppLocationName == nil {
                     vppLocationName = !match[3].isEmpty
@@ -1348,9 +1353,13 @@ public nonisolated enum BlockCapture {
             return "category_id = \(reference)"
         }
 
-        // PreStages name their enrollment customization by numeric ID ("0"
-        // and "-1" mean none). Without the customization in the export the
-        // origin's ID means nothing elsewhere, so it falls back to none.
+        // PreStages name their enrollment customization by numeric ID; "0"
+        // means none, and jamfplatform 1.9 refuses "-1" and "" at plan time.
+        // Without the customization in the export the origin's ID means
+        // nothing elsewhere, so it falls back to none.
+        text = replacing(in: text, pattern: #"enrollment_customization_id(\s*)= "(?:-1)?""#) { match in
+            "enrollment_customization_id\(match[1])= \"0\""
+        }
         text = replacing(in: text, pattern: #"enrollment_customization_id\s*= "(\d+)""#) { match in
             guard match[1] != "0" else { return nil }
             guard let address = table.address(type: "jamfplatform_pro_enrollment_customization", id: match[1]),
@@ -1378,7 +1387,9 @@ public nonisolated enum BlockCapture {
                 for _ in 0..<(-(delta.braces + delta.brackets)) where !container.isEmpty { container.removeLast() }
             }
             guard let match = line.firstMatch(of: /^(\s*)id\s+= "(\d+)" # TODO: unresolved reference/) else { continue }
-            let depKey: String? = container.contains("scripts") ? "script"
+            // jamfplatform 1.8 flattened a policy's `scripts = { scripts = [...] }`
+            // into `script_assignments = [...]`; captures may hold either.
+            let depKey: String? = container.contains("scripts") || container.contains("script_assignments") ? "script"
                 : container.contains("packages") ? "package" : nil
             guard let key = depKey,
                   let type = dependencyTypes.first(where: { $0.value == key })?.key,

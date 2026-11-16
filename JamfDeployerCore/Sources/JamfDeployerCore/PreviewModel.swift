@@ -103,13 +103,22 @@ public nonisolated enum PreviewBuilder {
         var counts: [ChangeKind: Int] = [:]
         var generalNotes: [String] = []
 
+        // A warning without an address repeats for every object it concerns
+        // (a deprecated attribute in many blocks): each is shown once, with
+        // how often it came.
+        var generalCounts: [String: Int] = [:]
         var notesByAddress: [String: [String]] = [:]
         for diagnostic in diagnostics {
             if let address = diagnostic.address {
                 notesByAddress[address, default: []].append(diagnostic.summary)
             } else if diagnostic.severity == "warning" {
-                generalNotes.append(diagnostic.summary)
+                if generalCounts[diagnostic.summary] == nil { generalNotes.append(diagnostic.summary) }
+                generalCounts[diagnostic.summary, default: 0] += 1
             }
+        }
+        generalNotes = generalNotes.map { note in
+            let count = generalCounts[note] ?? 1
+            return count > 1 ? "\(note) (\(count) times)" : note
         }
 
         for change in plan.resourceChanges ?? [] {

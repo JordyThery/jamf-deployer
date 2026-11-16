@@ -51,6 +51,7 @@ public nonisolated enum DriftReportBuilder {
         "profile_uuid",
         "profile_url",
         "prestage_installed_profile_ids",
+        "configuration_profile_ids", // its name since jamfplatform 1.8
         "version_lock",
         "member_count",
         "selected_version",

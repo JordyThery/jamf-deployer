@@ -85,7 +85,7 @@ struct ProviderUpgradeTests {
 
     @Test("A warning repeated for many objects shows once, with how often it came")
     func repeatedWarningsAreGrouped() throws {
-        let plan = try JSONDecoder().decode(PlanFile.self, from: Data(#"{"resource_changes": []}"#.utf8))
+        let plan = try JSONDecoder().decode(PlanFile.self, from: Data(#"{"format_version": "1.2", "resource_changes": []}"#.utf8))
         func warning(_ summary: String) -> EngineStreamEvent.Diagnostic {
             .init(severity: "warning", summary: summary, detail: nil, address: nil)
         }
