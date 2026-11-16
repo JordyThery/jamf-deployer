@@ -123,6 +123,14 @@ class AllowListTests(unittest.TestCase):
                 tenant_guard.load_allowlist(path)  # readable by others
             os.chmod(path, 0o600)
             self.assertEqual(tenant_guard.load_allowlist(path), [])
+            for version in (2, 3):
+                with open(path, "w") as f:
+                    f.write('{"version": %d, "tenants": [], "productionReads": true}' % version)
+                self.assertEqual(tenant_guard.load_allowlist(path), [])
+            with open(path, "w") as f:
+                f.write('{"version": 4, "tenants": []}')
+            with self.assertRaises(tenant_guard.Refused):
+                tenant_guard.load_allowlist(path)  # a version this helper doesn't know
 
 
 if __name__ == "__main__":
