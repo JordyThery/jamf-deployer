@@ -356,6 +356,124 @@ struct LiveDeployTests {
         #expect(run.network.refusals.isEmpty, "\(run.network.refusals)")
     }
 
+    /// jamfplatform 1.10.0 and Jamf Pro 11.34's retired Fix Disk Permissions:
+    /// turned on, Preview stops in plain language (11.34 and later; nothing
+    /// reaches Jamf); as capture writes a policy now (left out), it deploys
+    /// and checks clean; as blocks captured before 1.3.1 have it (false),
+    /// Preview shows no changes. A disabled, unscoped test policy.
+    @Test func retiredFixDiskPermissions() async throws {
+        let role = "jamf-test-b"
+        let run = try LiveCheckRun.current()
+        guard let target = try LiveTenant.all(run).first(where: { $0.role == role }) else { return }
+        try run.requireEngineTarget(role: role, service: target.service, host: target.entry.host,
+                                    region: target.entry.region, environmentID: target.entry.environmentID)
+        let step = { (name: String) in "\(role): \(name)" }
+
+        DemoSecretVault.keepEverythingInMemory()
+        let root = FileManager.default.temporaryDirectory.appending(path: "jd-live-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storeURL = root.appending(path: "store")
+        let tools = ToolDoorway.real(isDemoOn: { false })
+        let tenantStore = TenantStore(rootURL: storeURL.appending(path: "tenants"))
+        let service = TenantDeployService(
+            tenantStore: tenantStore, activityLog: ActivityLog(),
+            catalogSources: CatalogSourceStore(fileURL: storeURL.appending(path: "catalog-sources.json"), tools: tools),
+            storeURL: storeURL, tools: tools)
+        var tenant = try target.tenant(name: "\(run.prefix) Tenant")
+        tenant.namePrefix = "\(run.prefix) – "
+        tenantStore.add(tenant)
+        #expect(TenantSecrets(tenantID: tenant.id).platformClientSecret.save(target.secret))
+
+        let versionAnswer = try await target.api.send(HTTPRequest(path: "pro/v1/jamf-pro-version", accept: "application/json"))
+        let version = ((try? JSONSerialization.jsonObject(with: versionAnswer.data)) as? [String: Any])?["version"] as? String ?? ""
+        let parts = version.split(separator: ".").prefix(2).compactMap { Int($0.prefix { $0.isNumber }) }
+        let retiresIt = parts.count == 2 && (parts[0] > 11 || (parts[0] == 11 && parts[1] >= 34))
+
+        let name = "\(run.prefix) – Retired Settings"
+        let adopted = service.adoptedURL(for: tenant)
+        try FileManager.default.createDirectory(at: adopted, withIntermediateDirectories: true)
+        let override = adopted.appending(path: "override-jtktest.tf")
+        func write(_ fixDiskPermissions: String?) throws {
+            let line = fixDiskPermissions.map { "    fix_disk_permissions = \($0)\n" } ?? ""
+            try Data("""
+            resource "jamfplatform_pro_policy" "jtktest" {
+              general = {
+                name    = "\(name)"
+                enabled = false
+              }
+              maintenance = {
+            \(line)    update_inventory = false
+              }
+            }
+
+            """.utf8).write(to: override)
+        }
+        let mentionsIt = { (session: PreviewSession) in
+            session.diagnostics.contains { ($0.summary + ($0.detail ?? "")).contains("fix_disk_permissions") }
+        }
+
+        // 1. Turned on: on 11.34 and later Preview stops, in plain language.
+        try write("true")
+        if retiresIt {
+            do {
+                let unexpected = try await service.preview(tenant: current(tenant, tenantStore))
+                try Self.requireOnlyTestObjects(unexpected, run: run)
+                Issue.record("Jamf Pro \(version): the preview with Fix Disk Permissions on wasn't refused")
+                run.record(step: step("Fix Disk Permissions on stops Preview in plain language"), passed: false, note: "not refused on \(version)")
+            } catch {
+                let message = PreviewDeploySheet.failureMessage(error, for: .platform)
+                let plain = message.hasPrefix("Jamf Pro 11.34 and later no longer offer Fix Disk Permissions in policies.")
+                #expect(plain, "\(message)")
+                run.record(step: step("Fix Disk Permissions on stops Preview in plain language"), passed: plain,
+                           note: "Jamf Pro \(version)")
+            }
+        } else {
+            let allowed = try await service.preview(tenant: current(tenant, tenantStore))
+            try Self.requireOnlyTestObjects(allowed, run: run)
+            run.record(step: step("Fix Disk Permissions on stops Preview in plain language"), passed: true,
+                       note: "not reachable: Jamf Pro \(version) is older than 11.34, and the plugin allows it")
+        }
+        let leftBehind = try await target.classicList("policies").contains { $0.name == name }
+        #expect(!leftBehind, "The refused preview made a policy")
+
+        // 2. As capture writes it now: left out. Deploys, no deprecation note, checks clean.
+        try write(nil)
+        let first = try await service.preview(tenant: current(tenant, tenantStore))
+        try Self.requireOnlyTestObjects(first, run: run)
+        #expect(first.summary.counts[.create] == 1)
+        #expect(!mentionsIt(first), "A deprecation note for fix_disk_permissions without the setting")
+        let deployed = try await service.deploy(tenant: current(tenant, tenantStore), session: first)
+        #expect(deployed.errors.isEmpty, "\(deployed.errors)")
+        let policy = try #require(try await target.classicList("policies").first { $0.name == name })
+        try run.recordCreated(role: role, service: target.service, resource: "policies", id: policy.id, name: name)
+        try await service.checkDrift(tenant: current(tenant, tenantStore))
+        let clean = try #require(current(tenant, tenantStore).driftReport)
+        #expect(clean.actionableObjects.isEmpty, "\(clean.actionableObjects.map(\.address))")
+        run.record(step: step("a policy without Fix Disk Permissions deploys and checks clean"),
+                   passed: deployed.errors.isEmpty && clean.actionableObjects.isEmpty && !mentionsIt(first))
+
+        // 3. As blocks captured before 1.3.1 have it: false. No changes.
+        try write("false")
+        let older = try await service.preview(tenant: current(tenant, tenantStore))
+        try Self.requireOnlyTestObjects(older, run: run)
+        let changes = older.summary.groups.flatMap(\.changes).filter { $0.kind != .unchanged }.count
+        #expect(changes == 0, "\(changes) changes for fix_disk_permissions = false")
+        run.record(step: step("an older block with fix_disk_permissions = false previews with no changes"), passed: changes == 0,
+                   note: mentionsIt(older) ? "with the plugin's deprecation note" : "no deprecation note")
+
+        // 4. OpenTofu removes it.
+        try FileManager.default.removeItem(at: override)
+        let removal = try await service.preview(tenant: current(tenant, tenantStore))
+        try Self.requireOnlyTestObjects(removal, run: run)
+        #expect(removal.summary.counts[.remove] == 1)
+        let removed = try await service.deploy(tenant: current(tenant, tenantStore), session: removal)
+        let gone = try await !target.classicList("policies").contains { $0.id == policy.id }
+        #expect(removed.errors.isEmpty && gone)
+        run.record(step: step("the test policy is removed"), passed: removed.errors.isEmpty && gone)
+        try await service.removeTenant(current(tenant, tenantStore))
+        #expect(run.network.refusals.isEmpty, "\(run.network.refusals)")
+    }
+
     private func current(_ tenant: Tenant, _ store: TenantStore) throws -> Tenant {
         try #require(store.tenant(id: tenant.id))
     }

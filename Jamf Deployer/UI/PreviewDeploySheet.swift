@@ -569,16 +569,24 @@ struct PreviewDeploySheet: View {
                 stage = .reviewing(session)
             }
         } catch {
-            let raw = String(describing: error)
-            // App-level errors describe themselves; the translation table is
-            // for raw engine and provider output.
-            if let described = (error as? LocalizedError)?.errorDescription {
-                stage = .failed(described, detail: Self.readableDetail(error))
-            } else {
-                let translated = ErrorTranslation.translate(raw, for: tenant.errorConnection)
-                stage = .failed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: Self.readableDetail(error))
-            }
+            stage = .failed(Self.failureMessage(error, for: tenant.errorConnection), detail: Self.readableDetail(error))
         }
+    }
+
+    /// What a failed preview or deploy says. An engine stop the translation
+    /// table knows (a plugin's plan-time refusal) reads as its plain
+    /// sentence and hint; other app-level errors describe themselves; the
+    /// table covers the rest of the raw engine and provider output.
+    static func failureMessage(_ error: Error, for connection: ErrorTranslation.Connection) -> String {
+        if case EngineRunner.EngineError.nonZeroExit = error,
+           let known = ErrorTranslation.translateIfKnown(readableDetail(error), for: connection) {
+            return known.message + (known.hint.map { "\n\($0)" } ?? "")
+        }
+        if let described = (error as? LocalizedError)?.errorDescription {
+            return described
+        }
+        let translated = ErrorTranslation.translate(String(describing: error), for: connection)
+        return translated.message + (translated.hint.map { "\n\($0)" } ?? "")
     }
 
     /// What the engine said, for the failure's details: its error
@@ -629,13 +637,7 @@ struct PreviewDeploySheet: View {
                 let outcome = try await deployService.deploy(tenant: tenant, session: session)
                 stage = .finished(outcome)
             } catch {
-                let raw = String(describing: error)
-                if let described = (error as? LocalizedError)?.errorDescription {
-                    stage = .deployFailed(described, detail: Self.readableDetail(error))
-                } else {
-                    let translated = ErrorTranslation.translate(raw, for: tenant.errorConnection)
-                    stage = .deployFailed(translated.message + (translated.hint.map { "\n\($0)" } ?? ""), detail: Self.readableDetail(error))
-                }
+                stage = .deployFailed(Self.failureMessage(error, for: tenant.errorConnection), detail: Self.readableDetail(error))
             }
         }
     }

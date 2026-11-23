@@ -113,6 +113,21 @@ public nonisolated enum ErrorTranslation {
             "The object is saved in the tenant record. Run Check for Changes; if nothing shows for it, everything is in order."
         ),
         (
+            // jamfplatform 1.10.0's plan-time refusal on Jamf Pro 11.34 and
+            // later, which accept fix_disk_permissions = true but store false.
+            "Fix disk permissions is not supported by this Jamf Pro version",
+            "Jamf Pro 11.34 and later no longer offer Fix Disk Permissions in policies.",
+            "In the policy’s block, turn off Fix Disk Permissions: remove fix_disk_permissions from its maintenance settings, or set it to false. Then preview again."
+        ),
+        (
+            // jamfplatform 1.10.0's plan-time refusal on Jamf Pro 11.34 and
+            // later, which turn QuickAdd signing without a developer
+            // certificate back off. Captured code never holds a certificate.
+            "QuickAdd package signing needs a developer certificate",
+            "Jamf Pro 11.34 and later turn QuickAdd package signing off when no developer certificate is uploaded, and Jamf is removing the option.",
+            "In the block with the user-initiated enrollment settings, turn off QuickAdd package signing: remove sign_quickadd_package, or set it to false. Then preview again."
+        ),
+        (
             // jamfplatform 1.7.1's plan-time name check, when the name
             // belongs to an object this tenant's blocks already manage.
             "already managed by another resource in this configuration",

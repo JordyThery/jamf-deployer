@@ -2591,3 +2591,36 @@ struct ErrorTranslationConnectionTests {
         #expect(ErrorTranslation.translateIfKnown("some entirely novel failure", for: connection) == nil)
     }
 }
+
+// jamfplatform 1.10.0's plan-time refusals on Jamf Pro 11.34 and later, as
+// the engine prints them (titles and details from the plugin's source).
+@Suite("Jamf Pro 11.34 refusals")
+struct JamfPro1134RefusalTests {
+    @Test func fixDiskPermissionsSaysWhatToChange() {
+        let raw = """
+        Error: Fix disk permissions is not supported by this Jamf Pro version
+
+          with jamfplatform_pro_policy.jd_maintenance,
+          on pro_policy.tf line 40, in resource "jamfplatform_pro_policy" "jd_maintenance":
+          40:     fix_disk_permissions    = true
+
+        Jamf Pro 11.34.0 accepts maintenance.fix_disk_permissions = true but stores and reports false, so the setting can never take effect and the apply would fail with an inconsistent result. Jamf Pro 11.34.0 removed the option from the admin UI. Remove the attribute, or set it to false.
+        """
+        let translated = ErrorTranslation.translate(raw)
+        #expect(translated.message == "Jamf Pro 11.34 and later no longer offer Fix Disk Permissions in policies.")
+        #expect(translated.hint?.contains("remove fix_disk_permissions") == true)
+    }
+
+    @Test func quickAddSigningSaysWhatToChange() {
+        let raw = """
+        Error: QuickAdd package signing needs a developer certificate on this Jamf Pro version
+
+          with jamfplatform_pro_user_initiated_enrollment_settings.this,
+
+        Jamf Pro 11.34.0 accepts sign_quickadd_package = true without a developer_certificate but then reports false, so the apply would fail with an inconsistent result. Jamf is removing QuickAdd package signing from user-initiated enrollment settings. Remove sign_quickadd_package, or set it to false.
+        """
+        let translated = ErrorTranslation.translate(raw)
+        #expect(translated.message.hasPrefix("Jamf Pro 11.34 and later turn QuickAdd package signing off"))
+        #expect(translated.hint?.contains("remove sign_quickadd_package") == true)
+    }
+}

@@ -442,6 +442,11 @@ public nonisolated enum BlockCapture {
                 }
             }
 
+            // Settings Jamf Pro 11.34 retired: left out when off, noted when on.
+            let retired = RetiredSettings.cleaned(text)
+            text = retired.text
+            warnings += retired.notes
+
             // Name prefix: every quoted string that starts with the tenant's
             // prefix becomes "${var.name_prefix}…".
             if !request.namePrefix.isEmpty {

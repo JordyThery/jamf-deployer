@@ -126,3 +126,41 @@ struct PassphraseCheckTests {
         #expect(try await store.tenantIDsWithTeamState().isEmpty)
     }
 }
+
+@MainActor
+@Suite("Preview stops in plain language")
+struct PreviewFailureMessageTests {
+    /// An engine stop as a plan-time refusal leaves it: exit code 1 and the
+    /// plugin's error diagnostic (jamfplatform 1.10.0's own text).
+    static func engineStop(summary: String, detail: String) throws -> Error {
+        let json = try JSONSerialization.data(withJSONObject: [
+            "severity": "error", "summary": summary, "detail": detail,
+            "address": "module.block_maintenance.jamfplatform_pro_policy.jd_maintenance",
+        ])
+        let diagnostic = try JSONDecoder().decode(EngineStreamEvent.Diagnostic.self, from: json)
+        return EngineRunner.EngineError.nonZeroExit(.init(exitCode: 1, events: [], rawLines: [], errorDiagnostics: [diagnostic]))
+    }
+
+    @Test("A known plan-time refusal reads as what to change, not the plugin's title")
+    func knownRefusalIsTranslated() throws {
+        let error = try Self.engineStop(
+            summary: "Fix disk permissions is not supported by this Jamf Pro version",
+            detail: "Jamf Pro 11.34.0 accepts maintenance.fix_disk_permissions = true but stores and reports false, so the setting can never take effect and the apply would fail with an inconsistent result. Jamf Pro 11.34.0 removed the option from the admin UI. Remove the attribute, or set it to false.")
+        let message = PreviewDeploySheet.failureMessage(error, for: .platform)
+        #expect(message.hasPrefix("Jamf Pro 11.34 and later no longer offer Fix Disk Permissions in policies."))
+        #expect(message.contains("turn off Fix Disk Permissions"))
+        #expect(!message.contains("not supported by this Jamf Pro version"))
+    }
+
+    @Test("An unknown engine stop still shows the engine's own summary")
+    func unknownStopKeepsTheSummary() throws {
+        let error = try Self.engineStop(summary: "Something entirely new", detail: "Never seen before.")
+        #expect(PreviewDeploySheet.failureMessage(error, for: .platform) == "Something entirely new")
+    }
+
+    @Test("App-level errors still describe themselves")
+    func appErrorsDescribeThemselves() {
+        let error = TenantDeployService.DeployError.tenantBusy
+        #expect(PreviewDeploySheet.failureMessage(error, for: .platform) == error.errorDescription)
+    }
+}

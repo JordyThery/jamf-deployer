@@ -449,6 +449,11 @@ struct AdoptView: View {
             try ExportedObjectInventory.normalizeImportBlocks(directory: exportURL)
             try ExportedObjectInventory.inlineVariables(directory: exportURL)
             try ExportedObjectInventory.protectOmittedSections(directory: exportURL)
+            // Settings Jamf Pro 11.34 retired: left out when off, noted when on.
+            let retiredNotes = try RetiredSettings.clean(directory: exportURL)
+            if !retiredNotes.isEmpty {
+                stagingNote = ([stagingNote].compactMap(\.self) + retiredNotes).joined(separator: " ")
+            }
 
             // Each flagged value becomes a sensitive variable too.
             let destinationVariables = deployService.adoptedURL(for: tenant)
