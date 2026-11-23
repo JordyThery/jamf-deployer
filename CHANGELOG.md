@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.1 — 2026-11-23
+
+- **jamfplatform 1.10.0 is built in** (was 1.9.0). It follows Jamf Pro
+  11.34, which no longer offers Fix Disk Permissions in policies and is
+  phasing out QuickAdd package signing in user-initiated enrollment.
+- **Clearer stop instead of a failed deploy.** On Jamf Pro 11.34 and later,
+  a policy with Fix Disk Permissions turned on, or QuickAdd package signing
+  without a developer certificate, now stops at Preview with a sentence
+  saying what to turn off. Before, the deploy failed after it had run.
+- **Capture, Clone and Adopt leave these settings out when they're off,**
+  so Preview shows no deprecation notes for them. When one is on, it is
+  kept and the capture or adoption notes say so. Blocks captured with an
+  earlier version keep working and show the note in Preview until they're
+  captured again.
+- **Test Connection and the preflight checks** are more reliable when
+  several checks run at once.
+
 ## 1.3.0 — 2026-11-16
 
 - **Teams: update every Mac together.** After someone deploys a tenant with

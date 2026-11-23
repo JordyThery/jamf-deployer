@@ -17,7 +17,8 @@
 # and previewed on jamf-test-b, never deployed. Production takes part when
 # the allow-list's productionReads or --include-production lets it.
 #
-# Live steps, in order: the engine checks per tenant (unit tests), then the
+# Live steps, in order: the engine checks per tenant (unit tests: deploy,
+# a recovered import, Fix Disk Permissions on Jamf Pro 11.34), then the
 # live UI tests in Jamf DeployerUITests/LiveUITests.swift: Connect a Tenant
 # and Remove Tenant; deploy, Check for Changes, a change made in Jamf
 # restored and another kept, Remove from Tenant; capture from production
@@ -39,6 +40,7 @@ LIVE_TESTS=(
     "Jamf DeployerTests/LiveDeployTests/tenantA()"
     "Jamf DeployerTests/LiveDeployTests/tenantB()"
     "Jamf DeployerTests/LiveDeployTests/recoveredImportStillPreviews()"
+    "Jamf DeployerTests/LiveDeployTests/retiredFixDiskPermissions()"
     "Jamf DeployerUITests/LiveUITests/testConnect"
     "Jamf DeployerUITests/LiveUITests/testDeployDriftKeepRestore"
     "Jamf DeployerUITests/LiveUITests/testCaptureFromProductionPreviewOnTestB"
