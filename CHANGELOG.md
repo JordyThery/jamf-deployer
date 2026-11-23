@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.1
+## 1.3.1 — 2026-11-23
 
 - **jamfplatform 1.10.0 is built in** (was 1.9.0). It follows Jamf Pro
   11.34, which no longer offers Fix Disk Permissions in policies and is
