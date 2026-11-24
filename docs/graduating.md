@@ -703,12 +703,13 @@ Where to go next, and when:
 ## Credits
 
 The export, its layout and its pipeline follow what these JNUC 2026 sessions
-shared from running Jamf as code in production (recordings to follow):
+shared from running Jamf as code in production. Each title links to its
+recording on YouTube:
 
-- **Managing the Jamf Platform at Scale With IaC**, by Kyle and Neil Martin
-  (Jamf), and its reference project
+- **[Infrastructure as Code for the Jamf Platform: Terraform and GitOps at
+  Scale](https://www.youtube.com/watch?v=XohIVi6VFvA)**, by Kyle Hoare and Neil Martin (Jamf), and its reference project
   [Jamf-Concepts/terraform-jamf-platform](https://github.com/Jamf-Concepts/terraform-jamf-platform).
-- **From ClickOps to GitOps: Migrating Jamf Pro at Enterprise Scale to
-  Terraform**, by Joseph, Gordon and Dafydd (Lloyds Banking Group).
-- **From Zero to GitOps: Training a Mac Team to Work Like DevOps Engineers**,
-  by Joseph, Gordon and Dafydd (Lloyds Banking Group).
+- **[Jamf Pro to Terraform: ClickOps to GitOps Migration](https://www.youtube.com/watch?v=x4BosrxFk2s)**, by
+  Dafydd Watkins, Gordon Deacon and Joseph Little (Lloyds Banking Group).
+- **[From Click Ops to GitOps: Training a Mac Team on Terraform and Jamf
+  Pro](https://www.youtube.com/watch?v=8Lw7XQz6dvU)**, by Dafydd Watkins, Gordon Deacon and Joseph Little (Lloyds Banking Group).
