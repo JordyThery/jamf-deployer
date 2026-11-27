@@ -516,7 +516,7 @@ struct BlockDetailSheet: View {
                 object["category"] = editCategory.trimmingCharacters(in: .whitespaces)
             }
         } catch {
-            Self.log.error("Saving details for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Saving details for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .private)")
             // Shown inline: an alert presented from this sheet is unreliable.
             editError = "The details couldn’t be saved: \(error.localizedDescription)"
             return
@@ -604,7 +604,7 @@ struct BlockDetailSheet: View {
             try writeManifest(mutate)
             return true
         } catch {
-            Self.log.error("Writing block.json for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Writing block.json for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .private)")
             return false
         }
     }

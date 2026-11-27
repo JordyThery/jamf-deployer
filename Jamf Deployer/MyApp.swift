@@ -39,7 +39,7 @@ struct MyApp: App {
             storage: storage,
             secrets: sandboxFolder != nil ? TenantSecrets.sandboxConnectionSecrets : TenantSecrets.connectionSecrets,
             log: { message in
-                Logger(subsystem: "be.jordythery.jamf-deployer", category: "Connections").error("\(message, privacy: .public)")
+                Logger(subsystem: "be.jordythery.jamf-deployer", category: "Connections").error("\(message, privacy: .private)")
             }
         ))
         // Not in the unit tests' host: the installed app may be exporting.

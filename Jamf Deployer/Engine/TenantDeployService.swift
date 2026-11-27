@@ -1126,17 +1126,16 @@ final class TenantDeployService {
         }
     }
 
-    /// Per-block updates available from newer tags of the tenant's git
-    /// sources (fetches the remotes' tag lists).
     static let decisionsLog = Logger(subsystem: "be.jordythery.jamf-deployer", category: "decisions")
 
     /// Release-check and deploy-retry decisions, to Console; Debug builds
     /// also append them to a file so test runs can be read back without log
-    /// access.
+    /// access. Private in the system log: the lines name tenants, catalog
+    /// sources and resource addresses, and quote engine errors.
     static func trace(_ message: String) {
         // engine error summaries can quote a server's answer
         let message = EngineOutputCleaner.cleaned(message)
-        decisionsLog.info("\(message, privacy: .public)")
+        decisionsLog.info("\(message, privacy: .private)")
         #if DEBUG
         let line = Data("\(Date().formatted(.iso8601)) \(message)\n".utf8)
         // Only this user can read it: the per-user temporary folder, mode 600.
@@ -1153,6 +1152,8 @@ final class TenantDeployService {
         FileManager.default.temporaryDirectory.appending(path: "jamf-deployer-decisions.log")
     }
 
+    /// Per-block updates available from newer release tags of the tenant's
+    /// git sources (fetches the remotes' tag lists).
     func availableBaselineUpdates(for original: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
         let tenant = reattachOrphanedSelections(of: original)
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []

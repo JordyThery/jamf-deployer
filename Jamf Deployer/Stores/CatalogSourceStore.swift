@@ -168,7 +168,7 @@ final class CatalogSourceStore {
                 loaded.sourceID = source.id.uuidString
                 catalogs.append(loaded)
             } catch {
-                logger.error("Catalog source \(source.name, privacy: .public) unreadable: \(error.localizedDescription, privacy: .public)")
+                logger.error("Catalog source \(source.name, privacy: .private) unreadable: \(error.localizedDescription, privacy: .private)")
             }
         }
         return LoadedCatalog.merge(catalogs)
