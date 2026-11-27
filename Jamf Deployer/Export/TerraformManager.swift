@@ -85,13 +85,18 @@ final class TerraformManager {
             let zipURL = staging.appending(path: zipName)
             try zipData.write(to: zipURL)
 
-            let unzip = Process()
-            unzip.standardInput = FileHandle.nullDevice
-            unzip.executableURL = URL(filePath: "/usr/bin/unzip")
-            unzip.arguments = ["-oq", zipURL.path, "-d", staging.path]
-            try unzip.run()
-            unzip.waitUntilExit()
-            guard unzip.terminationStatus == 0 else { throw TerraformError.unpackFailed }
+            // Off the main actor: the archive is large, and the window
+            // shouldn't stall while it unpacks.
+            let unpacked = try await Task.detached {
+                let unzip = Process()
+                unzip.standardInput = FileHandle.nullDevice
+                unzip.executableURL = URL(filePath: "/usr/bin/unzip")
+                unzip.arguments = ["-oq", zipURL.path, "-d", staging.path]
+                try unzip.run()
+                unzip.waitUntilExit()
+                return unzip.terminationStatus == 0
+            }.value
+            guard unpacked else { throw TerraformError.unpackFailed }
 
             try FileManager.default.createDirectory(
                 at: installURL.deletingLastPathComponent(),
