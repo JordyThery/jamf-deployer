@@ -125,6 +125,9 @@ struct CatalogSourceStoreTests {
         #expect(GitCatalogManager.latestRelease(in: ["v1.4.0", "v1.4.0-rc1", "zzz"]) == "v1.4.0")
         #expect(GitCatalogManager.latestRelease(in: ["1.2.0", "v1.1.9"]) == "1.2.0")
         #expect(GitCatalogManager.latestRelease(in: ["wip", "v2.0.0-beta"]) == nil)
+        #expect(GitCatalogManager.latestRelease(in: ["v1.2", "v1.1.9"]) == "v1.2")
+        #expect(GitCatalogManager.latestRelease(in: ["v1.3", "v1.2.9", "v1"]) == "v1.3")
+        #expect(!GitCatalogManager.isReleaseTag("v1"))
         #expect(GitCatalogManager.ordered(tags) == ["v1.4.0-rc1", "wip", "v1.0.0", "v1.4.0", "v1.9.2", "v1.10.0"])
     }
 }

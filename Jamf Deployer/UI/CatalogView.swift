@@ -786,6 +786,8 @@ struct AddGitCatalogSheet: View {
                         .disabled(url.isEmpty || isWorking)
                     if !tags.isEmpty {
                         Picker("Tag", selection: $selectedTag) {
+                            // No release tag to preselect: nothing is chosen for you.
+                            if selectedTag.isEmpty { Text("Choose a Tag").tag("") }
                             ForEach(tags, id: \.self) { Text($0).tag($0) }
                         }
                         .frame(maxWidth: 220)
@@ -822,7 +824,10 @@ struct AddGitCatalogSheet: View {
                     message = "The repository has no release tags yet — catalogs are pinned by tag."
                 } else {
                     tags = found
-                    selectedTag = GitCatalogManager.latestRelease(in: found) ?? found.last ?? ""
+                    selectedTag = GitCatalogManager.latestRelease(in: found) ?? ""
+                    if selectedTag.isEmpty {
+                        message = "The repository has no release tags (such as v1.2.0) yet. Choose the tag to follow."
+                    }
                 }
             } catch {
                 message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

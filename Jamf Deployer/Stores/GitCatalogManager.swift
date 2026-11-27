@@ -24,7 +24,7 @@ nonisolated enum GitCatalogManager {
     }
 
     /// Lists the remote's tags: other tags first, then release tags
-    /// (`vMAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH`) oldest to newest.
+    /// (`vMAJOR.MINOR[.PATCH]`, with or without the v) oldest to newest.
     /// Runs off the caller's actor — `git ls-remote` goes to the network.
     static func availableTags(remote: String, tools: ToolDoorway) async throws -> [String] {
         try await Task.detached { try availableTagsSync(remote: remote, tools: tools) }.value
@@ -41,7 +41,7 @@ nonisolated enum GitCatalogManager {
     }
 
     static func isReleaseTag(_ tag: String) -> Bool {
-        tag.wholeMatch(of: /v?\d+\.\d+\.\d+/) != nil
+        tag.wholeMatch(of: /v?\d+\.\d+(\.\d+)?/) != nil
     }
 
     /// Other tags first (by name), then release tags by version.
