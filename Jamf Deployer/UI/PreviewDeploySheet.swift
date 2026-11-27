@@ -545,7 +545,7 @@ struct PreviewDeploySheet: View {
                 counts[.remove].map { "\($0) remove" },
                 counts[.adopt].map { "\($0) adopt" },
                 counts[.stopManaging].map { "\($0) stop managing" },
-                counts[.unknown].map { "\($0) unknown" },
+                counts[.unknown].map { "\($0) unknown change\($0 == 1 ? "" : "s")" },
             ].compactMap(\.self).joined(separator: " · ")
         )
         .font(.callout)
