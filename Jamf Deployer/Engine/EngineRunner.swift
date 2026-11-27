@@ -201,24 +201,10 @@ actor EngineRunner {
         return data
     }
 
-    /// Raw `tofu show -json <planFile>` output.
+    /// Raw `tofu show -json <planFile>` output. A failed `show` throws with
+    /// the engine's error text instead of handing back an empty answer.
     func showPlanData(planFileName: String) async throws -> Data {
-        var environment = configuration.environment
-        environment["TF_CLI_CONFIG_FILE"] = configuration.cliConfigURL.path
-        environment["HOME"] = NSHomeDirectory()
-        let process = try engineProcess(["show", "-json", planFileName], environment: environment)
-
-        let stdout = Pipe()
-        // No stdin: a TTY here (dev runs from Xcode) switches child tools into
-        // interactive mode and they block waiting for input.
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = stdout
-        let terminated = Self.installTerminationWait(process)
-        try process.run()
-        // Read fully before waiting, so a large plan cannot deadlock the pipe.
-        let collected = stdout.fileHandleForReading.readDataToEndOfFile()
-        await Self.awaitTermination(terminated)
-        return collected
+        try await checkedOutput(arguments: ["show", "-json", planFileName])
     }
 
     /// Decoded `tofu show -json <planFile>`.

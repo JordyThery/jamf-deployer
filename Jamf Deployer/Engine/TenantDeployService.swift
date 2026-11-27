@@ -1926,11 +1926,27 @@ final class TenantDeployService {
             }
         }
 
+        // The approved plan, read once: the ordered retry, the recovery of
+        // failed creates and the history's plan.json use it. When it can't
+        // be read the deploy still runs, and the Activity Log says what is
+        // missing.
+        var approvedPlanData: Data?
+        var approvedPlan: PlanFile?
+        do {
+            let data = try await runner.showPlanData(planFileName: session.planFileName)
+            approvedPlan = try JSONDecoder().decode(PlanFile.self, from: data)
+            approvedPlanData = data
+        } catch {
+            activityLog.append(ActivityLogEntry(
+                category: "Engine", operation: "show", detail: tenant.name, status: 500, duration: nil,
+                note: "The approved plan couldn’t be read, so this deploy has no ordered retry, no recovery of failed creates and no plan in History: \(Self.describe(error))"
+            ))
+        }
+
         // Objects that already carry a planned create's name before the
         // apply are never adopted after a failed create: they're someone
         // else's (made by hand, say), not what this apply left behind.
-        let existingBeforeApply = await existingObjects(
-            forPlannedCreatesIn: try? await runner.showPlan(planFileName: session.planFileName), tenant: tenant)
+        let existingBeforeApply = await existingObjects(forPlannedCreatesIn: approvedPlan, tenant: tenant)
 
         logEngine("apply", tenant: tenant)
 
@@ -1957,7 +1973,6 @@ final class TenantDeployService {
         // The engine can delete an object before updating what still uses it
         // (a block renamed a group another block scopes to); Jamf refuses the
         // delete. Finish the approved plan in order instead of failing.
-        let approvedPlan = try? await runner.showPlan(planFileName: session.planFileName)
         if !result.errorDiagnostics.isEmpty {
             Self.trace("Deploy \(tenant.name): \(result.errorDiagnostics.count) error(s) \(result.errorDiagnostics.map { "\($0.address ?? "-"): \($0.summary)" }); approved plan read: \(approvedPlan != nil); failed deletes: \(approvedPlan.flatMap { DeleteOrderRetry.failedDeletes(events: result.events, diagnostics: result.errorDiagnostics, approved: $0) }.map { Array($0) } ?? [])")
         }
@@ -1997,8 +2012,7 @@ final class TenantDeployService {
         // Objects Jamf created despite reporting an error become imports
         // the next preview adopts, instead of duplicate-name failures.
         var recovered = 0
-        if !result.errorDiagnostics.isEmpty,
-           let plan = try? await runner.showPlan(planFileName: session.planFileName) {
+        if !result.errorDiagnostics.isEmpty, let plan = approvedPlan {
             recovered = await recoverCreatedObjects(
                 tenant: tenant, diagnostics: result.errorDiagnostics, plan: plan, runner: runner,
                 existingBeforeApply: existingBeforeApply)
@@ -2011,8 +2025,7 @@ final class TenantDeployService {
         // `show -json` prints sensitive values in clear text, so history (and
         // the team repository) keeps the redacted plan. The event log holds
         // what the engine printed during the run, sensitive values masked.
-        if let planData = try? await runner.showPlanData(planFileName: session.planFileName),
-           let redacted = PlanRedactor.redact(planData) {
+        if let planData = approvedPlanData, let redacted = PlanRedactor.redact(planData) {
             try? Self.historyText(String(decoding: redacted, as: UTF8.self), path: "plan.json")
                 .write(to: entryURL.appending(path: "plan.json"))
         }
