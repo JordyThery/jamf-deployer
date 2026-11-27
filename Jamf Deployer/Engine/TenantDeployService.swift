@@ -2428,7 +2428,7 @@ final class TenantDeployService {
     }
 
     /// Tenants whose last fleet check failed, with a short reason — shown on
-    /// the dashboard so a failing check never masquerades as "in sync".
+    /// the dashboard so a failing check is never shown as "in sync".
     private(set) var fleetCheckFailures: [UUID: String] = [:]
 
     /// Checks every deployed tenant, a few at a time.
@@ -2569,7 +2569,7 @@ final class TenantDeployService {
     /// Prepares hand-over: every deployed block and adopted object is
     /// marked "stop managing". Nothing changes until the user previews and
     /// deploys; on success the tenant archives. Until then it can be
-    /// cancelled.
+    /// canceled.
     func prepareHandOver(tenant: Tenant) {
         var updated = tenant
         updated.selectionsBeforeHandOver = tenant.blockSelections

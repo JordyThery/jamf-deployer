@@ -49,7 +49,7 @@ struct PreviewDeploySheet: View {
     /// The Keychain's error when the passphrase can't be read right now
     /// (not the same as missing).
     @State private var recoveryPassphraseError: String?
-    /// Try Again's preview, cancelled when the sheet closes, as the first
+    /// Try Again's preview, canceled when the sheet closes, as the first
     /// preview's `.task` is.
     @State private var retryTask: Task<Void, Never>?
     @AppStorage("showsTechnicalDetails") private var showsTechnicalDetails = false

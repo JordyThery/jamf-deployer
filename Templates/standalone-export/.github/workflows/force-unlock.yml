@@ -1,6 +1,6 @@
 name: Force unlock
 
-# Manual: releases a tenant's state lock that a cancelled or crashed run left
+# Manual: releases a tenant's state lock that a canceled or crashed run left
 # behind. Every run locks the tenant's state and unlocks it when it ends; a
 # run that never ended keeps the lock, and every later run for the tenant then
 # fails at Init with "Error loading state: Failed to get state … giving up".

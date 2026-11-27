@@ -8,7 +8,7 @@ import JTKit
 ///
 /// Uses JTKit's free-text cleaning (`Redaction.text`): values of known
 /// secret names (`client_secret=…`, `"password": "…"`, `<password>…`) and
-/// `Bearer`/`Basic` credentials. It can't recognise a secret without such a
+/// `Bearer`/`Basic` credentials. It can't recognize a secret without such a
 /// name, e.g. a Wi-Fi password repeated in a server's error message.
 ///
 /// A Classic API error page (HTML, or XML `<error>`) quoted in the text is

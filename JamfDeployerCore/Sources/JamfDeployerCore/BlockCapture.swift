@@ -1119,7 +1119,7 @@ public nonisolated enum BlockCapture {
                 "type": "string",
                 "default": "",
                 "required": true,
-                "description": "Name of this tenant's Automated Device Enrollment instance. PreStage enrollments attach to it, so the tenant needs its ADE token uploaded first.",
+                "description": "Name of this tenant’s Automated Device Enrollment instance. PreStage enrollments attach to it, so the tenant needs its ADE token uploaded first.",
                 "section": "Enrollment",
             ]] : []) + (vppReferenced ? [[
                 "key": "vpp_location_name",
@@ -1127,7 +1127,7 @@ public nonisolated enum BlockCapture {
                 "type": "string",
                 "default": "",
                 "required": true,
-                "description": "Name of this tenant's Apps and Books (volume purchasing) location. It needs licenses for every app in this block.",
+                "description": "Name of this tenant’s Apps and Books (volume purchasing) location. It needs licenses for every app in this block.",
                 "section": "Apps and Books",
             ]] : []) + secretSettings.map { setting in [
                 "key": setting.key,
@@ -1135,7 +1135,7 @@ public nonisolated enum BlockCapture {
                 "type": "secret",
                 "default": "",
                 "required": true,
-                "description": "\(setting.objectDescription): \(setting.rule). Enter this tenant's value; it is kept in the Keychain, never in the block.",
+                "description": "\(setting.objectDescription): \(setting.rule). Enter this tenant’s value; it is kept in the Keychain, never in the block.",
                 "section": "Secrets",
             ] },
             "objectsCreated": typeCounts.sorted { $0.key < $1.key }.map { "\(objectLabel(for: $0.key)) (\($0.value))" },

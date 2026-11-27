@@ -709,7 +709,7 @@ struct ManageSourcesSheet: View {
         } message: {
             Text(removalUsersText + (sourcePendingRemoval?.kind == .gitRepository
                 ? "The downloaded checkouts are deleted; the repository itself is untouched."
-                : "The folder and its blocks stay on disk — the app just stops reading them."))
+                : "The folder and its blocks stay on disk — the app stops reading them."))
         }
     }
 
