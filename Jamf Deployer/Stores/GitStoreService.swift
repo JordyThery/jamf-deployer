@@ -366,23 +366,47 @@ actor GitStoreService {
             guard !objects.isEmpty else { return result }
             let types = try await runWithInput(objects.joined(separator: "\n") + "\n",
                                                "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)")
-            let blobs = types.split(separator: "\n").compactMap { line -> String? in
+            let blobs = types.split(separator: "\n").compactMap { line -> (id: String, size: Int)? in
                 let fields = line.split(separator: " ")
-                guard fields.count == 3, fields[1] == "blob" else { return nil }
-                return String(fields[0])
+                guard fields.count == 3, fields[1] == "blob", let size = Int(fields[2]) else { return nil }
+                return (String(fields[0]), size)
             }
-            // Every blob's contents in one git run, not one run per blob.
-            let wanted = blobs.filter { pathByBlob[$0] != Self.acknowledgementsFile }
-            guard !wanted.isEmpty else { return result }
-            let batch = try await execute(["cat-file", "--batch"], input: Data((wanted.joined(separator: "\n") + "\n").utf8))
-            for (blob, data) in Self.batchContents(batch) {
-                guard let path = pathByBlob[blob], let text = SecretScan.scannableText(data) else { continue }
-                for finding in SecretScan.scan(text: text, path: path) where seen.insert(finding).inserted {
-                    result.append(StoreFinding(finding: finding, inEarlierVersion: true))
+            let wanted = blobs.filter { pathByBlob[$0.id] != Self.acknowledgementsFile }
+            // The contents in a few git runs, not one per blob, each holding at
+            // most about `historyBatchBytes` (a larger blob gets a run of its own),
+            // so a long history with binaries never sits in memory at once.
+            for chunk in Self.chunks(wanted, maxBytes: Self.historyBatchBytes) {
+                let batch = try await execute(["cat-file", "--batch"], input: Data((chunk.joined(separator: "\n") + "\n").utf8))
+                for (blob, data) in Self.batchContents(batch) {
+                    guard let path = pathByBlob[blob], let text = SecretScan.scannableText(data) else { continue }
+                    for finding in SecretScan.scan(text: text, path: path) where seen.insert(finding).inserted {
+                        result.append(StoreFinding(finding: finding, inEarlierVersion: true))
+                    }
                 }
             }
             return result
         }
+    }
+
+    nonisolated static let historyBatchBytes = 64 * 1024 * 1024
+
+    /// Blob IDs in runs of at most `maxBytes` together; a blob larger than
+    /// that is a run of its own.
+    nonisolated static func chunks(_ blobs: [(id: String, size: Int)], maxBytes: Int) -> [[String]] {
+        var result: [[String]] = []
+        var current: [String] = []
+        var bytes = 0
+        for blob in blobs {
+            if !current.isEmpty, bytes + blob.size > maxBytes {
+                result.append(current)
+                current = []
+                bytes = 0
+            }
+            current.append(blob.id)
+            bytes += blob.size
+        }
+        if !current.isEmpty { result.append(current) }
+        return result
     }
 
     /// `git cat-file --batch` output: per object a "<id> <type> <size>"
