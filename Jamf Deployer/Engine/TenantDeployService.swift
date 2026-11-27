@@ -1711,13 +1711,13 @@ final class TenantDeployService {
     }
 
     /// JAMFPROTECT_* for baselines with Jamf Protect blocks; empty otherwise.
-    /// Decided on the catalog at the tenant's own pins (the blocks it
-    /// deploys), and a catalog that can't be loaded stops the run instead of
-    /// reading as "no Protect".
+    /// Decided on the blocks the workspace deploys (each selection resolved
+    /// from its own source at its own tag, as `generateWorkspace` does). A
+    /// built-in catalog that can't be loaded, or a selected block that can't
+    /// be found, stops the run instead of reading as "no Protect".
     private func protectEnvironment(for tenant: Tenant) throws -> [String: String] {
-        let catalog = try loadCatalog(for: tenant)
-        let needsProtect = effectiveSelections(for: tenant, catalog: catalog).contains { selection in
-            catalog.block(id: selection.blockID)?.products.contains("jamf-protect") == true
+        let needsProtect = try generatedSelections(for: tenant, catalog: loadCatalog(for: tenant)).contains {
+            $0.block.products.contains("jamf-protect")
         }
         guard needsProtect else { return [:] }
         guard let protectURL = tenant.protectURL,
