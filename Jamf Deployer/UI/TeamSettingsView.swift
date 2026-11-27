@@ -267,7 +267,7 @@ struct TeamSettingsView: View {
         Task {
             defer { isWorking = false }
             do {
-                try await Self.backUpStore()
+                try await Self.backUpStore(deployService.storeURL)
                 try await deployService.gitStore.ensureRepo()
                 _ = try await deployService.commitStore(message: "Prepare team space")
                 do {
@@ -311,14 +311,15 @@ struct TeamSettingsView: View {
         Task {
             defer { isWorking = false }
             do {
-                try await Self.backUpStore()
+                let store = deployService.storeURL
+                try await Self.backUpStore(store)
                 let imported: Set<UUID>
                 do {
                     let tools = deployService.tools
-                    imported = try await Task.detached { try Self.join(remote: remote, tools: tools) }.value
+                    imported = try await Task.detached { try Self.join(remote: remote, store: store, tools: tools) }.value
                 } catch {
                     // The swap can fail after the store moved aside.
-                    try? await Task.detached { try Self.restoreReplacedStore() }.value
+                    try? await Task.detached { try Self.restoreReplacedStore(store) }.value
                     tenantStore.reload()
                     catalogSources.reload()
                     throw TeamError.joinFailed(Self.describe(error))
@@ -341,7 +342,7 @@ struct TeamSettingsView: View {
                     deployService.retireLocalState(of: importedTenants)
                 } catch {
                     TeamPassphrase.item.delete()
-                    try? await Task.detached { try Self.restoreReplacedStore() }.value
+                    try? await Task.detached { try Self.restoreReplacedStore(store) }.value
                     tenantStore.reload()
                     catalogSources.reload()
                     await deployService.syncTeamState()
@@ -396,10 +397,10 @@ struct TeamSettingsView: View {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
-    /// Zips the whole store before any conversion: the universal escape hatch.
-    nonisolated static func backUpStore() async throws {
+    /// Zips the whole store (the one the app runs on) before any conversion,
+    /// so the store as it was can always be restored.
+    nonisolated static func backUpStore(_ store: URL) async throws {
         try await Task.detached {
-            let store = GitStoreService.storeURL
             guard FileManager.default.fileExists(atPath: store.path) else { return }
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -443,9 +444,8 @@ struct TeamSettingsView: View {
     }
 
     /// Puts this Mac's own store back after a join that did not finish.
-    nonisolated static func restoreReplacedStore() throws {
+    nonisolated static func restoreReplacedStore(_ store: URL) throws {
         let fileManager = FileManager.default
-        let store = GitStoreService.storeURL
         let retired = store.deletingLastPathComponent().appending(path: "store-replaced")
         // No retired copy means the swap never happened: leave the store be.
         guard fileManager.fileExists(atPath: retired.path) else { return }
@@ -455,10 +455,9 @@ struct TeamSettingsView: View {
 
     /// Clone to a fresh folder, swap stores, import local tenants. Returns
     /// the imported tenants' IDs.
-    nonisolated static func join(remote: String, tools: ToolDoorway) throws -> Set<UUID> {
+    nonisolated static func join(remote: String, store: URL, tools: ToolDoorway) throws -> Set<UUID> {
         guard !RepositoryPublisher.hasCredentials(remote) else { throw GitStoreService.GitError.remoteHasCredentials }
         let fileManager = FileManager.default
-        let store = GitStoreService.storeURL
         let fresh = store.deletingLastPathComponent().appending(path: "store-joining")
         try? fileManager.removeItem(at: fresh)
 
