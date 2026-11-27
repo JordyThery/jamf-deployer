@@ -94,7 +94,9 @@ nonisolated extension JamfAPIConfiguration {
         secret = source.secret
         connectionName = tenant.name
         if tenant.isJamfPro {
-            gatewayURL = Self.instanceURL(connection.serverURL) ?? URL(filePath: "/")
+            let instance = Self.instanceURL(connection.serverURL)
+            gatewayURL = instance ?? URL(filePath: "/")
+            hasInvalidInstanceURL = instance == nil
             flavor = .jamfProAPIClient
         } else {
             gatewayURL = URL(string: "https://\(connection.hostOverride)") ?? URL(filePath: "/")
