@@ -5,8 +5,8 @@
 - **Preview flags an adoption that would recreate an object.** When an
   adopted object can only be brought in line by deleting it in Jamf and
   creating it again, Preview now lists it as Replace, with its field
-  changes and a note that it gets a new Jamf ID. On a production tenant,
-  deploying it asks for the tenant’s name, and Return no longer deploys.
+  changes and a note that it gets a new Jamf ID. Return no longer deploys
+  it, and on a production tenant deploying asks for the tenant’s name.
 - **Changes the app doesn’t recognize are shown, not hidden.** An engine
   change of an unknown kind appears as its own row and is treated like a
   removal.
@@ -23,14 +23,14 @@
   Building Blocks says so, instead of the list being removed (and, in Team
   Mode, removed for the whole team). Sources added with a newer version of
   the app are kept.
-- **Clearer errors** when the engine can’t read a saved plan, and when a
-  catalog can’t be loaded for a tenant with Jamf Protect blocks.
+- **Clearer errors** when the engine can’t read a saved plan. Jamf Protect
+  credentials are now decided on the blocks a tenant actually deploys, at
+  their own catalog versions.
 - **Privacy and security:** tenant and catalog names no longer appear in
   readable form in the system log; Adopt removes the exported
   configuration from the temporary folder when its sheet closes; large
   text files are checked for secrets too; enrollment icons are never
-  downloaded through a redirect to another server; the bundled tools are
-  checked against pinned checksums.
+  downloaded through a redirect to another server.
 - **Faster store saves** in large fleets: only changed files are checked
   before each save.
 - **Roll Out** shows “Deploy failed” for a tenant whose deploy stopped,
