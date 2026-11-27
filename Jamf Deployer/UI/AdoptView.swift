@@ -44,7 +44,10 @@ struct AdoptView: View {
     @State private var unmanageableAddresses: Set<String> = []
     /// Selected objects that could not be staged, and why.
     @State private var stagingNote: String?
+    /// The exporter's last few lines (only the last three are shown).
     @State private var logTail: [String] = []
+    /// The sheet has closed: an export that finishes later is removed.
+    @State private var isClosed = false
     /// The last lines of a failed discovery's output, secrets masked.
     @State private var failureOutput: [String] = []
     /// Possible secrets, by object: from jamformer's scan and the app's own.
@@ -72,6 +75,12 @@ struct AdoptView: View {
             footer
         }
         .frame(width: 680, height: 560)
+        // The export holds the tenant's configuration, sensitive values
+        // included: it never outlives the sheet unless staging moved it.
+        .onDisappear {
+            isClosed = true
+            discardExport()
+        }
         .task {
             resourceTypes = (try? await runner.listResourceTypes(provider: tenant.connection.exporterProvider)) ?? []
             // The defaults are Jamf Platform API type names; keep only the
@@ -319,6 +328,7 @@ struct AdoptView: View {
         step = .discovering
         logTail = []
         failureOutput = []
+        discardExport()
         // Only names the exporter offers: an unknown name aborts the export.
         let available = Set(resourceTypes.map(\.filterKey))
         let types = available.isEmpty ? Array(selectedTypes) : Array(selectedTypes.intersection(available))
@@ -335,10 +345,19 @@ struct AdoptView: View {
                     includePackageFiles: false,
                     terraformPath: terraformURL.path,
                     onLine: { line in
-                        Task { @MainActor in logTail.append(line) }
+                        Task { @MainActor in
+                            logTail.append(line)
+                            if logTail.count > Self.logTailLimit { logTail.removeFirst(logTail.count - Self.logTailLimit) }
+                        }
                     }
                 )
+                exportURL = result.outputURL
+                guard !isClosed else {
+                    discardExport()
+                    return
+                }
                 guard result.exitCode == 0 else {
+                    discardExport()
                     let output = JamformerRunner.maskedOutput(result.logLines, secrets: [secret])
                     failureOutput = Array(output.suffix(8))
                     activityLog.append(ActivityLogEntry(
@@ -357,7 +376,6 @@ struct AdoptView: View {
                         : "\(headline) The exporter’s last lines are below; the Activity Log has the full output.")
                     return
                 }
-                exportURL = result.outputURL
                 let unmanageable = ExportedObjectInventory.unmanageable(directory: result.outputURL)
                 unmanageableAddresses = Set(unmanageable.keys)
                 alreadyAdopted = Set(((try? ExportedObjectInventory.scan(
@@ -384,14 +402,25 @@ struct AdoptView: View {
                         ? "No objects of the chosen types were found."
                         : "Every object of the chosen types is already adopted.")
                     : .pickObjects
+                if objects.isEmpty { discardExport() }
                 activityLog.append(ActivityLogEntry(
                     category: "Adopt", operation: "discover", detail: tenant.name,
                     status: 200, duration: nil, note: "\(objects.count) objects"
                 ))
             } catch {
+                discardExport()
                 step = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
         }
+    }
+
+    private static let logTailLimit = 3
+
+    /// Removes the export folder, unless staging already moved it.
+    private func discardExport() {
+        guard let url = exportURL else { return }
+        exportURL = nil
+        try? FileManager.default.removeItem(at: url)
     }
 
     /// A flagged object's findings, each with its "not a secret" choice.
