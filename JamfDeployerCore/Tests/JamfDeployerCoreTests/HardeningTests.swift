@@ -392,6 +392,20 @@ struct EnrollmentIconTests {
         #expect(!EnrollmentIcons.mayDownload(URL(string: "https://jamfcloud.com.example/i")!, allowedHosts: [".jamfcloud.com"]))
     }
 
+    @Test func redirectsFollowOnlyToAllowedHosts() async {
+        let guardian = EnrollmentIcons.RedirectGuard(allowedHosts: ["origin.example.com", ".jamfcloud.com"])
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.dataTask(with: URL(string: "https://origin.example.com/icon/1")!)
+        let response = HTTPURLResponse(url: URL(string: "https://origin.example.com/icon/1")!, statusCode: 302, httpVersion: nil, headerFields: nil)!
+        let elsewhere = URLRequest(url: URL(string: "https://cdn.elsewhere.example/icon/1")!)
+        let cloud = URLRequest(url: URL(string: "https://eu.jamfcloud.com/icon/1")!)
+        let plain = URLRequest(url: URL(string: "http://origin.example.com/icon/1")!)
+        #expect(await guardian.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: elsewhere) == nil)
+        #expect(await guardian.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: plain) == nil)
+        #expect(await guardian.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: cloud) == cloud)
+        task.cancel()
+    }
+
     @Test func jamfProTenantsOnJamfCloudAlsoGetJamfCloudIcons() {
         // Jamf serves icons from its own Jamf Cloud services, not the tenant's host.
         let icon = URL(string: "https://ics.services.jamfcloud.com/icon/hash_1")!
