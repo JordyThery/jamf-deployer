@@ -160,10 +160,17 @@ actor GitStoreService {
         try await exclusively { try await commitUnlocked(message: message) }
     }
 
+    /// Only the files that differ from the last commit are scanned: what is
+    /// already committed was checked when it was (and by the one-time
+    /// check). Findings that don't stop the commit (a deploy's plan in
+    /// history) are kept for `takeHistoryFindings()`.
     private func commitUnlocked(message: String) async throws -> Bool {
         try await requireNoUnfinishedMerge()
-        let findings = try await unacknowledgedFindingsUnlocked().filter(Self.blocksCommit)
+        let acknowledged = Set(acknowledgements().notSecrets)
+        let unacknowledged = try await changedFindingsUnlocked().filter { !acknowledged.contains($0) }
+        let findings = unacknowledged.filter(Self.blocksCommit)
         guard findings.isEmpty else { throw GitError.possibleSecrets(findings) }
+        historyFindings.formUnion(unacknowledged)
         try await run("add", "-A")
         let status = try await run("status", "--porcelain")
         guard !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -238,9 +245,32 @@ actor GitStoreService {
 
     private func currentFindingsUnlocked() async throws -> [SecretFinding] {
         let listing = try await run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
-        let paths = Set(listing.split(separator: "\0").map(String.init))
-            .filter { $0 != Self.acknowledgementsFile }
-            .sorted()
+        return await findings(in: Set(listing.split(separator: "\0").map(String.init)))
+    }
+
+    /// Possible secrets in the files the next commit would change or add
+    /// (all files while the store has no commit yet).
+    private func changedFindingsUnlocked() async throws -> [SecretFinding] {
+        guard (try? await run("rev-parse", "--verify", "--quiet", "HEAD")) != nil else {
+            return try await currentFindingsUnlocked()
+        }
+        let changed = try await run("ls-files", "-z", "--modified", "--others", "--exclude-standard")
+        let staged = try await run("diff", "--cached", "--name-only", "-z")
+        return await findings(in: Set((changed + staged).split(separator: "\0").map(String.init)))
+    }
+
+    /// Findings not yet handed out by `takeHistoryFindings()`: possible
+    /// secrets the last commits found but that don't stop a commit.
+    private var historyFindings: Set<SecretFinding> = []
+
+    /// The non-blocking findings of the commits since the last call.
+    func takeHistoryFindings() -> [SecretFinding] {
+        defer { historyFindings = [] }
+        return historyFindings.sorted { ($0.path, $0.line, $0.rule) < ($1.path, $1.line, $1.rule) }
+    }
+
+    private func findings(in listed: Set<String>) async -> [SecretFinding] {
+        let paths = listed.filter { !$0.isEmpty && $0 != Self.acknowledgementsFile }.sorted()
         let storeURL = storeURL
         return await Task.detached {
             var findings: [SecretFinding] = []

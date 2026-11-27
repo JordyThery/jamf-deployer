@@ -137,7 +137,9 @@ final class TenantDeployService {
 
     /// After a commit: history findings not acknowledged and not shown yet.
     func noteHistoryFindings() async {
-        guard !isDemo, let findings = try? await gitStore.unacknowledgedFindings() else { return }
+        guard !isDemo else { return }
+        // From the commits' own scans: the store isn't scanned again.
+        let findings = await gitStore.takeHistoryFindings()
         let new = findings.filter { !GitStoreService.blocksCommit($0) && !notifiedHistoryFindings.contains($0) }
         guard !new.isEmpty else { return }
         notifiedHistoryFindings.formUnion(new)
