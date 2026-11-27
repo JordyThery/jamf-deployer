@@ -1506,11 +1506,16 @@ final class TenantDeployService {
         tenantStore.workspaceURL(for: tenant).appending(path: "adopted")
     }
 
-    /// Whether the app manages anything in the tenant: deployed blocks, or
-    /// adopted objects once the tenant has been deployed. A tenant brought
-    /// in entirely through Adopt has no blocks but is fully managed.
+    /// Whether the app manages anything in the tenant: deployed blocks,
+    /// adopted objects once the tenant has been deployed, or objects a deploy
+    /// made (a first deploy that partly failed leaves objects in its state
+    /// without deployed blocks). A tenant brought in entirely through Adopt
+    /// has no blocks but is fully managed.
     func isManaged(_ tenant: Tenant) -> Bool {
-        !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
+        !tenant.deployedBlockVersions.isEmpty
+            || (tenant.lastDeploy?.succeeded ?? 0) > 0
+            || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
+            || hasLocalState(tenant)
     }
 
     /// Whether the tenant has anything a preview would show: selected

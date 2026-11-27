@@ -152,13 +152,19 @@ struct DeployServiceGuardTests {
     func onlyMovedStateIsRetired() throws {
         let fixture = Self.make()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
-        // A first deploy that partly failed: not "managed", but its state holds objects.
+        // A first deploy that partly failed: no deployed blocks, but its state
+        // holds objects, so it counts as managed (Remove Tenant asks for the name).
         let tenant = Self.tenant()
         fixture.tenantStore.add(tenant)
+        #expect(!fixture.service.isManaged(tenant))
         let state = fixture.tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
         try Data("{\"encrypted_data\": \"…\"}".utf8).write(to: state)
-        #expect(!fixture.service.isManaged(tenant))
+        #expect(fixture.service.isManaged(tenant))
         #expect(fixture.service.hasLocalState(tenant), "it still counts as having state")
+        // In Team Mode the state is on the team's branch: the deploy record tells.
+        var teamTenant = Self.tenant("Team Tenant")
+        teamTenant.lastDeploy = DeployRecord(date: .now, engineerName: "Engineer", succeeded: 40, failed: 1)
+        #expect(fixture.service.isManaged(teamTenant))
 
         fixture.service.retireLocalState(of: fixture.tenantStore.tenants)
         #expect(FileManager.default.fileExists(atPath: state.path), "state that didn't move stays")
