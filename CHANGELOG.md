@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.3.2 — 2026-11-27
+
+- **Preview flags an adoption that would recreate an object.** When an
+  adopted object can only be brought in line by deleting it in Jamf and
+  creating it again, Preview now lists it as Replace, with its field
+  changes and a note that it gets a new Jamf ID. On a production tenant,
+  deploying it asks for the tenant’s name, and Return no longer deploys.
+- **Changes the app doesn’t recognize are shown, not hidden.** An engine
+  change of an unknown kind appears as its own row and is treated like a
+  removal.
+- **Hand Over is safer.** If the adopted configuration can’t be read,
+  Preview stops with the reason instead of planning to delete the adopted
+  objects.
+- **Remove Tenant asks for the tenant’s name** after a first deploy that
+  failed partway, and Check for Changes and Hand Over are available for
+  that tenant.
+- **“Latest release” of a Git catalog** is now the newest version tag.
+  Prerelease and other tags are no longer picked by Baseline Updates,
+  Roll Out or Add Demo Catalog.
+- **A catalog sources list that can’t be read is left in place** and
+  Building Blocks says so, instead of the list being removed (and, in Team
+  Mode, removed for the whole team). Sources added with a newer version of
+  the app are kept.
+- **Clearer errors** when the engine can’t read a saved plan, and when a
+  catalog can’t be loaded for a tenant with Jamf Protect blocks.
+- **Privacy and security:** tenant and catalog names no longer appear in
+  readable form in the system log; Adopt removes the exported
+  configuration from the temporary folder when its sheet closes; large
+  text files are checked for secrets too; enrollment icons are never
+  downloaded through a redirect to another server; the bundled tools are
+  checked against pinned checksums.
+- **Faster store saves** in large fleets: only changed files are checked
+  before each save.
+- **Roll Out** shows “Deploy failed” for a tenant whose deploy stopped,
+  instead of “Deployed with problems”.
+- The window no longer pauses while the Terraform download unpacks or a
+  support bundle is saved.
+
 ## 1.3.1 — 2026-11-23
 
 - **jamfplatform 1.10.0 is built in** (was 1.9.0). It follows Jamf Pro
