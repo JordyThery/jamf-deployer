@@ -190,6 +190,25 @@ struct DeployServiceGuardTests {
         #expect(!fixture.service.isBusy)
     }
 
+    @Test("A hand-over whose adopted folder can't be read plans nothing")
+    func handOverWithAnUnreadableAdoptedFolderStops() async throws {
+        let attempts = Attempts()
+        let fixture = Self.make(tools: .trap { attempts.record($0) })
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var tenant = Self.tenant(managed: true)
+        tenant.handOverPending = true
+        fixture.tenantStore.add(tenant)
+        let adopted = fixture.service.adoptedURL(for: tenant)
+        try FileManager.default.createDirectory(at: adopted, withIntermediateDirectories: true)
+        let file = adopted.appending(path: "pro_category.tf")
+        try Data("resource \"jamfplatform_pro_category\" \"a\" {\n  name = \"A\"\n}\n".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path) }
+
+        await #expect { _ = try await fixture.service.preview(tenant: tenant) } throws: { Self.isError($0, "adoptedUnreadable") }
+        #expect(!attempts.all.contains(.openTofu), "nothing was planned: \(attempts.all)")
+    }
+
     // MARK: Team sync
 
     /// A store in Team Mode whose team space can't be reached.

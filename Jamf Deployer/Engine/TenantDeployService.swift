@@ -1280,7 +1280,16 @@ final class TenantDeployService {
         if tenant.handOverPending {
             // Hand-over releases adopted objects like blocks: the engine
             // forgets them and Jamf keeps them.
-            let addresses = ((try? ExportedObjectInventory.scan(directory: adopted)) ?? []).map(\.address)
+            // An adopted folder that can't be read stops the preview: without
+            // its `removed` blocks the plan would delete what it releases.
+            let addresses: [String]
+            do {
+                addresses = fileManager.fileExists(atPath: adopted.path)
+                    ? try ExportedObjectInventory.scan(directory: adopted).map(\.address)
+                    : []
+            } catch {
+                throw DeployError.adoptedUnreadable(error.localizedDescription)
+            }
             if !addresses.isEmpty {
                 let blocks = addresses.sorted().map { address in
                     "removed {\n  from = \(address)\n\n  lifecycle {\n    destroy = false\n  }\n}\n"
@@ -1289,38 +1298,50 @@ final class TenantDeployService {
                     .write(to: generated.appending(path: "adopted-handover_removed.tf"))
             }
         } else if fileManager.fileExists(atPath: adopted.path) {
-            let selectedModules = Set(selections.map { "module.\(WorkspaceGenerator.sanitized($0.block.id))" })
-            for file in (try? fileManager.contentsOfDirectory(at: adopted, includingPropertiesForKeys: nil)) ?? [] {
-                if file.lastPathComponent == Self.recoveredImportsFile {
-                    // Recovered creates of blocks no longer selected have
-                    // nothing left to import into.
-                    let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
-                    let kept = ExportedObjectInventory.topLevelBlocks(in: text).filter { block in
-                        guard let to = block.firstMatch(of: /\bto\s*=\s*(module\.[A-Za-z0-9_-]+)/) else { return true }
-                        return selectedModules.contains(String(to.1))
-                    }
-                    if !kept.isEmpty {
-                        try Data((kept.joined(separator: "\n\n") + "\n").utf8)
-                            .write(to: generated.appending(path: "adopted-\(file.lastPathComponent)"))
-                    }
-                } else if file.pathExtension == "tf", !file.lastPathComponent.hasSuffix("versions.tf") {
-                    // versions.tf would duplicate the workspace's own provider
-                    // requirements and fail init.
-                    try? fileManager.copyItem(
-                        at: file,
-                        to: generated.appending(path: "adopted-\(file.lastPathComponent)")
-                    )
-                } else if file.lastPathComponent == "support_files" {
-                    let target = generated.appending(path: "support_files")
-                    try? fileManager.removeItem(at: target)
-                    try? fileManager.copyItem(at: file, to: target)
-                }
+            // A file left out would plan its adopted objects as removals.
+            do {
+                try copyAdopted(from: adopted, to: generated, selections: selections)
+            } catch {
+                throw DeployError.adoptedUnreadable(error.localizedDescription)
             }
         }
         writeTerminalScript(
             for: tenant, catalog: catalog, output: output,
             teamMode: (backend ?? (isTeamMode ? .http : .local)) == .http)
         return output
+    }
+
+    /// Copies the tenant's adopted configuration into the workspace as
+    /// root-level files. Throws when a file can't be read or copied.
+    private func copyAdopted(from adopted: URL, to generated: URL, selections: [GeneratedSelection]) throws {
+        let fileManager = FileManager.default
+        let selectedModules = Set(selections.map { "module.\(WorkspaceGenerator.sanitized($0.block.id))" })
+        for file in try fileManager.contentsOfDirectory(at: adopted, includingPropertiesForKeys: nil) {
+            if file.lastPathComponent == Self.recoveredImportsFile {
+                // Recovered creates of blocks no longer selected have
+                // nothing left to import into.
+                let text = try String(contentsOf: file, encoding: .utf8)
+                let kept = ExportedObjectInventory.topLevelBlocks(in: text).filter { block in
+                    guard let to = block.firstMatch(of: /\bto\s*=\s*(module\.[A-Za-z0-9_-]+)/) else { return true }
+                    return selectedModules.contains(String(to.1))
+                }
+                if !kept.isEmpty {
+                    try Data((kept.joined(separator: "\n\n") + "\n").utf8)
+                        .write(to: generated.appending(path: "adopted-\(file.lastPathComponent)"))
+                }
+            } else if file.pathExtension == "tf", !file.lastPathComponent.hasSuffix("versions.tf") {
+                // versions.tf would duplicate the workspace's own provider
+                // requirements and fail init.
+                try fileManager.copyItem(
+                    at: file,
+                    to: generated.appending(path: "adopted-\(file.lastPathComponent)")
+                )
+            } else if file.lastPathComponent == "support_files" {
+                let target = generated.appending(path: "support_files")
+                try? fileManager.removeItem(at: target)
+                try fileManager.copyItem(at: file, to: target)
+            }
+        }
     }
 
     /// `plan.sh` beside the generated configuration: the preview's plan, to
@@ -2630,6 +2651,7 @@ final class TenantDeployService {
         case notInDemoMode
         case handedOver
         case passphraseNotVerified
+        case adoptedUnreadable(String)
 
         var errorDescription: String? {
             switch self {
@@ -2677,6 +2699,8 @@ final class TenantDeployService {
                 "The team passphrase couldn’t be checked against the team space’s deployment state, so it wasn’t accepted. Try again in a moment."
             case .tenantBusy:
                 "This tenant is already being previewed, checked or deployed. Try again when that finishes."
+            case .adoptedUnreadable(let detail):
+                "The tenant’s adopted configuration couldn’t be read, so nothing was planned: without it, the preview would remove the adopted objects. \(detail)"
             }
         }
     }
