@@ -338,8 +338,7 @@ actor GitStoreService {
                                                "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)")
             let blobs = types.split(separator: "\n").compactMap { line -> String? in
                 let fields = line.split(separator: " ")
-                guard fields.count == 3, fields[1] == "blob", let size = Int(fields[2]),
-                      size <= SecretScan.maximumFileSize else { return nil }
+                guard fields.count == 3, fields[1] == "blob" else { return nil }
                 return String(fields[0])
             }
             // Every blob's contents in one git run, not one run per blob.
