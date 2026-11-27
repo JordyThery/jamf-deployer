@@ -1161,7 +1161,7 @@ final class TenantDeployService {
         for source in catalogSources.customSources
         where source.kind == .gitRepository && usedSourceIDs.contains(source.id.uuidString) {
             guard let gitURL = source.gitURL,
-                  let latest = try await GitCatalogManager.availableTags(remote: gitURL, tools: tools).last else {
+                  let latest = try await GitCatalogManager.latestRelease(remote: gitURL, tools: tools) else {
                 Self.trace("\(source.name): no release tags found")
                 continue
             }

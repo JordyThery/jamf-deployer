@@ -169,7 +169,7 @@ struct CatalogView: View {
         Task {
             defer { isAddingDemoCatalog = false }
             do {
-                guard let latest = try await GitCatalogManager.availableTags(remote: Self.demoCatalogURL, tools: catalogSources.tools).last else {
+                guard let latest = try await GitCatalogManager.latestRelease(remote: Self.demoCatalogURL, tools: catalogSources.tools) else {
                     demoCatalogError = "The catalog repository has no releases yet."
                     return
                 }
@@ -818,7 +818,7 @@ struct AddGitCatalogSheet: View {
                     message = "The repository has no release tags yet — catalogs are pinned by tag."
                 } else {
                     tags = found
-                    selectedTag = found.last ?? ""
+                    selectedTag = GitCatalogManager.latestRelease(in: found) ?? found.last ?? ""
                 }
             } catch {
                 message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
