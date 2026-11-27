@@ -41,33 +41,46 @@ struct CatalogSourceStoreTests {
         #expect(messages.count == 2)
     }
 
-    @Test func anUnreadableSourceListIsCopiedAsideAndNeverCommitted() async throws {
+    @Test func anUnreadableSourceListStaysInPlaceAndIsNeverCommittedAway() async throws {
         let storeURL = FileManager.default.temporaryDirectory.appending(path: "catalog-store-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: storeURL) }
         let store = GitStoreService(storeURL: storeURL, tools: .real(isDemoOn: { false }))
         try await store.ensureRepo()
         let fileURL = storeURL.appending(path: "catalog-sources.json")
         let damaged = Data("{ not json".utf8)
-        for _ in 0..<2 {
-            try damaged.write(to: fileURL)
-            let sources = CatalogSourceStore(fileURL: fileURL, tools: .real(isDemoOn: { false }))
-            #expect(sources.customSources.isEmpty)
-            #expect(!FileManager.default.fileExists(atPath: fileURL.path), "set aside, so a save can't overwrite it")
-        }
-        // Each one kept, bytes intact; the second didn't replace the first.
-        let copies = try FileManager.default.contentsOfDirectory(atPath: storeURL.path)
-            .filter { $0.hasPrefix("catalog-sources.json.unreadable-") }
-        #expect(copies.count == 2)
-        for copy in copies {
-            #expect(try Data(contentsOf: storeURL.appending(path: copy)) == damaged)
-        }
-        // Kept on this Mac only: never committed, so never shared with a team.
+        try damaged.write(to: fileURL)
+        _ = try await store.commitAll(message: "A damaged list")
+
+        let sources = CatalogSourceStore(fileURL: fileURL, tools: .real(isDemoOn: { false }))
+        #expect(sources.customSources.isEmpty)
+        #expect(sources.isListUnreadable)
+        #expect(try Data(contentsOf: fileURL) == damaged, "left in place, bytes intact")
+        // The next store commit doesn't stage a deletion, so a team sync can't publish one.
         _ = try await store.commitAll(message: "After an unreadable file")
-        let tracked = try StoreSecretCheckTests.git(["ls-files"], in: storeURL)
-        #expect(!tracked.contains("unreadable"))
+        #expect(try StoreSecretCheckTests.git(["ls-files"], in: storeURL).contains("catalog-sources.json"))
+        #expect(try StoreSecretCheckTests.git(["status", "--porcelain"], in: storeURL).isEmpty)
     }
 
-    /// A list that can't be read or copied stays as it is, and nothing is saved over it.
+    /// A list written by a newer app (a source kind this one doesn't know)
+    /// still loads, and saving keeps that source as it was.
+    @Test func aSourceOfANewerKindLoadsAndIsKept() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "catalog-newer-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fileURL = folder.appending(path: "catalog-sources.json")
+        let id = UUID()
+        try Data(#"[{"id":"\#(id.uuidString)","name":"Future","path":"/x","kind":"s3Bucket"}]"#.utf8).write(to: fileURL)
+
+        let sources = CatalogSourceStore(fileURL: fileURL, tools: .real(isDemoOn: { false }))
+        #expect(!sources.isListUnreadable)
+        let future = try #require(sources.customSources.first)
+        #expect(future.kind == .other("s3Bucket"))
+        #expect(throws: CatalogSourceStore.NewerSourceKind.self) { _ = try sources.load(source: future) }
+        _ = try sources.addSource(name: "Mine", folderURL: folder.appending(path: "blocks"))
+        #expect(try String(contentsOf: fileURL, encoding: .utf8).contains("s3Bucket"))
+    }
+
+    /// A list that can't be read stays as it is, and nothing is saved over it.
     @Test func anUnreadableSourceListThatCantBeCopiedIsNeverSavedOver() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "catalog-locked-\(UUID().uuidString)")
         let blocks = FileManager.default.temporaryDirectory.appending(path: "catalog-folder-\(UUID().uuidString)")
@@ -75,7 +88,7 @@ struct CatalogSourceStoreTests {
         let fileURL = folder.appending(path: "catalog-sources.json")
         let damaged = Data("{ not json".utf8)
         try damaged.write(to: fileURL)
-        // A folder nothing can be written to: the copy (and the removal) fail.
+        // A folder nothing can be written to.
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
         defer {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)

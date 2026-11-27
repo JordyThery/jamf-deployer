@@ -24,7 +24,11 @@ struct CatalogView: View {
             if let catalog {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        if catalogSources.customSources.isEmpty {
+                        if catalogSources.isListUnreadable {
+                            Label(CatalogSourceStore.ListUnreadable().errorDescription ?? "", systemImage: "exclamationmark.triangle.fill")
+                                .font(.callout)
+                                .labelStyle(.tintedIcon(.yellow))
+                        } else if catalogSources.customSources.isEmpty {
                             demoCatalogBanner
                         }
                         if !catalog.unreadableBlocks.isEmpty {
