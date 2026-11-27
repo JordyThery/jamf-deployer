@@ -68,11 +68,11 @@ The App Catalog block picks its apps with a searchable picker, with per-app deli
 
 ![The App Catalog picker: searchable app list on the left, per-app delivery and update choices on the right](screenshot-app-catalog.png)
 
-![The tenant Overview: connection, preflight, Managed in this tenant with the adopt actions, and Add from the catalog](screenshot-baseline.png)
+![The tenant Overview: connection, preflight, Managed in this tenant with the adopt actions, and Add from the catalog](screenshot.png)
 
 ## Settings and scope
 
-Every block exposes a small set of plain-language settings — toggles, choices, numbers — defined by the block, not by the underlying provider schema. Secret-typed settings (API keys and similar) are stored in your Keychain, never in the tenant record.
+Every block exposes a small set of plain-language settings — toggles, choices, numbers — defined by the block, not by the engine plugin’s schema. Secret-typed settings (API keys and similar) are stored in your Keychain, never in the tenant record.
 
 Every block is optional, and blocks connect by reference. A block that applies to devices lets you pick its scope per tenant: a group another selected block creates (for example **Device Groups** from the demo catalog), or a group that already exists in the tenant. Mobile-scoped blocks (iPad and iPhone profiles and apps) pick a mobile device group the same way. Platform-scoped blocks (Software Updates, CIS Level 1) currently offer only groups created by another selected block. Blocks that file objects under a category pick it the same way, or use no category. A block starts on its declared default when the block creating it is selected too — FileVault on Pilot and Security, Rosetta 2 on Apple Silicon Macs — and otherwise asks you to choose, so nothing is created just to satisfy a dependency. Blocks that only support smart groups (App Catalog apps) list only smart groups from the tenant; of the groups another block creates, pick a smart one. Captured blocks that keep their original wiring carry their own scope instead.
 

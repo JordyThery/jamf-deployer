@@ -16,7 +16,7 @@
 
 Jamf Deployer is a macOS app for engineers who set up and look after Jamf tenants. It takes a new tenant to a best-practice baseline in an afternoon, captures what already exists in a tenant as reusable configuration, and keeps every tenant honest over time — showing what changed in Jamf outside the app and what a newer baseline would change, before anything is deployed.
 
-Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) providers, plus the community [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) provider for tenants connected through the Jamf Pro API — all bundled, nothing to install, and no Terraform knowledge needed. Everything is expressed in plain language: baselines are built from **building blocks**, every deploy starts with a **preview of changes**, and nothing is ever applied without your confirmation.
+Under the hood it drives [OpenTofu](https://opentofu.org) with the official [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) engine plugins, plus the community [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) plugin for tenants connected through the Jamf Pro API — all bundled, nothing to install, and no Terraform knowledge needed. Everything is expressed in plain language: baselines are built from **building blocks**, every deploy starts with a **preview of changes**, and nothing is ever applied without your confirmation.
 
 - **Set up** — connect a tenant through the Jamf Platform API or directly through the Jamf Pro API (an API client or a user account), pick a preset or compose a baseline from building blocks, preview and deploy. The app ships the configuration-free blocks (App Catalog apps, App Store apps for Mac and iPad and iPhone, Jamf Protect Baseline, Security Cloud), which use groups and categories already in your tenant or created by another selected block; opinionated ones come from catalogs you publish, with the versioned [demo catalog](https://github.com/JordyThery/jamf-deployer-catalog) (device groups, categories, extension attributes, enrollment, FileVault, software updates, CIS Level 1, Rosetta 2, tenant settings and more) as a worked example and template. Macs, iPads and iPhones are covered. A Day 0 checklist covers what an API can’t: APNs, Apple Business or Apple School Manager tokens, branding.
 - **Export** — turn an existing tenant’s objects into reusable building blocks that keep their wiring — one export can become several blocks, or a full tenant clone — plus documentation or a point-in-time snapshot; adopt hand-configured objects into management without recreating them.
@@ -36,10 +36,11 @@ The fleet dashboard keeps every tenant’s sync state, baseline size and Apple t
 Every action on screen is also in the menu bar:
 
 - **File:** Connect a Tenant… (⌘N), Export as Terraform… (⇧⌘E)
-- **View:** Dashboard (⌘1), Building Blocks (⌘2), History (⌘3); a tenant’s Overview, Day 0 Setup and Export (⌥⌘1–3); Show Technical Details; Show or Hide Sidebar
+- **View:** Dashboard (⌘1), Building Blocks (⌘2), History (⌘3); a tenant’s Overview, Day 0 Setup and Export (⌥⌘1–3); Reload History; Show Technical Details; Show or Hide Sidebar
 - **Tenant:** Demo Mode; Check for Changes (⌘R), Check All Tenants (⇧⌘R), Preview Changes… (⌘P, where every deploy starts); Adopt Existing Configuration…, Add a Custom Object…, Baseline Updates…, Run Preflight; Update Client Secret…, Hand Over Tenant…, Remove Tenant…; Roll Out…; in Team Mode, Sync Now and Force Unlock…
 - **Catalog:** Manage Sources…, Add Git Catalog…
 - **Window:** Activity Log (⇧⌘L), every call to Jamf and every engine run as it happens
+- **Help:** Guided Tour, Graduating to Terraform
 
 ## Updates and diagnostics
 
@@ -54,6 +55,10 @@ Every action on screen is also in the menu bar:
 - **[Permissions](docs/permissions.md)** — the API client privileges each block and feature needs, scoped to least privilege
 - **[Team Mode](docs/team-mode.md)** — the shared repository, state backend and locks, the team passphrase, per-engineer credentials, joining and leaving
 - **[Graduating to Terraform](docs/graduating.md)** — the path from the app to running Terraform yourself: reading plans, one tenant on the command line, a Git repository with reviewed changes, and running a fleet. There is no lock-in
+
+## Installation
+
+Download the latest zip from [Releases](https://github.com/JordyThery/jamf-deployer/releases/latest), unzip it and drag Jamf Deployer to Applications. The engine and its plugins are inside the app; nothing else needs installing. [Getting Started](docs/getting-started.md) takes it from there.
 
 ## Requirements
 
@@ -72,11 +77,11 @@ Every action on screen is also in the menu bar:
 
 ## Building
 
-Open the project in Xcode 27 or later. Xcode resolves the [JTKit](https://github.com/JordyThery/JTKit) Swift package, the app’s only package dependency, on first open; `Package.resolved` also lists Microsoft’s MSAL, which JTKit depends on and which this app doesn’t link or ship. Run `Vendor/fetch.sh` once to download the engine, providers, jamformer and the Git state backend, then build the `Jamf Deployer` scheme. Capturing blocks from a tenant and adopting existing configuration optionally use HashiCorp Terraform, which the app downloads on first use with your consent (it is BUSL-licensed and never bundled).
+Open the project in Xcode 27 or later. Xcode resolves the [JTKit](https://github.com/JordyThery/JTKit) Swift package, the app’s only package dependency, on first open; `Package.resolved` also lists Microsoft’s MSAL, which JTKit depends on and which this app doesn’t link or ship. Run `Vendor/fetch.sh` once to download the engine, its plugins, jamformer and the Git state backend (each checked against a pinned checksum), then build the `Jamf Deployer` scheme. Capturing blocks from a tenant and adopting existing configuration optionally use HashiCorp Terraform, which the app downloads on first use with your consent (it is BUSL-licensed and never bundled).
 
-## Acknowledgments
+## Credits
 
-Jamf Deployer stands on [OpenTofu](https://opentofu.org) (MPL-2.0), the [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) providers (MPL-2.0), the [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) provider by Deployment Theory (MPL-2.0), [terraform-backend-git](https://github.com/plumber-cd/terraform-backend-git) by plumber-cd (Apache-2.0), and [jamformer](https://github.com/Jamf-Concepts/jamformer) by Jamf Concepts (MIT). Their licenses accompany the bundled copies. The full texts, including those of the libraries compiled into jamformer, are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and in the app under About Jamf Deployer.
+Jamf Deployer stands on [OpenTofu](https://opentofu.org) (MPL-2.0), the [jamfplatform](https://github.com/jamf/terraform-provider-jamfplatform) and [jamfprotect](https://github.com/Jamf-Concepts/terraform-provider-jamfprotect) engine plugins (Terraform providers, MPL-2.0), the [jamfpro](https://github.com/deploymenttheory/terraform-provider-jamfpro) plugin by Deployment Theory (MPL-2.0), [terraform-backend-git](https://github.com/plumber-cd/terraform-backend-git) by plumber-cd (Apache-2.0), and [jamformer](https://github.com/Jamf-Concepts/jamformer) by Jamf Concepts (MIT). Their licenses accompany the bundled copies. The full texts, including those of the libraries compiled into jamformer, are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and in the app under About Jamf Deployer.
 
 Export as Terraform owes its layout and pipeline to three JNUC 2026 sessions: [*Infrastructure as Code for the Jamf Platform: Terraform and GitOps at Scale*](https://www.youtube.com/watch?v=XohIVi6VFvA) by Kyle Hoare and Neil Martin (Jamf), and [*Jamf Pro to Terraform: ClickOps to GitOps Migration*](https://www.youtube.com/watch?v=x4BosrxFk2s) and [*From Click Ops to GitOps: Training a Mac Team on Terraform and Jamf Pro*](https://www.youtube.com/watch?v=8Lw7XQz6dvU) by Dafydd Watkins, Gordon Deacon and Joseph Little (Lloyds Banking Group). See [Graduating to Terraform](docs/graduating.md#credits).
 
@@ -87,3 +92,7 @@ If Jamf Deployer saves you time, you can [buy me a coffee](https://buymeacoffee.
 ## Disclaimer
 
 This tool is provided as-is, without warranty of any kind. Use it at your own risk. This is a personal project. It is not affiliated with or endorsed by my employer or Jamf. Issues and pull requests are appreciated. Support is best-effort.
+
+## License
+
+[MIT](LICENSE)
