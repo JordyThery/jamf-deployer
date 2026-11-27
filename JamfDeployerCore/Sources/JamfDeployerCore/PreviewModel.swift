@@ -8,25 +8,33 @@ public nonisolated enum ChangeKind: String, Sendable, CaseIterable {
     case remove = "Remove"
     case adopt = "Adopt"
     case stopManaging = "Stop managing"
+    /// An action set this app doesn't know. Shown as its own row and
+    /// treated as destructive until the app learns what it means.
+    case unknown = "Unknown change"
     case unchanged = "Unchanged"
 
+    /// The kind follows the engine's actions first; an import only adds to
+    /// them. An import that keeps the object (no-op, or update: the diffs
+    /// are shown on the Adopt row) is "Adopt"; an import the engine can only
+    /// finish by deleting and recreating the object is "Replace".
     public static func from(actions: [String], importing: Bool) -> ChangeKind {
-        // An import is always "Adopt" — even when the first plan would also
-        // change attributes (the diffs are shown on the Adopt row).
-        if importing { return .adopt }
         switch Set(actions) {
+        case ["no-op"]: return importing ? .adopt : .unchanged
+        case ["update"]: return importing ? .adopt : .update
         case ["create"]: return .create
-        case ["update"]: return .update
         case ["delete", "create"]: return .replace
         case ["delete"]: return .remove
         case ["forget"]: return .stopManaging
-        default: return .unchanged
+        // A data source read during the deploy changes nothing in Jamf.
+        case ["read"]: return .unchanged
+        default: return .unknown
         }
     }
 
-    /// Changes that warrant the production guard (typed tenant name).
+    /// Changes that warrant the production guard (typed tenant name) and
+    /// keep Deploy off the Return key.
     public var isDestructive: Bool {
-        self == .remove || self == .replace
+        self == .remove || self == .replace || self == .unknown
     }
 }
 
@@ -59,15 +67,33 @@ public nonisolated struct ObjectChange: Sendable, Identifiable {
     public var fieldDiffs: [FieldDiff]
     /// Impact alerts and other diagnostics attached to this object.
     public var notes: [String]
+    /// The change also imports (adopts) the object, whatever its kind.
+    public var importing: Bool
+    /// The engine's actions, for an `unknown` change.
+    public var actions: [String]
 
     public init(address: String, resourceType: String, displayName: String, kind: ChangeKind,
-                fieldDiffs: [FieldDiff] = [], notes: [String] = []) {
+                fieldDiffs: [FieldDiff] = [], notes: [String] = [], importing: Bool = false, actions: [String] = []) {
         self.address = address
         self.resourceType = resourceType
         self.displayName = displayName
         self.kind = kind
         self.fieldDiffs = fieldDiffs
         self.notes = notes
+        self.importing = importing
+        self.actions = actions
+    }
+
+    /// Why this row needs a second look, or nil.
+    public var caution: String? {
+        switch kind {
+        case .replace where importing:
+            "Adopting this object deletes it in Jamf and creates it again: it gets a new Jamf ID, and what Jamf keeps with the old one (such as logs) is lost."
+        case .unknown:
+            "The engine planned an action this app doesn’t recognize (\(actions.joined(separator: ", "))). Treat it like a removal and check it before deploying."
+        default:
+            nil
+        }
     }
 }
 
@@ -119,17 +145,15 @@ public nonisolated enum PreviewBuilder {
         notesByAddress = notesByAddress.mapValues(Self.grouped)
 
         for change in plan.resourceChanges ?? [] {
-            let kind = ChangeKind.from(
-                actions: change.change.actions,
-                importing: change.change.importing != nil
-            )
+            let importing = change.change.importing != nil
+            let kind = ChangeKind.from(actions: change.change.actions, importing: importing)
             if kind == .unchanged, change.change.actions != ["no-op"] { continue }
             counts[kind, default: 0] += 1
             if kind == .unchanged { continue }
 
             let blockID = moduleID(of: change.address) ?? "tenant"
             let adoptsWithChanges = kind == .adopt && change.change.actions.contains("update")
-            let diffs = kind == .update || kind == .replace || adoptsWithChanges
+            let diffs = kind == .update || kind == .replace || kind == .unknown || adoptsWithChanges
                 ? fieldDiffs(for: change)
                 : []
 
@@ -139,7 +163,9 @@ public nonisolated enum PreviewBuilder {
                 displayName: displayName(for: change),
                 kind: kind,
                 fieldDiffs: diffs,
-                notes: notesByAddress[change.address] ?? []
+                notes: notesByAddress[change.address] ?? [],
+                importing: importing,
+                actions: change.change.actions
             ))
         }
 

@@ -155,10 +155,10 @@ struct PreviewDeploySheet: View {
         }
     }
 
-    /// Return deploys only a plan that removes and replaces nothing.
+    /// Return deploys only a plan that removes and replaces nothing (and
+    /// has no change the app doesn't recognize).
     private func removesNothing(_ session: PreviewSession) -> Bool {
-        let counts = session.summary.counts
-        return (counts[.remove] ?? 0) == 0 && (counts[.replace] ?? 0) == 0
+        !session.summary.hasDestructiveChanges
     }
 
     // MARK: Content
@@ -328,6 +328,11 @@ struct PreviewDeploySheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            if let caution = change.caution {
+                Label(caution, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .labelStyle(.tintedIcon(.orange))
+            }
             ForEach(change.notes, id: \.self) { note in
                 Label(note, systemImage: "person.3")
                     .font(.caption)
@@ -354,7 +359,7 @@ struct PreviewDeploySheet: View {
     private func badgeStyle(_ kind: ChangeKind) -> StatusBadge.Style {
         switch kind {
         case .create, .adopt: .tinted
-        case .remove, .replace: .warning
+        case .remove, .replace, .unknown: .warning
         default: .neutral
         }
     }
@@ -540,6 +545,7 @@ struct PreviewDeploySheet: View {
                 counts[.remove].map { "\($0) remove" },
                 counts[.adopt].map { "\($0) adopt" },
                 counts[.stopManaging].map { "\($0) stop managing" },
+                counts[.unknown].map { "\($0) unknown" },
             ].compactMap(\.self).joined(separator: " · ")
         )
         .font(.callout)
