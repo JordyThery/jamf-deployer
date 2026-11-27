@@ -260,7 +260,7 @@ struct GeneratorTests {
             selections: [
                 Self.selection(catalog, "device-groups"),
                 Self.selection(catalog, "categories"),
-                Self.selection(catalog, "enrollment", settings: ["ade_instance_name": "Apple Business Manager"]),
+                Self.selection(catalog, "enrollment", settings: ["ade_instance_name": "Apple Business"]),
                 Self.selection(catalog, "filevault"),
                 Self.selection(catalog, "software-updates", scope: "device-groups/Pilot"),
                 Self.selection(catalog, "compliance-cis-l1", scope: "device-groups/Pilot"),
@@ -277,7 +277,7 @@ struct GeneratorTests {
         #expect(output.mainTF.contains(#"module.device_groups.device_group_jamf_pro_ids["Apple Silicon Macs"]"#))
         #expect(output.mainTF.contains(#"category_id             = module.categories.category_ids["Security"]"#))
         let normalized = output.mainTF.replacingOccurrences(of: " +", with: " ", options: .regularExpression)
-        #expect(normalized.contains(#"ade_instance_name = "Apple Business Manager""#))
+        #expect(normalized.contains(#"ade_instance_name = "Apple Business""#))
         #expect(output.secretVariableNames.isEmpty)
     }
 
@@ -911,7 +911,7 @@ struct BlockCaptureTests {
         // names the organization); the capture sheet shows it instead.
         let lookup = try String(contentsOf: folder.appending(path: "enrollment_instance.tf"), encoding: .utf8)
         #expect(!lookup.contains("default"))
-        #expect(!lookup.contains("Apple Business Manager"))
+        #expect(!lookup.contains("Apple Business"))
         #expect(lookup.contains(#"data "jamfplatform_pro_automated_device_enrollment" "instance""#))
 
         let manifest = try JSONSerialization.jsonObject(
@@ -920,8 +920,8 @@ struct BlockCaptureTests {
         #expect(settings?.first?["key"] as? String == "ade_instance_name")
         #expect(settings?.first?["default"] as? String == "")
         #expect(settings?.first?["required"] as? Bool == true)
-        #expect(result.originSettingValues == ["ade_instance_name": "Apple Business Manager"])
-        #expect(result.warnings.contains { $0.contains("Automated Device Enrollment instance") && $0.contains("“Apple Business Manager”") })
+        #expect(result.originSettingValues == ["ade_instance_name": "Apple Business"])
+        #expect(result.warnings.contains { $0.contains("Automated Device Enrollment instance") && $0.contains("“Apple Business”") })
 
         // Recovery Lock passwords are not exportable; the capture turns the
         // feature off rather than shipping a PreStage that cannot be created.
@@ -1601,7 +1601,7 @@ struct AdoptPreparationTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data(#"""
         resource "jamfplatform_pro_automated_device_enrollment" "abm" {
-          name         = "Apple Business Manager"
+          name         = "Apple Business"
           server_token = var.abm_server_token
         }
 

@@ -68,7 +68,7 @@ struct DemoModeTests {
         try await day0.uploadVPPToken(tenant: fresh, tokenFile: Data("ZGVtbw==".utf8), name: "Contoso New Apps")
         try await day0.createBranding(tenant: fresh, brandingName: "Contoso New")
         _ = try await day0.downloadADEPublicKey(tenant: fresh)
-        try await day0.uploadADEToken(tenant: fresh, tokenFile: Data("demo".utf8), name: "Contoso New ABM.p7m")
+        try await day0.uploadADEToken(tenant: fresh, tokenFile: Data("demo".utf8), name: "Contoso New Apple Business.p7m")
         try await day0.registerProtect(tenant: fresh, protectURL: "https://contoso.protect.demo.invalid",
                                        clientID: "demo-client", password: "demo-password")
         await day0.detect(tenant: fresh)
