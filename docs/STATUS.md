@@ -1,6 +1,6 @@
 # Jamf Deployer — status, limitations and uncertainties
 
-As of 2026-11-27 (1.3.2 in preparation; 1.3.1 released 2026-11-23; changes are listed in [CHANGELOG.md](../CHANGELOG.md)). The release check passed on 2026-11-23 against the published JTKit 1.8.1 in about 23 minutes. The open items, limits and what is live-verified, in one place.
+As of 2026-11-28 (1.3.2 released 2026-11-28; changes are listed in [CHANGELOG.md](../CHANGELOG.md)). The release check passed on 2026-11-27 against the published JTKit 1.13.1 in about 23 minutes; 1.3.2 ships with JTKit 1.13.2. The open items, limits and what is live-verified, in one place.
 
 ## Never exercised live (schema-verified, validated, but unapplied)
 - ADE `.p7m` / Apps and Books `.vpptoken` uploads and Protect registration in Day 0 — wired and spec-verified, needing real Apple/Protect artifacts to fire for the first time.
@@ -50,7 +50,7 @@ Live-verified: `tenants/<id>/generated/` + `state/` + the env vars (`JAMFPLATFOR
 - Every block’s Jamf Pro API privileges were verified live (Sandbox, 2026-10-22) with an API client holding only the listed privileges: deploy, a second plan with no changes, destroy. App Installers come under the Mac Applications privileges.
 
 ## Packaging and release
-- Releases are signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time.
+- Releases are signed and notarized (Developer ID, hardened runtime); the embed script signs the provider binaries inside the mirror archives at build time. Apple silicon only from 1.3.2 (arm64; only arm64 tool and plugin zips are bundled).
 - Unit tests: about 210 in the app target (Jamf DeployerTests, plus 7 live checks) and about 195 in JamfDeployerCore. Demo mode: 21 smoke UI tests in every release check (dashboard, checks, keep and restore, preflight, connect and remove, the baseline editor, block settings and pickers, Day 0, the catalog library, history, the Demo Mode marker, the guided tour, menus). Live UI tests (1.2, JTKit's live-check switch, jamf-test-a and jamf-test-b only, `JTKTEST` objects): every release check connects and removes a tenant, deploys a demo-catalog block with Preview and Apply, adopts an object, finds a change made in Jamf, restores and keeps it, removes everything, and captures from the production read role with a Preview on jamf-test-b and no apply. The full live suite (custom objects and catalog blocks on both connections, the Jamf Pro API flows, history, documentation, snapshot, clone and capture, a two-ring rollout, the Fleet preset conflict, Export as Terraform for review, a catalog release that renames a group, and the Mac App Store Apps block on a tenant with an Apps and Books location) runs on request. Before 1.2 the functional suites ran from separate scripts and also covered Team Mode and Export as Terraform end to end (export and move, the exported workflows, Destroy, hand-over); those push to a repository and are not part of the live tests.
 - App Sandbox is off by design (child-process engine); Developer ID + notarization is the distribution model.
 
