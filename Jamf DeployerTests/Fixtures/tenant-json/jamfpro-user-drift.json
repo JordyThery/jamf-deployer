@@ -27,7 +27,7 @@
     {
       "blockID" : "enrollment",
       "settings" : {
-        "ade_instance_name" : "Apple Business Manager",
+        "ade_instance_name" : "Apple Business",
         "auto_advance_setup" : "false",
         "default_prestage" : "false",
         "prestage_display_name" : "Standard Enrollment"
@@ -154,7 +154,7 @@
     {
       "blockID" : "mobile-enrollment",
       "settings" : {
-        "ade_instance_name" : "Apple Business Manager",
+        "ade_instance_name" : "Apple Business",
         "default_prestage" : "false",
         "prestage_display_name" : "iPad and iPhone Enrollment"
       },

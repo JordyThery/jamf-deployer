@@ -351,15 +351,20 @@ struct ExportView: View {
                 }
                 // Captured blocks carry their own copy of enrollment icons,
                 // downloaded only from the tenant's own host or Jamf Cloud, and logged.
+                // A redirect to any other host is refused, and the log names
+                // the host the icon finally came from.
                 let iconHosts = EnrollmentIcons.allowedHosts(jamfProURL: tenant.jamfProURL)
+                let redirects = EnrollmentIcons.RedirectGuard(allowedHosts: iconHosts)
                 let log = activityLog
                 await EnrollmentIcons.localize(directory: result.outputURL, allowedHosts: iconHosts) { url in
                     let started = Date()
-                    let (data, response) = try await URLSession.shared.data(from: url)
+                    let (data, response) = try await URLSession.shared.data(from: url, delegate: redirects)
                     let status = (response as? HTTPURLResponse)?.statusCode
+                    let finalHost = response.url?.host() ?? url.host() ?? ""
                     await log.append(ActivityLogEntry(
-                        category: "Export", operation: "download icon", detail: url.host() ?? "",
-                        status: status, duration: Date().timeIntervalSince(started), note: nil
+                        category: "Export", operation: "download icon", detail: finalHost,
+                        status: status, duration: Date().timeIntervalSince(started),
+                        note: finalHost == url.host() ? nil : "redirected from \(url.host() ?? "")"
                     ))
                     guard status == 200 else { throw URLError(.badServerResponse) }
                     return data

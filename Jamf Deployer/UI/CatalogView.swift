@@ -24,7 +24,11 @@ struct CatalogView: View {
             if let catalog {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        if catalogSources.customSources.isEmpty {
+                        if catalogSources.isListUnreadable {
+                            Label(CatalogSourceStore.ListUnreadable().errorDescription ?? "", systemImage: "exclamationmark.triangle.fill")
+                                .font(.callout)
+                                .labelStyle(.tintedIcon(.yellow))
+                        } else if catalogSources.customSources.isEmpty {
                             demoCatalogBanner
                         }
                         if !catalog.unreadableBlocks.isEmpty {
@@ -169,7 +173,7 @@ struct CatalogView: View {
         Task {
             defer { isAddingDemoCatalog = false }
             do {
-                guard let latest = try await GitCatalogManager.availableTags(remote: Self.demoCatalogURL, tools: catalogSources.tools).last else {
+                guard let latest = try await GitCatalogManager.latestRelease(remote: Self.demoCatalogURL, tools: catalogSources.tools) else {
                     demoCatalogError = "The catalog repository has no releases yet."
                     return
                 }
@@ -512,7 +516,7 @@ struct BlockDetailSheet: View {
                 object["category"] = editCategory.trimmingCharacters(in: .whitespaces)
             }
         } catch {
-            Self.log.error("Saving details for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Saving details for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .private)")
             // Shown inline: an alert presented from this sheet is unreliable.
             editError = "The details couldn’t be saved: \(error.localizedDescription)"
             return
@@ -600,7 +604,7 @@ struct BlockDetailSheet: View {
             try writeManifest(mutate)
             return true
         } catch {
-            Self.log.error("Writing block.json for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Writing block.json for \(block.id, privacy: .public) failed: \(error.localizedDescription, privacy: .private)")
             return false
         }
     }
@@ -705,7 +709,7 @@ struct ManageSourcesSheet: View {
         } message: {
             Text(removalUsersText + (sourcePendingRemoval?.kind == .gitRepository
                 ? "The downloaded checkouts are deleted; the repository itself is untouched."
-                : "The folder and its blocks stay on disk — the app just stops reading them."))
+                : "The folder and its blocks stay on disk — the app stops reading them."))
         }
     }
 
@@ -782,6 +786,8 @@ struct AddGitCatalogSheet: View {
                         .disabled(url.isEmpty || isWorking)
                     if !tags.isEmpty {
                         Picker("Tag", selection: $selectedTag) {
+                            // No release tag to preselect: nothing is chosen for you.
+                            if selectedTag.isEmpty { Text("Choose a Tag").tag("") }
                             ForEach(tags, id: \.self) { Text($0).tag($0) }
                         }
                         .frame(maxWidth: 220)
@@ -818,7 +824,10 @@ struct AddGitCatalogSheet: View {
                     message = "The repository has no release tags yet — catalogs are pinned by tag."
                 } else {
                     tags = found
-                    selectedTag = found.last ?? ""
+                    selectedTag = GitCatalogManager.latestRelease(in: found) ?? ""
+                    if selectedTag.isEmpty {
+                        message = "The repository has no release tags (such as v1.2.0) yet. Choose the tag to follow."
+                    }
                 }
             } catch {
                 message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

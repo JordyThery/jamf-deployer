@@ -235,7 +235,7 @@ struct FleetDashboardView: View {
     @ViewBuilder
     private func baselineCell(for tenant: Tenant) -> some View {
         if tenant.deployedBlockVersions.isEmpty {
-            Text(deployService.isManaged(tenant) ? "Adopted only" : "—").foregroundStyle(.secondary)
+            Text(deployService.hasAdoptedConfig(for: tenant) && deployService.isManaged(tenant) ? "Adopted only" : "—").foregroundStyle(.secondary)
         } else {
             let updates = catalog.map { catalog in
                 tenant.deployedBlockVersions.filter { id, version in

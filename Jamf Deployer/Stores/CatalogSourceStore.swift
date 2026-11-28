@@ -17,9 +17,30 @@ enum CatalogSourceError: LocalizedError {
 @Observable
 final class CatalogSourceStore {
     nonisolated struct CustomSource: Codable, Sendable, Identifiable, Equatable {
-        enum Kind: String, Codable {
+        enum Kind: Codable, Equatable, Sendable {
             case localFolder
             case gitRepository
+            /// A kind a newer version of the app wrote: kept as it is, so a
+            /// save here doesn't change a teammate's source.
+            case other(String)
+
+            init(from decoder: Decoder) throws {
+                let raw = try decoder.singleValueContainer().decode(String.self)
+                switch raw {
+                case "localFolder": self = .localFolder
+                case "gitRepository": self = .gitRepository
+                default: self = .other(raw)
+                }
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case .localFolder: try container.encode("localFolder")
+                case .gitRepository: try container.encode("gitRepository")
+                case .other(let raw): try container.encode(raw)
+                }
+            }
         }
 
         var id: UUID
@@ -62,8 +83,8 @@ final class CatalogSourceStore {
     }
 
     private(set) var customSources: [CustomSource] = []
-    /// The list on disk can't be read and no copy of it could be kept:
-    /// nothing is saved over it until it reads again (`reload()`).
+    /// The list on disk can't be read: nothing is saved over it until it
+    /// reads again (`reload()`).
     private(set) var isListUnreadable = false
     private let logger = Logger(subsystem: "be.jordythery.jamf-deployer", category: "CatalogSources")
 
@@ -89,24 +110,18 @@ final class CatalogSourceStore {
         customSources = load()
     }
 
-    /// Loads the source list. A file that exists but cannot be read is
-    /// copied to `catalog-sources.json.unreadable-<date>` (bytes intact; an
-    /// earlier copy is never replaced; never committed) and only then
-    /// removed, so a later save can't overwrite it. When the copy fails,
-    /// the file stays and `isListUnreadable` stops every save.
+    /// Loads the source list. A file that exists but can't be read stays
+    /// exactly where it is (it's tracked in the store, and in Team Mode
+    /// shared): `isListUnreadable` stops every save over it until it reads
+    /// again (`reload()`), and Building Blocks says so.
     private func load() -> [CustomSource] {
         isListUnreadable = false
         do {
             return try JSONFile.load([CustomSource].self, from: fileURL)
         } catch {
             guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
-            if let copy = FileCopies.keepUnreadableCopy(of: fileURL) {
-                try? FileManager.default.removeItem(at: fileURL)
-                logger.error("catalog-sources.json could not be read and was set aside as \(copy, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            } else {
-                isListUnreadable = true
-                logger.error("catalog-sources.json could not be read or copied; left as it is: \(error.localizedDescription, privacy: .public)")
-            }
+            isListUnreadable = true
+            logger.error("catalog-sources.json could not be read; left as it is: \(error.localizedDescription, privacy: .private)")
             return []
         }
     }
@@ -153,7 +168,7 @@ final class CatalogSourceStore {
                 loaded.sourceID = source.id.uuidString
                 catalogs.append(loaded)
             } catch {
-                logger.error("Catalog source \(source.name, privacy: .public) unreadable: \(error.localizedDescription, privacy: .public)")
+                logger.error("Catalog source \(source.name, privacy: .private) unreadable: \(error.localizedDescription, privacy: .private)")
             }
         }
         return LoadedCatalog.merge(catalogs)
@@ -172,6 +187,8 @@ final class CatalogSourceStore {
                 throw GitCatalogManager.CatalogError.checkoutMissing(resolved)
             }
             return try LoadedCatalog.load(from: checkout)
+        case .other:
+            throw NewerSourceKind(name: source.name)
         }
     }
 
@@ -215,7 +232,14 @@ final class CatalogSourceStore {
     /// The list on disk can't be read, and no copy of it could be kept.
     struct ListUnreadable: LocalizedError {
         var errorDescription: String? {
-            "The list of catalog sources can’t be read, and no copy of it could be kept, so it wasn’t changed."
+            "The list of catalog sources (catalog-sources.json in the store) can’t be read, so it’s left as it is and nothing is changed in it. Blocks from Git catalogs and your own folders aren’t shown until it reads again."
+        }
+    }
+
+    struct NewerSourceKind: LocalizedError {
+        var name: String
+        var errorDescription: String? {
+            "The catalog source “\(name)” was added with a newer version of Jamf Deployer. Update the app to use it."
         }
     }
 }

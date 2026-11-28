@@ -137,7 +137,9 @@ final class TenantDeployService {
 
     /// After a commit: history findings not acknowledged and not shown yet.
     func noteHistoryFindings() async {
-        guard !isDemo, let findings = try? await gitStore.unacknowledgedFindings() else { return }
+        guard !isDemo else { return }
+        // From the commits' own scans: the store isn't scanned again.
+        let findings = await gitStore.takeHistoryFindings()
         let new = findings.filter { !GitStoreService.blocksCommit($0) && !notifiedHistoryFindings.contains($0) }
         guard !new.isEmpty else { return }
         notifiedHistoryFindings.formUnion(new)
@@ -1126,17 +1128,16 @@ final class TenantDeployService {
         }
     }
 
-    /// Per-block updates available from newer tags of the tenant's git
-    /// sources (fetches the remotes' tag lists).
     static let decisionsLog = Logger(subsystem: "be.jordythery.jamf-deployer", category: "decisions")
 
     /// Release-check and deploy-retry decisions, to Console; Debug builds
     /// also append them to a file so test runs can be read back without log
-    /// access.
+    /// access. Private in the system log: the lines name tenants, catalog
+    /// sources and resource addresses, and quote engine errors.
     static func trace(_ message: String) {
         // engine error summaries can quote a server's answer
         let message = EngineOutputCleaner.cleaned(message)
-        decisionsLog.info("\(message, privacy: .public)")
+        decisionsLog.info("\(message, privacy: .private)")
         #if DEBUG
         let line = Data("\(Date().formatted(.iso8601)) \(message)\n".utf8)
         // Only this user can read it: the per-user temporary folder, mode 600.
@@ -1153,6 +1154,8 @@ final class TenantDeployService {
         FileManager.default.temporaryDirectory.appending(path: "jamf-deployer-decisions.log")
     }
 
+    /// Per-block updates available from newer release tags of the tenant's
+    /// git sources (fetches the remotes' tag lists).
     func availableBaselineUpdates(for original: Tenant) async throws -> [(source: CatalogSourceStore.CustomSource, tag: String, updates: [CatalogUpdatePlanner.BlockUpdate])] {
         let tenant = reattachOrphanedSelections(of: original)
         var results: [(CatalogSourceStore.CustomSource, String, [CatalogUpdatePlanner.BlockUpdate])] = []
@@ -1161,7 +1164,7 @@ final class TenantDeployService {
         for source in catalogSources.customSources
         where source.kind == .gitRepository && usedSourceIDs.contains(source.id.uuidString) {
             guard let gitURL = source.gitURL,
-                  let latest = try await GitCatalogManager.availableTags(remote: gitURL, tools: tools).last else {
+                  let latest = try await GitCatalogManager.latestRelease(remote: gitURL, tools: tools) else {
                 Self.trace("\(source.name): no release tags found")
                 continue
             }
@@ -1280,7 +1283,16 @@ final class TenantDeployService {
         if tenant.handOverPending {
             // Hand-over releases adopted objects like blocks: the engine
             // forgets them and Jamf keeps them.
-            let addresses = ((try? ExportedObjectInventory.scan(directory: adopted)) ?? []).map(\.address)
+            // An adopted folder that can't be read stops the preview: without
+            // its `removed` blocks the plan would delete what it releases.
+            let addresses: [String]
+            do {
+                addresses = fileManager.fileExists(atPath: adopted.path)
+                    ? try ExportedObjectInventory.scan(directory: adopted).map(\.address)
+                    : []
+            } catch {
+                throw DeployError.adoptedUnreadable(error.localizedDescription)
+            }
             if !addresses.isEmpty {
                 let blocks = addresses.sorted().map { address in
                     "removed {\n  from = \(address)\n\n  lifecycle {\n    destroy = false\n  }\n}\n"
@@ -1289,38 +1301,50 @@ final class TenantDeployService {
                     .write(to: generated.appending(path: "adopted-handover_removed.tf"))
             }
         } else if fileManager.fileExists(atPath: adopted.path) {
-            let selectedModules = Set(selections.map { "module.\(WorkspaceGenerator.sanitized($0.block.id))" })
-            for file in (try? fileManager.contentsOfDirectory(at: adopted, includingPropertiesForKeys: nil)) ?? [] {
-                if file.lastPathComponent == Self.recoveredImportsFile {
-                    // Recovered creates of blocks no longer selected have
-                    // nothing left to import into.
-                    let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
-                    let kept = ExportedObjectInventory.topLevelBlocks(in: text).filter { block in
-                        guard let to = block.firstMatch(of: /\bto\s*=\s*(module\.[A-Za-z0-9_-]+)/) else { return true }
-                        return selectedModules.contains(String(to.1))
-                    }
-                    if !kept.isEmpty {
-                        try Data((kept.joined(separator: "\n\n") + "\n").utf8)
-                            .write(to: generated.appending(path: "adopted-\(file.lastPathComponent)"))
-                    }
-                } else if file.pathExtension == "tf", !file.lastPathComponent.hasSuffix("versions.tf") {
-                    // versions.tf would duplicate the workspace's own provider
-                    // requirements and fail init.
-                    try? fileManager.copyItem(
-                        at: file,
-                        to: generated.appending(path: "adopted-\(file.lastPathComponent)")
-                    )
-                } else if file.lastPathComponent == "support_files" {
-                    let target = generated.appending(path: "support_files")
-                    try? fileManager.removeItem(at: target)
-                    try? fileManager.copyItem(at: file, to: target)
-                }
+            // A file left out would plan its adopted objects as removals.
+            do {
+                try copyAdopted(from: adopted, to: generated, selections: selections)
+            } catch {
+                throw DeployError.adoptedUnreadable(error.localizedDescription)
             }
         }
         writeTerminalScript(
             for: tenant, catalog: catalog, output: output,
             teamMode: (backend ?? (isTeamMode ? .http : .local)) == .http)
         return output
+    }
+
+    /// Copies the tenant's adopted configuration into the workspace as
+    /// root-level files. Throws when a file can't be read or copied.
+    private func copyAdopted(from adopted: URL, to generated: URL, selections: [GeneratedSelection]) throws {
+        let fileManager = FileManager.default
+        let selectedModules = Set(selections.map { "module.\(WorkspaceGenerator.sanitized($0.block.id))" })
+        for file in try fileManager.contentsOfDirectory(at: adopted, includingPropertiesForKeys: nil) {
+            if file.lastPathComponent == Self.recoveredImportsFile {
+                // Recovered creates of blocks no longer selected have
+                // nothing left to import into.
+                let text = try String(contentsOf: file, encoding: .utf8)
+                let kept = ExportedObjectInventory.topLevelBlocks(in: text).filter { block in
+                    guard let to = block.firstMatch(of: /\bto\s*=\s*(module\.[A-Za-z0-9_-]+)/) else { return true }
+                    return selectedModules.contains(String(to.1))
+                }
+                if !kept.isEmpty {
+                    try Data((kept.joined(separator: "\n\n") + "\n").utf8)
+                        .write(to: generated.appending(path: "adopted-\(file.lastPathComponent)"))
+                }
+            } else if file.pathExtension == "tf", !file.lastPathComponent.hasSuffix("versions.tf") {
+                // versions.tf would duplicate the workspace's own provider
+                // requirements and fail init.
+                try fileManager.copyItem(
+                    at: file,
+                    to: generated.appending(path: "adopted-\(file.lastPathComponent)")
+                )
+            } else if file.lastPathComponent == "support_files" {
+                let target = generated.appending(path: "support_files")
+                try? fileManager.removeItem(at: target)
+                try fileManager.copyItem(at: file, to: target)
+            }
+        }
     }
 
     /// `plan.sh` beside the generated configuration: the preview's plan, to
@@ -1485,11 +1509,16 @@ final class TenantDeployService {
         tenantStore.workspaceURL(for: tenant).appending(path: "adopted")
     }
 
-    /// Whether the app manages anything in the tenant: deployed blocks, or
-    /// adopted objects once the tenant has been deployed. A tenant brought
-    /// in entirely through Adopt has no blocks but is fully managed.
+    /// Whether the app manages anything in the tenant: deployed blocks,
+    /// adopted objects once the tenant has been deployed, or objects a deploy
+    /// made (a first deploy that partly failed leaves objects in its state
+    /// without deployed blocks). A tenant brought in entirely through Adopt
+    /// has no blocks but is fully managed.
     func isManaged(_ tenant: Tenant) -> Bool {
-        !tenant.deployedBlockVersions.isEmpty || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
+        !tenant.deployedBlockVersions.isEmpty
+            || (tenant.lastDeploy?.succeeded ?? 0) > 0
+            || (tenant.lastDeploy != nil && hasAdoptedConfig(for: tenant))
+            || hasLocalState(tenant)
     }
 
     /// Whether the tenant has anything a preview would show: selected
@@ -1682,12 +1711,14 @@ final class TenantDeployService {
     }
 
     /// JAMFPROTECT_* for baselines with Jamf Protect blocks; empty otherwise.
+    /// Decided on the blocks the workspace deploys (each selection resolved
+    /// from its own source at its own tag, as `generateWorkspace` does). A
+    /// built-in catalog that can't be loaded, or a selected block that can't
+    /// be found, stops the run instead of reading as "no Protect".
     private func protectEnvironment(for tenant: Tenant) throws -> [String: String] {
-        let needsProtect = (try? loadCatalog()).map { catalog in
-            effectiveSelections(for: tenant, catalog: catalog).contains { selection in
-                catalog.block(id: selection.blockID)?.products.contains("jamf-protect") == true
-            }
-        } ?? false
+        let needsProtect = try generatedSelections(for: tenant, catalog: loadCatalog(for: tenant)).contains {
+            $0.block.products.contains("jamf-protect")
+        }
         guard needsProtect else { return [:] }
         guard let protectURL = tenant.protectURL,
               let protectClientID = tenant.protectClientID,
@@ -1900,11 +1931,27 @@ final class TenantDeployService {
             }
         }
 
+        // The approved plan, read once: the ordered retry, the recovery of
+        // failed creates and the history's plan.json use it. When it can't
+        // be read the deploy still runs, and the Activity Log says what is
+        // missing.
+        var approvedPlanData: Data?
+        var approvedPlan: PlanFile?
+        do {
+            let data = try await runner.showPlanData(planFileName: session.planFileName)
+            approvedPlan = try JSONDecoder().decode(PlanFile.self, from: data)
+            approvedPlanData = data
+        } catch {
+            activityLog.append(ActivityLogEntry(
+                category: "Engine", operation: "show", detail: tenant.name, status: 500, duration: nil,
+                note: "The approved plan couldn’t be read, so this deploy has no ordered retry, no recovery of failed creates and no plan in History: \(Self.describe(error))"
+            ))
+        }
+
         // Objects that already carry a planned create's name before the
         // apply are never adopted after a failed create: they're someone
         // else's (made by hand, say), not what this apply left behind.
-        let existingBeforeApply = await existingObjects(
-            forPlannedCreatesIn: try? await runner.showPlan(planFileName: session.planFileName), tenant: tenant)
+        let existingBeforeApply = await existingObjects(forPlannedCreatesIn: approvedPlan, tenant: tenant)
 
         logEngine("apply", tenant: tenant)
 
@@ -1931,7 +1978,6 @@ final class TenantDeployService {
         // The engine can delete an object before updating what still uses it
         // (a block renamed a group another block scopes to); Jamf refuses the
         // delete. Finish the approved plan in order instead of failing.
-        let approvedPlan = try? await runner.showPlan(planFileName: session.planFileName)
         if !result.errorDiagnostics.isEmpty {
             Self.trace("Deploy \(tenant.name): \(result.errorDiagnostics.count) error(s) \(result.errorDiagnostics.map { "\($0.address ?? "-"): \($0.summary)" }); approved plan read: \(approvedPlan != nil); failed deletes: \(approvedPlan.flatMap { DeleteOrderRetry.failedDeletes(events: result.events, diagnostics: result.errorDiagnostics, approved: $0) }.map { Array($0) } ?? [])")
         }
@@ -1971,8 +2017,7 @@ final class TenantDeployService {
         // Objects Jamf created despite reporting an error become imports
         // the next preview adopts, instead of duplicate-name failures.
         var recovered = 0
-        if !result.errorDiagnostics.isEmpty,
-           let plan = try? await runner.showPlan(planFileName: session.planFileName) {
+        if !result.errorDiagnostics.isEmpty, let plan = approvedPlan {
             recovered = await recoverCreatedObjects(
                 tenant: tenant, diagnostics: result.errorDiagnostics, plan: plan, runner: runner,
                 existingBeforeApply: existingBeforeApply)
@@ -1985,8 +2030,7 @@ final class TenantDeployService {
         // `show -json` prints sensitive values in clear text, so history (and
         // the team repository) keeps the redacted plan. The event log holds
         // what the engine printed during the run, sensitive values masked.
-        if let planData = try? await runner.showPlanData(planFileName: session.planFileName),
-           let redacted = PlanRedactor.redact(planData) {
+        if let planData = approvedPlanData, let redacted = PlanRedactor.redact(planData) {
             try? Self.historyText(String(decoding: redacted, as: UTF8.self), path: "plan.json")
                 .write(to: entryURL.appending(path: "plan.json"))
         }
@@ -2384,7 +2428,7 @@ final class TenantDeployService {
     }
 
     /// Tenants whose last fleet check failed, with a short reason — shown on
-    /// the dashboard so a failing check never masquerades as "in sync".
+    /// the dashboard so a failing check is never shown as "in sync".
     private(set) var fleetCheckFailures: [UUID: String] = [:]
 
     /// Checks every deployed tenant, a few at a time.
@@ -2525,7 +2569,7 @@ final class TenantDeployService {
     /// Prepares hand-over: every deployed block and adopted object is
     /// marked "stop managing". Nothing changes until the user previews and
     /// deploys; on success the tenant archives. Until then it can be
-    /// cancelled.
+    /// canceled.
     func prepareHandOver(tenant: Tenant) {
         var updated = tenant
         updated.selectionsBeforeHandOver = tenant.blockSelections
@@ -2630,6 +2674,7 @@ final class TenantDeployService {
         case notInDemoMode
         case handedOver
         case passphraseNotVerified
+        case adoptedUnreadable(String)
 
         var errorDescription: String? {
             switch self {
@@ -2677,6 +2722,8 @@ final class TenantDeployService {
                 "The team passphrase couldn’t be checked against the team space’s deployment state, so it wasn’t accepted. Try again in a moment."
             case .tenantBusy:
                 "This tenant is already being previewed, checked or deployed. Try again when that finishes."
+            case .adoptedUnreadable(let detail):
+                "The tenant’s adopted configuration couldn’t be read, so nothing was planned: without it, the preview would remove the adopted objects. \(detail)"
             }
         }
     }

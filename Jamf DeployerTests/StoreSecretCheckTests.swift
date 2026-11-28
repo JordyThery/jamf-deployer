@@ -8,6 +8,12 @@ import JamfDeployerCore
 /// obviously fake values from the real jamformer test run.
 @Suite("Store secret check")
 struct StoreSecretCheckTests {
+    @Test func historyBlobsAreReadInBoundedRuns() {
+        let blobs: [(id: String, size: Int)] = [("a", 40), ("b", 40), ("c", 200), ("d", 10), ("e", 10)]
+        #expect(GitStoreService.chunks(blobs, maxBytes: 100) == [["a", "b"], ["c"], ["d", "e"]])
+        #expect(GitStoreService.chunks([], maxBytes: 100).isEmpty)
+    }
+
     static let fakeScriptSecret = "FAKE-NotARealSecret-123"
     static let scriptPath = "tenants/00000000-0000-4000-9000-000000000001/adopted/support_files/scripts/ZZ Secret Scan Test.zsh"
 

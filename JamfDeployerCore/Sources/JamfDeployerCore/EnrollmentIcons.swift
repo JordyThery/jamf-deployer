@@ -36,6 +36,26 @@ public nonisolated enum EnrollmentIcons {
 
     static let jamfCloud = ".jamfcloud.com"
 
+    /// A download's task delegate: follows a redirect only to a URL
+    /// `mayDownload` allows, so an icon is never fetched from another host.
+    public nonisolated final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+        let allowedHosts: Set<String>
+
+        public init(allowedHosts: Set<String>) {
+            self.allowedHosts = allowedHosts
+        }
+
+        public func urlSession(_ session: URLSession, task: URLSessionTask,
+                               willPerformHTTPRedirection response: HTTPURLResponse,
+                               newRequest request: URLRequest) async -> URLRequest? {
+            allows(request) ? request : nil
+        }
+
+        public func allows(_ request: URLRequest) -> Bool {
+            request.url.map { EnrollmentIcons.mayDownload($0, allowedHosts: allowedHosts) } ?? false
+        }
+    }
+
     /// Downloads each enrollment customization icon through `fetch` (which
     /// returns the body of a 200 answer and throws otherwise) and points the
     /// configuration at the local copy. Returns the icon URLs left in place.

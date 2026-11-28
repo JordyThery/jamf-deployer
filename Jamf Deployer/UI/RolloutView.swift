@@ -23,6 +23,8 @@ struct RolloutView: View {
     enum Outcome {
         case deployed(succeeded: Int)
         case failed(String)
+        /// The deploy itself failed (the engine stopped), not one of its changes.
+        case deployFailed(String)
         case noChanges
         case skipped
         /// Previewed, then the rollout was stopped here.
@@ -239,6 +241,10 @@ struct RolloutView: View {
             Label("Deployed with problems", systemImage: "exclamationmark.triangle.fill")
                 .labelStyle(.tintedIcon(.orange))
                 .help(message)
+        case .deployFailed(let message):
+            Label("Deploy failed", systemImage: "xmark.octagon.fill")
+                .labelStyle(.tintedIcon(.red))
+                .help(message)
         case .noChanges:
             Label("Nothing to deploy", systemImage: "equal.circle").foregroundStyle(.secondary)
         case .skipped:
@@ -373,7 +379,7 @@ struct RolloutView: View {
         case .deployFailed(let message):
             // Partly applied: keep the staged release so the record matches.
             stagedBaseline = nil
-            outcomes[id] = .failed(message)
+            outcomes[id] = .deployFailed(message)
             stage = .finished
         }
     }

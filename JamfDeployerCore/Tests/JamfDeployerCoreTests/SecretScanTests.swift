@@ -423,6 +423,18 @@ struct SecretScanTests {
         #expect(!declaration.contains("default"))
         #expect(variables.contains("variable \"wifi_password\""))
     }
+
+    /// A large text file (a profile with embedded images) is still scanned.
+    @Test func largeTextFilesAreScanned() {
+        let padding = String(repeating: "<data>QUJDREVGR0g=</data>\n", count: 250_000)
+        let text = padding + "<key>Password</key>\n<string>FAKE-NotARealSecret-456</string>\n"
+        let data = Data(text.utf8)
+        #expect(data.count > 5 * 1024 * 1024)
+        let scannable = SecretScan.scannableText(data)
+        #expect(scannable != nil)
+        #expect(!SecretScan.scan(text: scannable ?? "", path: "support_files/big.mobileconfig").isEmpty)
+        #expect(SecretScan.scannableText(Data([0x41, 0x00, 0x42])) == nil, "binaries are still skipped")
+    }
 }
 
 @Suite("Secret scan on shipped files")

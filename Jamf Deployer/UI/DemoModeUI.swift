@@ -11,6 +11,7 @@ enum DemoModeText {
     static let deployUnavailable = "Deploying isn’t available in Demo Mode."
     /// Settings tabs that work on the real store.
     static let realStoreOnly = "Demo Mode is on. These settings are for your real store; turn off Demo Mode in the Tenant menu to change them."
+    static let sandboxStoreOnly = "This copy of the app runs on a test store of its own. These settings are for your real store; open the app normally to change them."
 }
 
 extension View {
@@ -44,16 +45,19 @@ private struct RealStoreOnly: ViewModifier {
     let demo: DemoMode
 
     func body(content: Content) -> some View {
+        // A sandbox launch (or a live check) runs on a store of its own:
+        // the real store's team settings stay out of reach there too.
+        let isSandbox = demo.isSandbox || LiveLaunch.isSwitched
         VStack(alignment: .leading, spacing: 0) {
-            if demo.isOn {
-                Label(DemoModeText.realStoreOnly, systemImage: "testtube.2")
+            if demo.isOn || isSandbox {
+                Label(demo.isOn ? DemoModeText.realStoreOnly : DemoModeText.sandboxStoreOnly, systemImage: "testtube.2")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding([.horizontal, .top])
                     .fixedSize(horizontal: false, vertical: true)
             }
             content
-                .disabled(demo.isOn)
+                .disabled(demo.isOn || isSandbox)
         }
     }
 }

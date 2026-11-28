@@ -75,10 +75,10 @@
   "settings": [
     {
       "default": "",
-      "description": "The exact name of the ADE instance in Jamf Pro (Settings → Device Enrollment). Usually “Apple Business Manager”.",
+      "description": "The exact name of the ADE instance in Jamf Pro (Settings → Device Enrollment). Usually “Apple Business”.",
       "key": "ade_instance_name",
       "required": true,
-      "section": "Apple Business Manager",
+      "section": "Apple Business",
       "title": "Automated Device Enrollment instance",
       "type": "string"
     },

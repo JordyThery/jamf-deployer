@@ -1,0 +1,14 @@
+# Jamf Deployer: roadmap
+
+The agreed next steps, in order. Each item still needs Jordy's go-ahead before work starts. Current limits and what is live-verified: `docs/STATUS.md`. Out of scope (decided): DDM status reports, device actions, inventory browsing, Jamf School, Slack notifications, data-driven list settings in blocks.
+
+1. **Saved rollout rings.** Named, ordered rings in Settings (default Test, then Production; not limited to three), kept in the shared settings in Team Mode. Each tenant saves its ring (on the tenant page and in the Connect wizard; existing tenants start from their Production switch). Roll Out pre-fills from the saved rings, with per-rollout changes and "Save as default"; a ring can pause before it starts; the dashboard gets a ring column and filter. No automatic waiting times: every tenant still needs its preview and Deploy click. Extend the rollout UI test.
+2. **Scheduled drift checks and snapshots.** A menu bar mode, no background daemon: a menu bar item and Start at Login, and a scheduler that runs the staggered Check All Tenants and notifies only when it finds changes. Scheduled snapshots use the same scheduler: jamformer snapshot zips to a folder the user picks, timestamped, keeping the last N, notifying only on failure, never in the team repository. One shared Schedules settings pane. With it comes the **"N objects in Jamf aren't managed here"** line (from Adopt's discovery, linking to Adopt): in Check for Changes on demand first, then in the scheduled checks. Unattended checks without the app stay the exported repository's job (`docs/graduating.md`).
+3. **Name-collision warning in the baseline editor.** Preview already stops when a new object takes the name of one that exists in Jamf (Jamf Platform API tenants), but not when two selected blocks would both create the same name (STATUS, Composition). The editor warns before the preview, naming both blocks and the object.
+4. **In-app personal access token flow for Team Mode.** Today Team Mode needs Git credentials already set up on the Mac (gh, a credential helper or SSH). Designed, not built: sign in to GitHub from Settings › Team with a token kept in the Keychain, for Macs without those tools.
+5. **A Team Mode live test.** Team Mode is covered by unit tests only since 1.2 (nothing in a live run pushes to a repository). A live test against a private throwaway repository: create, check and restore through the state backend, a teammate's lock and Force Unlock, leave and join with the passphrase, tenant removal, backing up and restoring the real store around it.
+
+## Done
+
+- **1.0.3:** staged fleet deploys (Roll Out, up to three rings).
+- **1.0.1 and 1.0.2:** the on-ramp to Terraform: Export as Terraform, the commands behind every preview, `plan.sh`, and `docs/graduating.md`.

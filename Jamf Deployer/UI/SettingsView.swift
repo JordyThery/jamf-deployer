@@ -94,6 +94,11 @@ struct SupportBundleButton: View {
     }
 
     private func createBundle() {
+        Task { await writeBundle() }
+    }
+
+    /// The zip is written off the main actor, so the window never stalls.
+    private func writeBundle() async {
         do {
             let staging = FileManager.default.temporaryDirectory
                 .appending(path: "jd-support-\(UUID().uuidString)")
@@ -116,13 +121,16 @@ struct SupportBundleButton: View {
             panel.allowedContentTypes = [.zip]
             panel.nameFieldStringValue = "JamfDeployer-Support-\(Date.now.formatted(.iso8601.year().month().day())).zip"
             guard panel.runModal() == .OK, let destination = panel.url else { return }
-            let ditto = Process()
-            ditto.standardInput = FileHandle.nullDevice
-            ditto.executableURL = URL(filePath: "/usr/bin/ditto")
-            ditto.arguments = ["-c", "-k", staging.path, destination.path]
-            try ditto.run()
-            ditto.waitUntilExit()
-            message = ditto.terminationStatus == 0
+            let written = try await Task.detached {
+                let ditto = Process()
+                ditto.standardInput = FileHandle.nullDevice
+                ditto.executableURL = URL(filePath: "/usr/bin/ditto")
+                ditto.arguments = ["-c", "-k", staging.path, destination.path]
+                try ditto.run()
+                ditto.waitUntilExit()
+                return ditto.terminationStatus == 0
+            }.value
+            message = written
                 ? "Saved \(destination.lastPathComponent)."
                 : "The support bundle couldn’t be written."
         } catch {

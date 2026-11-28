@@ -72,6 +72,53 @@ struct PreviewTests {
         #expect(ChangeKind.from(actions: ["forget"], importing: false) == .stopManaging)
         #expect(ChangeKind.from(actions: ["no-op"], importing: true) == .adopt)
         #expect(ChangeKind.from(actions: ["delete"], importing: false).isDestructive)
+        #expect(ChangeKind.from(actions: ["update"], importing: true) == .adopt)
+        #expect(ChangeKind.from(actions: ["delete", "create"], importing: true) == .replace)
+        #expect(ChangeKind.from(actions: ["create", "delete"], importing: true) == .replace)
+        #expect(ChangeKind.from(actions: ["no-op"], importing: false) == .unchanged)
+        #expect(ChangeKind.from(actions: ["read"], importing: false) == .unchanged)
+        #expect(ChangeKind.from(actions: ["something-new"], importing: false) == .unknown)
+        #expect(ChangeKind.from(actions: ["something-new"], importing: true) == .unknown)
+        #expect(ChangeKind.unknown.isDestructive)
+        #expect(!ChangeKind.adopt.isDestructive)
+    }
+
+    /// An adopted object OpenTofu can only bring in line by deleting and
+    /// recreating it: Replace (destructive, with diffs), never Adopt.
+    @Test func importThatReplacesIsAReplace() throws {
+        let plan = try JSONDecoder().decode(PlanFile.self, from: fixtureData("show-plan-import-replace.json"))
+        let summary = PreviewBuilder.build(plan: plan, diagnostics: [], blockNames: [:])
+        #expect(summary.counts[.replace] == 1)
+        #expect(summary.counts[.adopt] == 2)
+        #expect(summary.hasDestructiveChanges)
+        let changes = summary.groups.flatMap(\.changes)
+        let replaced = try #require(changes.first { $0.address.hasSuffix("jtktest_replace") })
+        #expect(replaced.kind == .replace)
+        #expect(replaced.importing)
+        #expect(replaced.fieldDiffs.map(\.path).contains("priority"))
+        #expect(replaced.caution?.contains("new Jamf ID") == true)
+        let updated = try #require(changes.first { $0.address.hasSuffix("jtktest_update") })
+        #expect(updated.kind == .adopt)
+        #expect(updated.fieldDiffs.map(\.path) == ["priority"])
+        #expect(updated.caution == nil)
+        let kept = try #require(changes.first { $0.address.hasSuffix("jtktest_keep") })
+        #expect(kept.kind == .adopt && kept.fieldDiffs.isEmpty)
+    }
+
+    /// An action set the app doesn't know is shown, not dropped, and counts
+    /// as destructive.
+    @Test func unknownActionsAreShownAndDestructive() throws {
+        let json = #"{"format_version":"1.2","resource_changes":[{"address":"jamfplatform_pro_category.odd","type":"jamfplatform_pro_category","name":"odd","change":{"actions":["delete","create","update"],"before":{"name":"A"},"after":{"name":"B"}}},{"address":"data.jamfplatform_pro_category.lookup","type":"jamfplatform_pro_category","name":"lookup","change":{"actions":["read"],"before":null,"after":{"name":"C"}}}]}"#
+        let plan = try JSONDecoder().decode(PlanFile.self, from: Data(json.utf8))
+        let summary = PreviewBuilder.build(plan: plan, diagnostics: [], blockNames: [:])
+        #expect(summary.counts[.unknown] == 1)
+        #expect(summary.counts[.unchanged] == nil)
+        #expect(summary.hasDestructiveChanges)
+        #expect(!summary.isEmpty)
+        let odd = try #require(summary.groups.flatMap(\.changes).first)
+        #expect(odd.kind == .unknown)
+        #expect(odd.caution?.contains("delete, create, update") == true)
+        #expect(odd.fieldDiffs.map(\.path) == ["name"])
     }
 
     @Test func moduleAddressesMapToBlockIDs() {
@@ -213,7 +260,7 @@ struct GeneratorTests {
             selections: [
                 Self.selection(catalog, "device-groups"),
                 Self.selection(catalog, "categories"),
-                Self.selection(catalog, "enrollment", settings: ["ade_instance_name": "Apple Business Manager"]),
+                Self.selection(catalog, "enrollment", settings: ["ade_instance_name": "Apple Business"]),
                 Self.selection(catalog, "filevault"),
                 Self.selection(catalog, "software-updates", scope: "device-groups/Pilot"),
                 Self.selection(catalog, "compliance-cis-l1", scope: "device-groups/Pilot"),
@@ -230,7 +277,7 @@ struct GeneratorTests {
         #expect(output.mainTF.contains(#"module.device_groups.device_group_jamf_pro_ids["Apple Silicon Macs"]"#))
         #expect(output.mainTF.contains(#"category_id             = module.categories.category_ids["Security"]"#))
         let normalized = output.mainTF.replacingOccurrences(of: " +", with: " ", options: .regularExpression)
-        #expect(normalized.contains(#"ade_instance_name = "Apple Business Manager""#))
+        #expect(normalized.contains(#"ade_instance_name = "Apple Business""#))
         #expect(output.secretVariableNames.isEmpty)
     }
 
@@ -864,7 +911,7 @@ struct BlockCaptureTests {
         // names the organization); the capture sheet shows it instead.
         let lookup = try String(contentsOf: folder.appending(path: "enrollment_instance.tf"), encoding: .utf8)
         #expect(!lookup.contains("default"))
-        #expect(!lookup.contains("Apple Business Manager"))
+        #expect(!lookup.contains("Apple Business"))
         #expect(lookup.contains(#"data "jamfplatform_pro_automated_device_enrollment" "instance""#))
 
         let manifest = try JSONSerialization.jsonObject(
@@ -873,8 +920,8 @@ struct BlockCaptureTests {
         #expect(settings?.first?["key"] as? String == "ade_instance_name")
         #expect(settings?.first?["default"] as? String == "")
         #expect(settings?.first?["required"] as? Bool == true)
-        #expect(result.originSettingValues == ["ade_instance_name": "Apple Business Manager"])
-        #expect(result.warnings.contains { $0.contains("Automated Device Enrollment instance") && $0.contains("“Apple Business Manager”") })
+        #expect(result.originSettingValues == ["ade_instance_name": "Apple Business"])
+        #expect(result.warnings.contains { $0.contains("Automated Device Enrollment instance") && $0.contains("“Apple Business”") })
 
         // Recovery Lock passwords are not exportable; the capture turns the
         // feature off rather than shipping a PreStage that cannot be created.
@@ -1554,7 +1601,7 @@ struct AdoptPreparationTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data(#"""
         resource "jamfplatform_pro_automated_device_enrollment" "abm" {
-          name         = "Apple Business Manager"
+          name         = "Apple Business"
           server_token = var.abm_server_token
         }
 

@@ -95,7 +95,7 @@ final class TenantStore {
                 loaded.append(try JSONFile.load(Tenant.self, from: file))
             } catch {
                 unreadable.append(file)
-                logger.error("Could not read \(file.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                logger.error("Could not read \(file.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .private)")
             }
         }
         tenants = loaded.sorted { $0.createdAt < $1.createdAt }
@@ -107,7 +107,7 @@ final class TenantStore {
         do {
             try JSONFile.save(tenant, to: file)
         } catch {
-            logger.error("Could not save tenant.json: \(error.localizedDescription, privacy: .public)")
+            logger.error("Could not save tenant.json: \(error.localizedDescription, privacy: .private)")
         }
     }
 

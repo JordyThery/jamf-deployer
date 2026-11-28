@@ -339,12 +339,11 @@ public nonisolated enum SecretScan {
         return result.sorted { ($0.finding.line, $0.finding.rule) < ($1.finding.line, $1.finding.rule) }
     }
 
-    /// Files larger than this, or with a NUL byte, are not text and are skipped.
-    public static let maximumFileSize = 4 * 1024 * 1024
-
-    /// The text of a file worth scanning, or nil for binaries and large files.
+    /// The text of a file worth scanning, or nil for a binary (a file with a
+    /// NUL byte). Text files are scanned whatever their size: the rules are
+    /// linear, and a large profile can still hold a password.
     public static func scannableText(_ data: Data) -> String? {
-        guard data.count <= maximumFileSize, !data.contains(0) else { return nil }
+        guard !data.contains(0) else { return nil }
         return String(decoding: data, as: UTF8.self)
     }
 

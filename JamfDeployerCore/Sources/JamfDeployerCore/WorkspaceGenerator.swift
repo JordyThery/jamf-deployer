@@ -205,8 +205,6 @@ public nonisolated enum WorkspaceGenerator {
         public var description: String
     }
 
-    /// The module calls for `input`, in rendering order, with the secret
-    /// variables they use.
     /// Pairs of blocks that cannot be selected together. A conflict counts
     /// when either block lists the other in `conflicts`.
     public static func conflictingPairs(_ blocks: [BlockMetadata]) -> [(BlockMetadata, BlockMetadata)] {
@@ -221,6 +219,8 @@ public nonisolated enum WorkspaceGenerator {
         return pairs
     }
 
+    /// The module calls for `input`, in rendering order, with the secret
+    /// variables they use.
     public static func moduleCalls(_ input: WorkspaceInput) throws -> (calls: [ModuleCall], secrets: [SecretVariable]) {
         if let (first, second) = conflictingPairs(input.selections.map(\.block)).first {
             throw WorkspaceGeneratorError.conflictingBlocks(blocks: [first.name, second.name])

@@ -152,13 +152,19 @@ struct DeployServiceGuardTests {
     func onlyMovedStateIsRetired() throws {
         let fixture = Self.make()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
-        // A first deploy that partly failed: not "managed", but its state holds objects.
+        // A first deploy that partly failed: no deployed blocks, but its state
+        // holds objects, so it counts as managed (Remove Tenant asks for the name).
         let tenant = Self.tenant()
         fixture.tenantStore.add(tenant)
+        #expect(!fixture.service.isManaged(tenant))
         let state = fixture.tenantStore.workspaceURL(for: tenant).appending(path: "state/terraform.tfstate")
         try Data("{\"encrypted_data\": \"…\"}".utf8).write(to: state)
-        #expect(!fixture.service.isManaged(tenant))
+        #expect(fixture.service.isManaged(tenant))
         #expect(fixture.service.hasLocalState(tenant), "it still counts as having state")
+        // In Team Mode the state is on the team's branch: the deploy record tells.
+        var teamTenant = Self.tenant("Team Tenant")
+        teamTenant.lastDeploy = DeployRecord(date: .now, engineerName: "Engineer", succeeded: 40, failed: 1)
+        #expect(fixture.service.isManaged(teamTenant))
 
         fixture.service.retireLocalState(of: fixture.tenantStore.tenants)
         #expect(FileManager.default.fileExists(atPath: state.path), "state that didn't move stays")
@@ -188,6 +194,25 @@ struct DeployServiceGuardTests {
         await #expect { _ = try await fixture.service.deploy(tenant: tenant, session: session) } throws: { Self.isError($0, "handedOver") }
         #expect(attempts.all.isEmpty)
         #expect(!fixture.service.isBusy)
+    }
+
+    @Test("A hand-over whose adopted folder can't be read plans nothing")
+    func handOverWithAnUnreadableAdoptedFolderStops() async throws {
+        let attempts = Attempts()
+        let fixture = Self.make(tools: .trap { attempts.record($0) })
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var tenant = Self.tenant(managed: true)
+        tenant.handOverPending = true
+        fixture.tenantStore.add(tenant)
+        let adopted = fixture.service.adoptedURL(for: tenant)
+        try FileManager.default.createDirectory(at: adopted, withIntermediateDirectories: true)
+        let file = adopted.appending(path: "pro_category.tf")
+        try Data("resource \"jamfplatform_pro_category\" \"a\" {\n  name = \"A\"\n}\n".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path) }
+
+        await #expect { _ = try await fixture.service.preview(tenant: tenant) } throws: { Self.isError($0, "adoptedUnreadable") }
+        #expect(!attempts.all.contains(.openTofu), "nothing was planned: \(attempts.all)")
     }
 
     // MARK: Team sync

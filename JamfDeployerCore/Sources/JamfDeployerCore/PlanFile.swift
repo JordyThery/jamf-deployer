@@ -5,9 +5,10 @@ import Foundation
 /// Shapes verified against captured fixtures
 /// (Fixtures/engine/show-plan-*.json, Fixtures/live/show-plan-*.json).
 public nonisolated struct PlanFile: Decodable, Sendable {
-    /// One resource-level change. `actions` maps to the user-facing labels:
-    /// ["create"] Create, ["update"] Update, ["delete","create"] Replace,
-    /// ["delete"] Remove, ["forget"] Stop managing, import flag → Adopt.
+    /// One resource-level change. `actions` maps to the user-facing labels
+    /// (`ChangeKind.from`): ["create"] Create, ["update"] Update,
+    /// ["delete","create"] Replace (also with an import), ["delete"] Remove,
+    /// ["forget"] Stop managing, an import with ["no-op"] or ["update"] Adopt.
     public struct ResourceChange: Decodable, Sendable {
         public struct Change: Decodable, Sendable {
             public var actions: [String]
