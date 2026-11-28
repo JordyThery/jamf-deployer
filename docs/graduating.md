@@ -283,7 +283,7 @@ Deployer’s demo catalog is a set of such modules you can use directly:
 
 ```hcl
 module "categories" {
-  source         = "git::https://github.com/JordyThery/jamf-deployer-catalog.git//blocks/categories?ref=v1.1.1"
+  source         = "git::https://github.com/JordyThery/jamf-deployer-catalog.git//blocks/categories?ref=v1.2.0"
   name_prefix    = ""
   managed_by_tag = "Managed by Terraform"
 }
@@ -291,7 +291,7 @@ module "categories" {
 
 Every block takes `name_prefix` and `managed_by_tag`; its other inputs are in
 its `variables.tf`. Tenants on the Jamf Pro API use the block’s `jamfpro`
-folder: `//blocks/categories/jamfpro?ref=v1.1.1`.
+folder: `//blocks/categories/jamfpro?ref=v1.2.0`.
 
 ### Both: prove it, then change something
 
